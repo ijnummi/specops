@@ -96,6 +96,14 @@ description: Local-first markdown-native workbench for specs-driven AI-assisted 
 
     expect(adrFile?.content).toContain("id: adr.001-markdown-is-source-of-truth\n");
   });
+
+  it("emits the canonical ADR 002 id", () => {
+    const adrFile = initialSpecopsFiles().find(
+      (file) => file.path === "decisions/adr-002-postgresql-is-derived-cache.md"
+    );
+
+    expect(adrFile?.content).toContain("id: adr.002-postgresql-derived-cache\n");
+  });
 });
 
 describe("initializeSpecopsFolder", () => {

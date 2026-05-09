@@ -11,7 +11,7 @@ const starterSpecs = [
   },
   {
     path: "decisions/adr-002-postgresql-is-derived-cache.md",
-    entityId: "adr.002-postgresql-is-derived-cache",
+    entityId: "adr.002-postgresql-derived-cache",
     type: "adr",
     title: "PostgreSQL Is Derived Cache",
     status: "accepted"
