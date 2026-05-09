@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: specops-postgres
+    environment:
+      POSTGRES_USER: specops
+      POSTGRES_PASSWORD: specops
+      POSTGRES_DB: specops
+    ports:
+      - "5432:5432"
+    volumes:
+      - specops_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U specops -d specops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  specops_postgres_data:

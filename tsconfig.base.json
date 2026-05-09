@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@specops/contracts": ["packages/contracts/src/index.ts"],
+      "@specops/db": ["packages/db/src/index.ts"],
+      "@specops/domain": ["packages/domain/src/index.ts"],
+      "@specops/markdown": ["packages/markdown/src/index.ts"],
+      "@specops/graph": ["packages/graph/src/index.ts"],
+      "@specops/config": ["packages/config/src/index.ts"],
+      "@specops/testing": ["packages/testing/src/index.ts"]
+    }
+  }
+}
