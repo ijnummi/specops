@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderSync, Play, RotateCw } from "lucide-react";
@@ -27,6 +27,7 @@ type ProjectDetailPageProps = {
 export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailPageProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [isEditorDirty, setIsEditorDirty] = useState(false);
   const project = useQuery(projectQuery(projectId));
   const [entities, validation, indexRuns] = useQueries({
     queries: [
@@ -56,6 +57,14 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     (message) => !selectedEntityId || message.entityId === selectedEntityId || message.entityId === null
   );
   const latestRun = indexRuns.data?.[0] ?? null;
+
+  const confirmEntitySwitch = useCallback(() => {
+    if (!isEditorDirty) {
+      return true;
+    }
+
+    return window.confirm("Discard unsaved editor changes?");
+  }, [isEditorDirty]);
 
   const invalidateProject = async () => {
     await Promise.all([
@@ -141,6 +150,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
             entities={filteredEntities}
             selectedEntityId={selectedEntityId}
             query={query}
+            onBeforeSelect={confirmEntitySwitch}
           />
         </>
       }
@@ -171,7 +181,11 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
             indexRuns.error?.message}
         </div>
       ) : selectedEntityId ? (
-        <EntityDetail projectId={projectId} entityId={selectedEntityId} />
+        <EntityDetail
+          projectId={projectId}
+          entityId={selectedEntityId}
+          onDirtyChange={setIsEditorDirty}
+        />
       ) : entities.isLoading ? (
         <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
           Loading entities...

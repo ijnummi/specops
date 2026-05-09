@@ -10,35 +10,96 @@ import {
   updateEntityMarkdown,
   validationMessagesQuery
 } from "../api/queries.js";
+import { validateEntityMarkdownIdentity } from "./entity-markdown.js";
 import { LinkPanels } from "./link-panels.js";
 import { MarkdownEditor } from "./markdown-editor.js";
 
 type EntityDetailProps = {
   projectId: string;
   entityId: string;
+  onDirtyChange?: (isDirty: boolean) => void;
 };
 
-export function EntityDetail({ projectId, entityId }: EntityDetailProps) {
+type EditorState = {
+  entityId: string;
+  markdown: string;
+  savedMarkdown: string;
+};
+
+export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetailProps) {
   const queryClient = useQueryClient();
   const entity = useQuery(entityQuery(projectId, entityId));
   const [outgoing, backlinks] = useQueries({
     queries: [outgoingLinksQuery(projectId, entityId), backlinksQuery(projectId, entityId)]
   });
-  const [markdown, setMarkdown] = useState("");
+  const [editorState, setEditorState] = useState<EditorState>({
+    entityId: "",
+    markdown: "",
+    savedMarkdown: ""
+  });
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const documentMarkdown = useMemo(
     () => (entity.data ? entityToMarkdown(entity.data.frontmatter, entity.data.bodyMarkdown) : ""),
     [entity.data]
   );
+  const isDirty = editorState.markdown !== editorState.savedMarkdown;
 
   useEffect(() => {
-    setMarkdown(documentMarkdown);
-  }, [documentMarkdown]);
+    setSaveError(null);
+  }, [entityId]);
+
+  useEffect(() => {
+    if (!entity.data) {
+      return;
+    }
+
+    setEditorState((current) => {
+      const selectedEntityChanged = current.entityId !== entityId;
+      const currentIsDirty = current.markdown !== current.savedMarkdown;
+
+      if (selectedEntityChanged) {
+        return {
+          entityId,
+          markdown: documentMarkdown,
+          savedMarkdown: documentMarkdown
+        };
+      }
+
+      if (!currentIsDirty) {
+        return {
+          entityId,
+          markdown: documentMarkdown,
+          savedMarkdown: documentMarkdown
+        };
+      }
+
+      return current;
+    });
+  }, [documentMarkdown, entity.data, entityId]);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  useEffect(
+    () => () => {
+      onDirtyChange?.(false);
+    },
+    [onDirtyChange]
+  );
 
   const mutation = useMutation({
-    mutationFn: () => updateEntityMarkdown(projectId, entityId, markdown),
+    mutationFn: (markdownToSave: string) =>
+      updateEntityMarkdown(projectId, entityId, markdownToSave),
     onSuccess: async (savedEntity) => {
-      setMarkdown(entityToMarkdown(savedEntity.frontmatter, savedEntity.bodyMarkdown));
+      const savedMarkdown = entityToMarkdown(savedEntity.frontmatter, savedEntity.bodyMarkdown);
+      setSaveError(null);
+      setEditorState({
+        entityId,
+        markdown: savedMarkdown,
+        savedMarkdown
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.entity(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
@@ -50,6 +111,18 @@ export function EntityDetail({ projectId, entityId }: EntityDetailProps) {
       ]);
     }
   });
+
+  function handleSave() {
+    const validation = validateEntityMarkdownIdentity(editorState.markdown, entityId);
+
+    if (!validation.ok) {
+      setSaveError(validation.message);
+      return;
+    }
+
+    setSaveError(null);
+    mutation.mutate(editorState.markdown);
+  }
 
   if (entity.isLoading) {
     return (
@@ -70,8 +143,6 @@ export function EntityDetail({ projectId, entityId }: EntityDetailProps) {
   if (!entity.data) {
     return null;
   }
-
-  const isDirty = markdown !== documentMarkdown;
 
   return (
     <div className="grid gap-3">
@@ -94,16 +165,23 @@ export function EntityDetail({ projectId, entityId }: EntityDetailProps) {
               type="button"
               className="button-primary"
               disabled={!isDirty || mutation.isPending}
-              onClick={() => mutation.mutate()}
+              onClick={handleSave}
             >
               <Save className="h-4 w-4" aria-hidden="true" />
               Save
             </button>
           </div>
         </div>
-        <MarkdownEditor value={markdown} onChange={setMarkdown} />
+        <MarkdownEditor
+          value={editorState.markdown}
+          onChange={(value) => {
+            setSaveError(null);
+            setEditorState((current) => ({ ...current, markdown: value }));
+          }}
+        />
       </section>
 
+      {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
       {mutation.error ? <p className="text-sm text-red-700">{mutation.error.message}</p> : null}
 
       <LinkPanels outgoing={outgoing.data ?? []} backlinks={backlinks.data ?? []} />

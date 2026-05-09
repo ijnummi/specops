@@ -6,6 +6,7 @@ type EntityListProps = {
   entities: SpecEntityDto[];
   selectedEntityId: string | null;
   query: string;
+  onBeforeSelect?: () => boolean;
 };
 
 const typeOrder = [
@@ -18,7 +19,13 @@ const typeOrder = [
   "adr"
 ];
 
-export function EntityList({ projectId, entities, selectedEntityId, query }: EntityListProps) {
+export function EntityList({
+  projectId,
+  entities,
+  selectedEntityId,
+  query,
+  onBeforeSelect
+}: EntityListProps) {
   const grouped = groupEntities(entities);
 
   if (entities.length === 0) {
@@ -39,6 +46,11 @@ export function EntityList({ projectId, entities, selectedEntityId, query }: Ent
                 to="/projects/$projectId/entities/$entityId"
                 params={{ projectId, entityId: entity.entityId }}
                 search={{ q: query }}
+                onClick={(event) => {
+                  if (entity.entityId !== selectedEntityId && onBeforeSelect && !onBeforeSelect()) {
+                    event.preventDefault();
+                  }
+                }}
                 className={
                   entity.entityId === selectedEntityId
                     ? "entity-row border-slate-300 bg-slate-100"
