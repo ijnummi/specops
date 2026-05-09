@@ -1,0 +1,70 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+import { describe, expect, it } from "vitest";
+
+import { initializeSpecopsFolder } from "../init-specops.js";
+import { createEntityMarkdown, initialSpecopsFiles } from "../templates.js";
+
+describe("createEntityMarkdown", () => {
+  it("creates deterministic markdown with required frontmatter", () => {
+    expect(
+      createEntityMarkdown({
+        entityId: "domain.project",
+        type: "domain_entity",
+        title: "Project",
+        status: "draft"
+      })
+    ).toBe(`---
+id: domain.project
+type: domain_entity
+title: Project
+status: draft
+links: {}
+---
+
+# Project
+
+Describe this domain_entity and the decisions that shape it.
+`);
+  });
+});
+
+describe("initialSpecopsFiles", () => {
+  it("includes starter specs and templates", () => {
+    const paths = initialSpecopsFiles().map((file) => file.path);
+
+    expect(paths).toContain("project.yaml");
+    expect(paths).toContain("decisions/adr-001-markdown-is-source-of-truth.md");
+    expect(paths).toContain("domain/project.md");
+    expect(paths).toContain("domain/spec-entity.md");
+    expect(paths).toContain("interfaces/markdown-indexer.md");
+    expect(paths).toContain("use-cases/uc.initialize-specops-folder.md");
+    expect(paths).toContain("templates/use-case.template.md");
+    expect(paths).toContain("templates/adr.template.md");
+  });
+});
+
+describe("initializeSpecopsFolder", () => {
+  it("creates missing starter files without overwriting existing files", async () => {
+    const root = join(tmpdir(), `specops-init-${crypto.randomUUID()}`);
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "project.yaml"), "existing: true\n");
+
+    const result = await initializeSpecopsFolder(root);
+
+    expect(result.createdPaths).toContain(
+      "decisions/adr-001-markdown-is-source-of-truth.md"
+    );
+    expect(result.skippedPaths).toEqual(["project.yaml"]);
+    expect(result.createdCount).toBe(result.createdPaths.length);
+    expect(result.skippedCount).toBe(1);
+    await expect(readFile(join(root, "project.yaml"), "utf8")).resolves.toBe(
+      "existing: true\n"
+    );
+    await expect(
+      readFile(join(root, "templates", "domain-entity.template.md"), "utf8")
+    ).resolves.toContain("{{id}}");
+  });
+});
