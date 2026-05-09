@@ -6,6 +6,7 @@ import type { Db } from "@specops/db";
 
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
+import { createSourceBootstrapService } from "../services/source-bootstrap-service.js";
 import { createSpecopsInitializerService } from "../services/specops-initializer.js";
 
 type RouteOptions = {
@@ -20,6 +21,7 @@ export const registerProjectRoutes: FastifyPluginAsync<RouteOptions> = async (ap
   const projectService = createProjectService(db);
   const initializerService = createSpecopsInitializerService(db);
   const indexerService = createIndexerService(db);
+  const sourceBootstrapService = createSourceBootstrapService(db);
 
   app.get("/projects", async () => projectService.listProjects());
 
@@ -49,6 +51,11 @@ export const registerProjectRoutes: FastifyPluginAsync<RouteOptions> = async (ap
   app.post("/projects/:projectId/init-specops", async (request) => {
     const { projectId } = projectParamsSchema.parse(request.params);
     return initializerService.initializeProjectSpecops(projectId);
+  });
+
+  app.post("/projects/:projectId/bootstrap-from-source", async (request) => {
+    const { projectId } = projectParamsSchema.parse(request.params);
+    return sourceBootstrapService.bootstrapProject(projectId);
   });
 
   app.post("/projects/:projectId/index", async (request) => {
