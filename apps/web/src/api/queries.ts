@@ -1,9 +1,13 @@
 import { queryOptions } from "@tanstack/react-query";
 import type {
+  AgentTaskPreviewRequest,
+  AgentTaskPreviewResponse,
   CreateEntityRequest,
   CreateProjectRequest,
   IndexRunDto,
   ProjectDto,
+  SaveAgentTaskRequest,
+  SaveAgentTaskResponse,
   SpecEntityDto,
   SpecLinkDto,
   ValidationMessageDto
@@ -29,6 +33,8 @@ export const queryKeys = {
     ["projects", projectId, "entities", entityId, "outgoing-links"] as const,
   backlinks: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId, "backlinks"] as const,
+  agentTaskPreview: (projectId: string, input: AgentTaskPreviewRequest) =>
+    ["projects", projectId, "agent-tasks", "preview", input] as const,
   validation: (projectId: string) => ["projects", projectId, "validation-messages"] as const,
   indexRuns: (projectId: string) => ["projects", projectId, "index-runs"] as const,
   search: (projectId: string, query: string) => ["projects", projectId, "search", query] as const
@@ -152,5 +158,21 @@ export function updateEntityMarkdown(
       entityId
     )}/markdown`,
     { markdown, baseContentHash }
+  );
+}
+
+export function previewAgentTask(projectId: string, input: AgentTaskPreviewRequest) {
+  return apiSend<AgentTaskPreviewResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/agent-tasks/preview`,
+    input
+  );
+}
+
+export function saveAgentTask(projectId: string, input: SaveAgentTaskRequest) {
+  return apiSend<SaveAgentTaskResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/agent-tasks`,
+    input
   );
 }
