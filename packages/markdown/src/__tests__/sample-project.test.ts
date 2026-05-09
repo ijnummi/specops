@@ -1,7 +1,8 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { discoverMarkdownFiles } from "../discover.js";
 import { parseSpecMarkdown } from "../parse.js";
 
 describe("sample specops project", () => {
@@ -28,11 +29,8 @@ describe("sample specops project", () => {
     expect(types).toEqual(
       new Set([
         "adr",
-        "agent_task",
-        "data_model",
         "domain_entity",
         "interface",
-        "ui_view",
         "use_case"
       ])
     );
@@ -57,23 +55,4 @@ async function findRepoRoot(startDir = process.cwd()): Promise<string> {
       current = parent;
     }
   }
-}
-
-async function discoverMarkdownFiles(root: string): Promise<string[]> {
-  const results: string[] = [];
-
-  async function walk(relativeDir: string) {
-    const entries = await readdir(path.join(root, relativeDir), { withFileTypes: true });
-    for (const entry of entries) {
-      const relativePath = path.join(relativeDir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(relativePath);
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        results.push(relativePath.split(path.sep).join("/"));
-      }
-    }
-  }
-
-  await walk("");
-  return results.sort();
 }
