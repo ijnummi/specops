@@ -17,6 +17,10 @@ export const markdownEditorExtensions = [
     ".cm-content": {
       overflowWrap: "anywhere"
     },
+    ".cm-line span": {
+      fontWeight: "400",
+      textDecoration: "none"
+    },
     ".cmt-heading, .cmt-strong, .cmt-meta, .cmt-keyword": {
       fontWeight: "400"
     },
