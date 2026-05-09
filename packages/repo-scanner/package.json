@@ -10,6 +10,8 @@
     "test": "vitest run --passWithNoTests",
     "build": "tsc -b"
   },
-  "dependencies": {},
+  "dependencies": {
+    "typescript": "^6.0.3"
+  },
   "devDependencies": {}
 }
