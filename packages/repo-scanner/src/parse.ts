@@ -28,6 +28,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
     filePath: input.path
   }));
+  const localExportedNames = collectLocalExportedNames(sourceFile);
 
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
@@ -41,48 +42,62 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     }
 
     if (ts.isFunctionDeclaration(statement) && statement.name) {
-      const isExported = hasExportModifier(statement);
+      const isDefaultExport = hasDefaultModifier(statement);
+      const isExported = isDefaultExport || hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, componentOr("function", statement.name.text), isExported));
-      if (isExported) exports.push(namedExport(statement.name.text));
+      if (isDefaultExport) exports.push(defaultExport());
+      else if (hasExportModifier(statement)) exports.push(namedExport(statement.name.text));
       continue;
     }
 
     if (ts.isClassDeclaration(statement) && statement.name) {
-      const isExported = hasExportModifier(statement);
+      const isDefaultExport = hasDefaultModifier(statement);
+      const isExported = isDefaultExport || hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "class", isExported));
-      if (isExported) exports.push(namedExport(statement.name.text));
+      if (isDefaultExport) exports.push(defaultExport());
+      else if (hasExportModifier(statement)) exports.push(namedExport(statement.name.text));
+      continue;
+    }
+
+    if (ts.isClassDeclaration(statement)) {
+      if (hasDefaultModifier(statement)) exports.push(defaultExport());
       continue;
     }
 
     if (ts.isInterfaceDeclaration(statement)) {
-      const isExported = hasExportModifier(statement);
+      const isExported = hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "interface", isExported));
-      if (isExported) exports.push({ exportedName: statement.name.text, exportKind: "type", sourceSpecifier: null });
+      if (hasExportModifier(statement)) exports.push({ exportedName: statement.name.text, exportKind: "type", sourceSpecifier: null });
       continue;
     }
 
     if (ts.isTypeAliasDeclaration(statement)) {
-      const isExported = hasExportModifier(statement);
+      const isExported = hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "type_alias", isExported));
-      if (isExported) exports.push({ exportedName: statement.name.text, exportKind: "type", sourceSpecifier: null });
+      if (hasExportModifier(statement)) exports.push({ exportedName: statement.name.text, exportKind: "type", sourceSpecifier: null });
       continue;
     }
 
     if (ts.isEnumDeclaration(statement)) {
-      const isExported = hasExportModifier(statement);
+      const isExported = hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "enum", isExported));
-      if (isExported) exports.push(namedExport(statement.name.text));
+      if (hasExportModifier(statement)) exports.push(namedExport(statement.name.text));
       continue;
     }
 
     if (ts.isVariableStatement(statement)) {
-      const isExported = hasExportModifier(statement);
       for (const declaration of statement.declarationList.declarations) {
         if (!ts.isIdentifier(declaration.name)) continue;
         const name = declaration.name.text;
+        const isExported = hasExportModifier(statement) || localExportedNames.has(name);
         symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported));
-        if (isExported) exports.push(namedExport(name));
+        if (hasExportModifier(statement)) exports.push(namedExport(name));
       }
+      continue;
+    }
+
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      exports.push(defaultExport());
     }
   }
 
@@ -147,6 +162,21 @@ function parseExportDeclaration(node: ts.ExportDeclaration): SourceExportFact[] 
   }));
 }
 
+function collectLocalExportedNames(sourceFile: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isExportDeclaration(statement) || statement.moduleSpecifier || !statement.exportClause) continue;
+    if (!ts.isNamedExports(statement.exportClause)) continue;
+
+    for (const element of statement.exportClause.elements) {
+      names.add((element.propertyName ?? element.name).text);
+    }
+  }
+
+  return names;
+}
+
 function importFact(specifier: string, importKind: SourceImportFact["importKind"], importedNames: string[]): SourceImportFact {
   return {
     specifier,
@@ -161,8 +191,16 @@ function namedExport(exportedName: string): SourceExportFact {
   return { exportedName, exportKind: "named", sourceSpecifier: null };
 }
 
+function defaultExport(): SourceExportFact {
+  return { exportedName: "default", exportKind: "default", sourceSpecifier: null };
+}
+
 function hasExportModifier(node: ts.Node): boolean {
   return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+}
+
+function hasDefaultModifier(node: ts.Node): boolean {
+  return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword);
 }
 
 function symbolFact(

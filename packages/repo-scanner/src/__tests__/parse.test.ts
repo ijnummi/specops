@@ -44,7 +44,7 @@ describe("parseSourceFacts", () => {
       })
     );
     expect(result.symbols).toContainEqual(
-      expect.objectContaining({ name: "Internal", symbolKind: "class", isExported: false })
+      expect.objectContaining({ name: "Internal", symbolKind: "class", isExported: true })
     );
   });
 
@@ -60,5 +60,67 @@ describe("parseSourceFacts", () => {
         filePath: "src/broken.ts"
       })
     );
+  });
+
+  it("represents named default function exports", () => {
+    const result = parseSourceFacts({
+      path: "src/default-function.ts",
+      content: "export default function run() {}\n"
+    });
+
+    expect(result.exports).toContainEqual({
+      exportedName: "default",
+      exportKind: "default",
+      sourceSpecifier: null
+    });
+    expect(result.symbols).toContainEqual(
+      expect.objectContaining({
+        name: "run",
+        symbolKind: "function",
+        isExported: true
+      })
+    );
+  });
+
+  it("marks local symbols exported through export declarations", () => {
+    const result = parseSourceFacts({
+      path: "src/re-export-local.ts",
+      content: "const helper = () => null;\nexport { helper as exportedHelper };\n"
+    });
+
+    expect(result.exports).toContainEqual({
+      exportedName: "exportedHelper",
+      exportKind: "named",
+      sourceSpecifier: null
+    });
+    expect(result.symbols).toContainEqual(
+      expect.objectContaining({
+        name: "helper",
+        symbolKind: "constant",
+        isExported: true
+      })
+    );
+  });
+
+  it("represents anonymous default exports", () => {
+    const classResult = parseSourceFacts({
+      path: "src/default-class.ts",
+      content: "export default class {}\n"
+    });
+    const expressionResult = parseSourceFacts({
+      path: "src/default-expression.ts",
+      content: "export default () => null;\n"
+    });
+
+    expect(classResult.exports).toContainEqual({
+      exportedName: "default",
+      exportKind: "default",
+      sourceSpecifier: null
+    });
+    expect(expressionResult.exports).toContainEqual({
+      exportedName: "default",
+      exportKind: "default",
+      sourceSpecifier: null
+    });
   });
 });
