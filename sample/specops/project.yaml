@@ -1,4 +1,4 @@
-id: team-decision-log
-name: Team Decision Log
+id: specops-workbench
+name: SpecOps Workbench
 specops_version: 1
-description: Sample SpecOps project for a local-first team decision log application.
+description: Local-first markdown-native workbench for specs-driven AI-assisted software development.
