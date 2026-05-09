@@ -52,7 +52,10 @@ export function buildServer(databaseUrl: string) {
     await client?.end();
   });
 
-  app.register(cors, { origin: true });
+  app.register(cors, {
+    origin: true,
+    methods: ["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"]
+  });
 
   app.get("/health", async () => ({ ok: true }));
   app.register(registerProjectRoutes, { prefix: "/api", db });

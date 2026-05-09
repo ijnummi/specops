@@ -31,6 +31,26 @@ describe("routes", () => {
       await app.close();
     }
   });
+
+  it("allows browser preflight for project metadata deletion", async () => {
+    const app = buildServer("postgres://specops:specops@127.0.0.1:1/specops_test_routes");
+
+    try {
+      const response = await app.inject({
+        method: "OPTIONS",
+        url: "/api/projects/demo",
+        headers: {
+          origin: "http://127.0.0.1:5176",
+          "access-control-request-method": "DELETE"
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-methods"]).toContain("DELETE");
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describeWithDb("database-backed routes", () => {
