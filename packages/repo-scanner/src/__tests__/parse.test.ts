@@ -132,4 +132,53 @@ describe("parseSourceFacts", () => {
       sourceSpecifier: null
     });
   });
+
+  it("tracks re-export declarations as imports", () => {
+    const starResult = parseSourceFacts({
+      path: "src/star-barrel.ts",
+      content: "export * from './foo';\n"
+    });
+    const namedResult = parseSourceFacts({
+      path: "src/named-barrel.ts",
+      content: "export { Foo } from './foo';\n"
+    });
+
+    expect(starResult.imports).toContainEqual({
+      specifier: "./foo",
+      importKind: "re_export",
+      importedNames: ["*"],
+      isRelative: true,
+      resolvedPath: null
+    });
+    expect(starResult.exports).toContainEqual({
+      exportedName: "*",
+      exportKind: "namespace",
+      sourceSpecifier: "./foo"
+    });
+    expect(namedResult.imports).toContainEqual({
+      specifier: "./foo",
+      importKind: "re_export",
+      importedNames: ["Foo"],
+      isRelative: true,
+      resolvedPath: null
+    });
+    expect(namedResult.exports).toContainEqual({
+      exportedName: "Foo",
+      exportKind: "re_export",
+      sourceSpecifier: "./foo"
+    });
+  });
+
+  it("represents default aliases in export declarations", () => {
+    const result = parseSourceFacts({
+      path: "src/default-alias.ts",
+      content: "const Foo = 1;\nexport { Foo as default };\n"
+    });
+
+    expect(result.exports).toContainEqual({
+      exportedName: "default",
+      exportKind: "default",
+      sourceSpecifier: null
+    });
+  });
 });

@@ -36,4 +36,24 @@ describe("scanRepository", () => {
       kind: "test"
     });
   });
+
+  it("resolves re-export import edges", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "specops-scanner-"));
+    roots.push(root);
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "src", "foo.ts"), "export const Foo = 1;\n");
+    await writeFile(path.join(root, "src", "index.ts"), "export { Foo } from './foo';\n");
+
+    const result = await scanRepository({ repoPath: root });
+    const indexFile = result.files.find((file) => file.path === "src/index.ts");
+
+    expect(indexFile?.imports).toContainEqual(
+      expect.objectContaining({
+        specifier: "./foo",
+        importKind: "re_export",
+        importedNames: ["Foo"],
+        resolvedPath: "src/foo.ts"
+      })
+    );
+  });
 });

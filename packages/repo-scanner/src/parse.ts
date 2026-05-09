@@ -37,6 +37,8 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     }
 
     if (ts.isExportDeclaration(statement)) {
+      const reExportImport = parseReExportImportDeclaration(statement);
+      if (reExportImport) imports.push(reExportImport);
       exports.push(...parseExportDeclaration(statement));
       continue;
     }
@@ -162,9 +164,35 @@ function parseExportDeclaration(node: ts.ExportDeclaration): SourceExportFact[] 
 
   return exportClause.elements.map((element) => ({
     exportedName: element.name.text,
-    exportKind: node.isTypeOnly ? "type" : sourceSpecifier ? "re_export" : "named",
+    exportKind: exportKindForExportSpecifier(element, node, sourceSpecifier),
     sourceSpecifier
   }));
+}
+
+function parseReExportImportDeclaration(node: ts.ExportDeclaration): SourceImportFact | null {
+  if (!node.moduleSpecifier) return null;
+
+  const specifier = stringLiteralText(node.moduleSpecifier);
+  const exportClause = node.exportClause;
+  if (!exportClause) return importFact(specifier, "re_export", ["*"]);
+  if (ts.isNamespaceExport(exportClause)) return importFact(specifier, "re_export", [exportClause.name.text]);
+
+  return importFact(
+    specifier,
+    "re_export",
+    exportClause.elements.map((element) => (element.propertyName ?? element.name).text)
+  );
+}
+
+function exportKindForExportSpecifier(
+  element: ts.ExportSpecifier,
+  node: ts.ExportDeclaration,
+  sourceSpecifier: string | null
+): SourceExportFact["exportKind"] {
+  if (element.name.text === "default") return "default";
+  if (node.isTypeOnly) return "type";
+  if (sourceSpecifier) return "re_export";
+  return "named";
 }
 
 function collectLocalExportedNames(sourceFile: ts.SourceFile): Set<string> {
