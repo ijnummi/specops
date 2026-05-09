@@ -278,6 +278,25 @@ describe("parseSourceFacts", () => {
     );
   });
 
+  it("warns instead of attaching mixed variable statement annotations", () => {
+    const result = parseSourceFacts({
+      path: "src/mixed-variable.ts",
+      content:
+        "/** @specops domain.foo */\n" +
+        "export const Foo = 1, { bar } = source;\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "Foo")).toMatchObject({
+      specopsAnnotations: []
+    });
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_unresolved_symbol",
+        filePath: "src/mixed-variable.ts"
+      })
+    );
+  });
+
   it("ignores unrelated leading comments", () => {
     const result = parseSourceFacts({
       path: "src/workspace.ts",

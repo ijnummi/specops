@@ -99,8 +99,9 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     }
 
     if (ts.isVariableStatement(statement)) {
+      const declarationCount = statement.declarationList.declarations.length;
       const identifierDeclarations = statement.declarationList.declarations.filter(hasIdentifierName);
-      const annotationNode = identifierDeclarations.length === 1 ? statement : undefined;
+      const annotationNode = declarationCount === 1 && identifierDeclarations.length === 1 ? statement : undefined;
 
       for (const declaration of identifierDeclarations) {
         const name = declaration.name.text;
@@ -108,7 +109,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
         symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported, annotationNode));
         if (hasExportModifier(statement)) exports.push(namedExport(name));
       }
-      if (identifierDeclarations.length !== 1) warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
+      if (declarationCount !== 1 || identifierDeclarations.length !== 1) warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
