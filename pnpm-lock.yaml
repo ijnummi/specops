@@ -187,6 +187,15 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/source-bootstrap:
+    dependencies:
+      '@specops/repo-scanner':
+        specifier: workspace:*
+        version: link:../repo-scanner
+      yaml:
+        specifier: ^2.8.4
+        version: 2.8.4
+
   packages/taskgen:
     dependencies:
       yaml:

@@ -107,7 +107,7 @@ export function slugifySourceSymbol(value: string): string {
 function isEligibleSymbol(sourceFile: SourceFileFact, symbol: SourceSymbolFact): boolean {
   if (!symbol.isExported) return false;
   if (!symbol.name || symbol.name === "default") return false;
-  if (!domainSymbolKinds.has(symbol.symbolKind)) return false;
+  if (!domainSymbolKinds.has(symbol.symbolKind) && !isInterfaceLikeName(symbol.name)) return false;
 
   return sourceFile.exports.some(
     (sourceExport) =>

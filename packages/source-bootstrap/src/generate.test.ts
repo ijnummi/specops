@@ -105,6 +105,29 @@ describe("generateBootstrapSpecFiles", () => {
     expect(files[0]?.content).toContain("`src/model.ts` exports `Decision` as a type alias.");
   });
 
+  it("generates interface specs from exported suffix-named functions and constants", () => {
+    const files = generateBootstrapSpecFiles({
+      files: [
+        sourceFile("src/http.ts", [
+          { name: "SearchHandler", symbolKind: "function", isExported: true, line: 3, metadata: {} },
+          { name: "ApiClient", symbolKind: "const", isExported: true, line: 9, metadata: {} }
+        ])
+      ],
+      warnings: []
+    });
+
+    expect(files.map((file) => file.path)).toEqual([
+      "interfaces/api-client.md",
+      "interfaces/search-handler.md"
+    ]);
+    expect(files.find((file) => file.entityId === "interface.search-handler")?.content).toContain(
+      "`src/http.ts` exports `SearchHandler` as a function."
+    );
+    expect(files.find((file) => file.entityId === "interface.api-client")?.content).toContain(
+      "`src/http.ts` exports `ApiClient` as a const."
+    );
+  });
+
   it("slugifies source symbols stably", () => {
     expect(slugifySourceSymbol("DecisionService")).toBe("decision-service");
     expect(slugifySourceSymbol("workspace_record")).toBe("workspace-record");
