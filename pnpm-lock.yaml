@@ -41,6 +41,9 @@ importers:
       '@specops/markdown':
         specifier: workspace:*
         version: link:../../packages/markdown
+      '@specops/taskgen':
+        specifier: workspace:*
+        version: link:../../packages/taskgen
       drizzle-orm:
         specifier: ^0.38.0
         version: 0.38.4(@types/pg@8.20.0)(@types/react@18.3.28)(pg@8.20.0)(react@18.3.1)
@@ -50,6 +53,9 @@ importers:
       pg:
         specifier: ^8.13.1
         version: 8.20.0
+      yaml:
+        specifier: ^2.6.1
+        version: 2.8.4
       zod:
         specifier: ^3.23.8
         version: 3.25.76

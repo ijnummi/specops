@@ -18,9 +18,11 @@
     "@specops/domain": "workspace:*",
     "@specops/graph": "workspace:*",
     "@specops/markdown": "workspace:*",
+    "@specops/taskgen": "workspace:*",
     "drizzle-orm": "^0.38.0",
     "fastify": "^5.2.0",
     "pg": "^8.13.1",
+    "yaml": "^2.6.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
