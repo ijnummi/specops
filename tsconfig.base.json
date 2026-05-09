@@ -22,7 +22,8 @@
       "@specops/markdown": ["packages/markdown/src/index.ts"],
       "@specops/graph": ["packages/graph/src/index.ts"],
       "@specops/config": ["packages/config/src/index.ts"],
-      "@specops/testing": ["packages/testing/src/index.ts"]
+      "@specops/testing": ["packages/testing/src/index.ts"],
+      "@specops/source-bootstrap": ["packages/source-bootstrap/src/index.ts"]
     }
   }
 }

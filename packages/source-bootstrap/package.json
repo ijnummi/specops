@@ -1,0 +1,17 @@
+{
+  "name": "@specops/source-bootstrap",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run --passWithNoTests",
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@specops/repo-scanner": "workspace:*",
+    "yaml": "^2.8.4"
+  }
+}
