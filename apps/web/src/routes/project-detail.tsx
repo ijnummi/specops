@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderSync, Play, RotateCw } from "lucide-react";
@@ -17,9 +17,10 @@ import {
   getDraft,
   isDraftDirty,
   saveDraft,
+  setEntityDrafts,
   syncFetchedMarkdown,
   updateDraft,
-  type EntityDrafts
+  useEntityDrafts
 } from "../components/entity-drafts.js";
 import { EntityCreateForm } from "../components/entity-create-form.js";
 import { EntityDetail } from "../components/entity-detail.js";
@@ -36,7 +37,7 @@ type ProjectDetailPageProps = {
 export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailPageProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [entityDrafts, setEntityDrafts] = useState<EntityDrafts>({});
+  const entityDrafts = useEntityDrafts();
   const project = useQuery(projectQuery(projectId));
   const [entities, validation, indexRuns] = useQueries({
     queries: [

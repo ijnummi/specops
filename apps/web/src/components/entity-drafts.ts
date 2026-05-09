@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 export type EntityDraft = {
   markdown: string;
   savedMarkdown: string;
@@ -5,8 +7,49 @@ export type EntityDraft = {
 
 export type EntityDrafts = Record<string, EntityDraft>;
 
+let entityDrafts: EntityDrafts = {};
+const listeners = new Set<() => void>();
+
 export function entityDraftKey(projectId: string, entityId: string) {
   return `${projectId}/${entityId}`;
+}
+
+export function useEntityDrafts(): EntityDrafts {
+  return useSyncExternalStore(
+    subscribeEntityDrafts,
+    getEntityDraftsSnapshot,
+    getEntityDraftsSnapshot
+  );
+}
+
+export function getEntityDraftsSnapshot(): EntityDrafts {
+  return entityDrafts;
+}
+
+export function subscribeEntityDrafts(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function setEntityDrafts(updater: (drafts: EntityDrafts) => EntityDrafts) {
+  const nextDrafts = updater(entityDrafts);
+  if (nextDrafts === entityDrafts) {
+    return;
+  }
+
+  entityDrafts = nextDrafts;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+export function resetEntityDraftsForTests() {
+  entityDrafts = {};
+  for (const listener of listeners) {
+    listener();
+  }
 }
 
 export function getDraft(drafts: EntityDrafts, key: string): EntityDraft | null {
@@ -23,7 +66,11 @@ export function syncFetchedMarkdown(
   fetchedMarkdown: string
 ): EntityDrafts {
   const current = drafts[key];
-  if (current) {
+  if (isDraftDirty(current ?? null)) {
+    return drafts;
+  }
+
+  if (current?.markdown === fetchedMarkdown && current.savedMarkdown === fetchedMarkdown) {
     return drafts;
   }
 
