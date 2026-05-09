@@ -23,7 +23,11 @@ async function walk(rootPath: string, relativeDir: string): Promise<string[]> {
       continue;
     }
 
-    if (entry.isFile() && entry.name.endsWith(".md")) {
+    if (
+      entry.isFile() &&
+      entry.name.endsWith(".md") &&
+      !entry.name.endsWith(".template.md")
+    ) {
       files.push(relativePath);
     }
   }
