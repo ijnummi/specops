@@ -416,6 +416,129 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it("bootstraps source-only projects into canonical markdown specs and indexes them", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      projectId: project.id,
+      status: "succeeded",
+      entityCount: 5
+    });
+
+    await expect(
+      readFile(path.join(project.specopsPath, "domain", "decision.md"), "utf8")
+    ).resolves.toContain("id: domain.decision");
+    await expect(
+      readFile(path.join(project.specopsPath, "domain", "workspace.md"), "utf8")
+    ).resolves.toContain("id: domain.workspace");
+    await expect(
+      readFile(path.join(project.specopsPath, "interfaces", "decision-service.md"), "utf8")
+    ).resolves.toContain("id: interface.decision-service");
+    await expect(readFile(path.join(project.specopsPath, "project.yaml"), "utf8")).resolves.toContain(
+      "source_bootstrap:"
+    );
+
+    const entitiesResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities`
+    });
+    const entities = entitiesResponse.json() as Array<{ entityId: string }>;
+    expect(entities.map((entity) => entity.entityId)).toEqual(
+      expect.arrayContaining([
+        "domain.decision",
+        "domain.workspace",
+        "interface.decision-service"
+      ])
+    );
+  });
+
+  it("refuses source bootstrap when non-template specs already exist", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "existing.md"),
+      "---\n" +
+        "id: domain.existing\n" +
+        "type: domain_entity\n" +
+        "title: Existing\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Existing\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe("Source bootstrap requires an empty specops folder");
+  });
+
+  it("refuses source bootstrap when it has already completed", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+    await mkdir(project.specopsPath, { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "project.yaml"),
+      "id: sample\n" +
+        "source_bootstrap:\n" +
+        '  completed_at: "2026-05-10T00:00:00.000Z"\n' +
+        "  scanner: typescript\n" +
+        "  generated_entity_count: 1\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe("Source bootstrap has already completed");
+  });
+
+  it("refuses source bootstrap when no supported source files are found", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe("No supported source files found");
+  });
+
+  it("refuses source bootstrap when no eligible exported symbols are found", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "helpers.ts"),
+      "function internalOnly() { return 1; }\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe("No eligible exported source symbols found");
+  });
+
   it("refreshes source files and facts during project indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -791,6 +914,27 @@ describeWithDb("database-backed routes", () => {
     projectIds.push(body.id);
 
     return body;
+  }
+
+  async function writeSampleSourceProject(repoPath: string) {
+    await mkdir(path.join(repoPath, "src", "services"), { recursive: true });
+    await writeFile(
+      path.join(repoPath, "src", "domain.ts"),
+      "export interface Workspace { id: string; name: string; }\n" +
+        "export interface Decision { id: string; title: string; }\n" +
+        "export type DecisionLink = { fromId: string; toId: string };\n"
+    );
+    await writeFile(
+      path.join(repoPath, "src", "services", "decision-service.ts"),
+      "import type { Decision, Workspace } from '../domain';\n" +
+        "export class DecisionService {\n" +
+        "  list(_workspace: Workspace): Decision[] { return []; }\n" +
+        "}\n"
+    );
+    await writeFile(
+      path.join(repoPath, "src", "services", "reminder-scheduler.ts"),
+      "export class ReminderScheduler { schedule() { return null; } }\n"
+    );
   }
 });
 

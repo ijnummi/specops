@@ -11,6 +11,7 @@
     { "path": "../../packages/db" },
     { "path": "../../packages/domain" },
     { "path": "../../packages/markdown" },
-    { "path": "../../packages/graph" }
+    { "path": "../../packages/graph" },
+    { "path": "../../packages/source-bootstrap" }
   ]
 }

@@ -19,6 +19,7 @@
     "@specops/graph": "workspace:*",
     "@specops/markdown": "workspace:*",
     "@specops/repo-scanner": "workspace:*",
+    "@specops/source-bootstrap": "workspace:*",
     "@specops/taskgen": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
