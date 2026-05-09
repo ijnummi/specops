@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderSync, Play, RotateCw } from "lucide-react";
 
 import {
+  bootstrapFromSource,
   entitiesQuery,
   indexRunsQuery,
   initializeSpecops,
@@ -25,6 +25,7 @@ import {
 import { EntityCreateForm } from "../components/entity-create-form.js";
 import { EntityDetail } from "../components/entity-detail.js";
 import { EntityList } from "../components/entity-list.js";
+import { ProjectActions } from "../components/project-actions.js";
 import { ValidationPanel } from "../components/validation-panel.js";
 import { WorkbenchLayout } from "../components/workbench-layout.js";
 
@@ -131,36 +132,24 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     mutationFn: () => reindexProject(projectId),
     onSuccess: invalidateProject
   });
+  const bootstrapMutation = useMutation({
+    mutationFn: () => bootstrapFromSource(projectId),
+    onSuccess: invalidateProject
+  });
 
   return (
     <WorkbenchLayout
       title={project.data?.name ?? "Project"}
       subtitle={project.data ? `${project.data.repoPath} / ${project.data.specopsPath}` : projectId}
       actions={
-        <>
-          <button
-            type="button"
-            className="button-secondary"
-            disabled={initializeMutation.isPending}
-            onClick={() => initializeMutation.mutate()}
-          >
-            <FolderSync className="h-4 w-4" aria-hidden="true" />
-            Init specops
-          </button>
-          <button
-            type="button"
-            className="button-primary"
-            disabled={indexMutation.isPending}
-            onClick={() => indexMutation.mutate()}
-          >
-            {indexMutation.isPending ? (
-              <RotateCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Play className="h-4 w-4" aria-hidden="true" />
-            )}
-            Re-index
-          </button>
-        </>
+        <ProjectActions
+          isInitializing={initializeMutation.isPending}
+          isBootstrapping={bootstrapMutation.isPending}
+          isIndexing={indexMutation.isPending}
+          onInitialize={() => initializeMutation.mutate()}
+          onBootstrap={() => bootstrapMutation.mutate()}
+          onReindex={() => indexMutation.mutate()}
+        />
       }
       sidebar={
         <>
@@ -251,6 +240,9 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
 
       {initializeMutation.error ? (
         <p className="mt-3 text-sm text-red-700">{initializeMutation.error.message}</p>
+      ) : null}
+      {bootstrapMutation.error ? (
+        <p className="mt-3 text-sm text-red-700">{bootstrapMutation.error.message}</p>
       ) : null}
       {indexMutation.error ? <p className="mt-3 text-sm text-red-700">{indexMutation.error.message}</p> : null}
     </WorkbenchLayout>
