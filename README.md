@@ -1,18 +1,18 @@
 # SpecOps Workbench
 
-SpecOps Workbench is a local-first specification workbench for creating, editing, indexing, and navigating markdown-native product and engineering specs. Milestone 1 focuses on a usable vertical slice: canonical markdown files under `specops/`, a PostgreSQL-backed derived index, an API, and a web UI for project and spec workflows.
+SpecOps Workbench is a local-first specification workbench for creating, editing, indexing, and navigating markdown-native product and engineering specs. The current local workflow includes canonical markdown files under `specops/`, PostgreSQL-backed derived indexes, source inventory scanning, an API, and a web UI for project and spec workflows.
 
 ## Architecture
 
 This repository is a pnpm TypeScript monorepo with:
 
 - `apps/web`: React, Vite, TanStack Router, TanStack Query, Tailwind CSS, and CodeMirror UI.
-- `apps/api`: Fastify API for projects, markdown initialization, indexing, entities, search, links, and validation messages.
+- `apps/api`: Fastify API for projects, markdown initialization, indexing, source inventory, entities, search, links, and validation messages.
 - `apps/worker`: future asynchronous worker entrypoint. In Milestone 1, indexing runs synchronously through the API.
 - `packages/domain`, `packages/contracts`, `packages/markdown`, `packages/graph`, and `packages/db`: shared domain types, Zod contracts, markdown parsing, graph helpers, and Drizzle/PostgreSQL persistence.
-- `packages/repo-scanner`, `packages/taskgen`, and `packages/ai-prefill`: future-facing package stubs for later milestones.
+- `packages/repo-scanner`, `packages/taskgen`, and `packages/ai-prefill`: source scanning, agent task generation, and future AI-assisted workflows.
 
-Markdown is canonical. PostgreSQL stores a rebuildable cache of indexed entities, links, index runs, and validation messages. If database cache data is deleted, it can be rebuilt by indexing the markdown files again.
+Markdown and source files are canonical. PostgreSQL stores rebuildable cache data for indexed entities, links, source inventory, index runs, and validation messages. If database cache data is deleted, it can be rebuilt by indexing the project again.
 
 ## Prerequisites
 
@@ -21,7 +21,17 @@ Markdown is canonical. PostgreSQL stores a rebuildable cache of indexed entities
 - Docker with Docker Compose for local PostgreSQL.
 - A shell environment that can copy `.env.example` to `.env`.
 
-Some environments expose Compose as `docker-compose` instead of `docker compose`. If port `5432` is already occupied, adjust the Compose port mapping or update `DATABASE_URL` in `.env` to point at the available PostgreSQL port.
+Some environments expose Compose as `docker-compose` instead of `docker compose`. This repo's normal local PostgreSQL port is `5436`, matching `.env.example`. If that port is occupied, adjust the Compose port mapping and update `DATABASE_URL` in `.env`.
+
+## Local Ports
+
+The normal local ports are:
+
+- PostgreSQL: `localhost:5436`
+- API: `http://127.0.0.1:4004`
+- Web: `http://127.0.0.1:5176`
+
+Avoid using stale defaults like API port `4000` or Vite port `5173` for this repo.
 
 ## Setup
 
@@ -41,16 +51,19 @@ Runnable local flow:
 pnpm install
 docker compose up -d postgres
 cp .env.example .env
-set -a; source .env; set +a
 pnpm db:migrate
 pnpm dev
 ```
 
-The `.env` file is copied for local configuration, but the database migration and API process read settings from `process.env`. Load `.env` into the current shell before running `pnpm db:migrate` or `pnpm dev`, or pass the values inline:
+The `.env` file is copied for local configuration. The API and migration command load the nearest `.env` automatically, while the web app reads `VITE_API_URL` through Vite using the repo root env file.
+
+The default `.env.example` values are:
 
 ```sh
-DATABASE_URL=postgres://specops:specops@localhost:5432/specops pnpm db:migrate
-DATABASE_URL=postgres://specops:specops@localhost:5432/specops pnpm dev
+DATABASE_URL=postgres://specops:specops@localhost:5436/specops
+API_HOST=127.0.0.1
+API_PORT=4004
+VITE_API_URL=http://127.0.0.1:4004
 ```
 
 The Docker Compose PostgreSQL command is:
@@ -71,19 +84,19 @@ The development server command is:
 pnpm dev
 ```
 
-`pnpm dev` starts the API and web apps in parallel. By default, the API uses `http://127.0.0.1:4000` and the web app uses `VITE_API_URL` from `.env`.
+`pnpm dev` starts the API and web apps in parallel. By default, the API uses `http://127.0.0.1:4004`, and the web app uses `http://127.0.0.1:5176`.
 
-## Milestone 1 Workflow
+## Local Workflow
 
 1. Start PostgreSQL and run migrations.
 2. Start the API and web app with `pnpm dev`.
 3. Create a project record that points at a local repository path.
 4. Initialize a `specops/` folder for that project when needed.
 5. Create spec entities from templates or edit existing markdown files directly.
-6. Run indexing from the API or web UI to parse markdown into PostgreSQL.
-7. Review entities, outgoing links, backlinks, search results, index runs, and validation messages in the workbench.
+6. Run indexing from the API or web UI to parse markdown and scan source files into PostgreSQL.
+7. Review entities, source inventory, outgoing links, backlinks, search results, index runs, and validation messages in the workbench.
 
-Markdown files remain the source of truth for specs. PostgreSQL is a cache and workflow store derived from those files, so index data can be discarded and rebuilt from markdown.
+Markdown and source files remain the source of truth. PostgreSQL is a cache and workflow store derived from those files, so index data can be discarded and rebuilt from the project.
 
 ## Validation
 
@@ -98,7 +111,7 @@ pnpm --filter web build
 Full DB-backed API and indexer tests require `TEST_DATABASE_URL`. Without it, those tests are skipped locally; in CI, the test suite fails if `TEST_DATABASE_URL` is absent. Use a separate test database whose database name includes `test`, for example:
 
 ```sh
-export TEST_DATABASE_URL=postgres://specops:specops@localhost:5432/specops_test
+export TEST_DATABASE_URL=postgres://specops:specops@localhost:5436/specops_test
 pnpm typecheck
 pnpm test
 pnpm --filter web build

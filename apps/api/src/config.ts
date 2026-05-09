@@ -15,7 +15,7 @@ export function loadConfig(env: Env = loadProcessEnvWithDotEnv()): ApiConfig {
     throw new Error("DATABASE_URL is required");
   }
 
-  const port = Number.parseInt(env.API_PORT ?? "4000", 10);
+  const port = Number.parseInt(env.API_PORT ?? "4004", 10);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error("API_PORT must be a valid TCP port");
   }

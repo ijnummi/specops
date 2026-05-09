@@ -18,6 +18,18 @@ afterEach(async () => {
 });
 
 describe("loadConfig", () => {
+  it("defaults to the normal local API port when API_PORT is unset", () => {
+    expect(
+      loadConfig({
+        DATABASE_URL: "postgres://specops:specops@localhost:5436/specops"
+      })
+    ).toEqual({
+      databaseUrl: "postgres://specops:specops@localhost:5436/specops",
+      host: "127.0.0.1",
+      port: 4004
+    });
+  });
+
   it("loads DATABASE_URL from the nearest parent .env when process env is unset", async () => {
     tempDir = await mkdtemp(join(tmpdir(), "specops-config-"));
     const apiDir = join(tempDir, "apps", "api");
@@ -25,7 +37,7 @@ describe("loadConfig", () => {
     await writeFile(
       join(tempDir, ".env"),
       [
-        "DATABASE_URL=postgres://specops:specops@localhost:5432/specops",
+        "DATABASE_URL=postgres://specops:specops@localhost:5436/specops",
         "API_HOST=0.0.0.0",
         "API_PORT=4010"
       ].join("\n")
@@ -37,7 +49,7 @@ describe("loadConfig", () => {
     process.chdir(apiDir);
 
     expect(loadConfig()).toEqual({
-      databaseUrl: "postgres://specops:specops@localhost:5432/specops",
+      databaseUrl: "postgres://specops:specops@localhost:5436/specops",
       host: "0.0.0.0",
       port: 4010
     });
