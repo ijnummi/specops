@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createProjectRequestSchema } from "./projects";
+import { createProjectRequestSchema } from "./projects.js";
 
 describe("createProjectRequestSchema", () => {
   it("accepts kebab-case slugs", () => {

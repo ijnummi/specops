@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createEntityRequestSchema } from "./entities";
+import { createEntityRequestSchema } from "./entities.js";
 
 describe("createEntityRequestSchema", () => {
   it("defaults status to draft", () => {

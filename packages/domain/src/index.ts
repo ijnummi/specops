@@ -5,4 +5,4 @@ export type {
   SpecLink,
   ValidationLevel,
   ValidationMessage
-} from "./types";
+} from "./types.js";
