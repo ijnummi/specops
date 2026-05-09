@@ -69,20 +69,40 @@ describeWithDb("indexProject", () => {
         body: "Implement the derived cache indexer."
       })
     );
+    await writeSpecFile(
+      specopsPath,
+      "notes/NOTE-1.md",
+      specMarkdown({
+        id: "NOTE-1",
+        type: "note",
+        title: "Standalone note",
+        status: "draft",
+        body: "This note is intentionally unlinked to exercise validation messages."
+      })
+    );
 
     const result = await createIndexerService(db).indexProject(projectId);
 
     expect(result.status).toBe("succeeded");
-    expect(result.entityCount).toBe(2);
+    expect(result.entityCount).toBe(3);
     expect(result.linkCount).toBe(1);
     expect(result.errorCount).toBe(0);
     expect(result.warningCount).toBe(0);
     await expectProjectCounts(projectId, {
-      files: 2,
-      entities: 2,
+      files: 3,
+      entities: 3,
       links: 1,
       errors: 0,
       warnings: 0
+    });
+    const [message] = await db
+      .select()
+      .from(validationMessages)
+      .where(and(eq(validationMessages.projectId, projectId), eq(validationMessages.code, "orphan_entity")));
+    expect(message).toMatchObject({
+      level: "info",
+      entityId: "NOTE-1",
+      filePath: "notes/NOTE-1.md"
     });
   });
 
