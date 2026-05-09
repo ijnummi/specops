@@ -7,5 +7,6 @@ playwright-report/
 .env
 .DS_Store
 .superpowers/
+.worktrees/
 *.tsbuildinfo
 apps/web/.vite/
