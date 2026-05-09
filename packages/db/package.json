@@ -9,7 +9,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run --passWithNoTests",
     "build": "tsc -b",
-    "migrate": "tsx src/index.ts"
+    "migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
     "drizzle-kit": "^0.30.0",
