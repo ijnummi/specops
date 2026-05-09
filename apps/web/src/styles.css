@@ -45,7 +45,7 @@
   }
 
   .entity-row {
-    @apply grid min-h-16 min-w-0 rounded border px-2 py-2;
+    @apply grid min-h-12 min-w-0 gap-1 rounded border px-2 py-2;
   }
 
   .panel-section {

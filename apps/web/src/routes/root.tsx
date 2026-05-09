@@ -3,8 +3,8 @@ import { Boxes } from "lucide-react";
 
 export function RootRoute() {
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-950">
-      <header className="border-b border-slate-200 bg-white">
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-100 text-slate-950">
+      <header className="shrink-0 border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-12 max-w-[1600px] items-center justify-between px-4">
           <Link to="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold">
             <Boxes className="h-4 w-4 shrink-0 text-slate-700" aria-hidden="true" />
@@ -15,7 +15,9 @@ export function RootRoute() {
           </span>
         </div>
       </header>
-      <Outlet />
+      <div className="min-h-0 flex-1">
+        <Outlet />
+      </div>
     </div>
   );
 }

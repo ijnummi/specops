@@ -1,8 +1,10 @@
-import type { SpecEntityDto } from "@specops/contracts";
+type EditableEntityMarkdown = {
+  markdown?: string;
+  frontmatter: Record<string, unknown>;
+  bodyMarkdown: string;
+};
 
-export function entityMarkdownForEditing(
-  entity: Pick<SpecEntityDto, "markdown" | "frontmatter" | "bodyMarkdown">
-): string {
+export function entityMarkdownForEditing(entity: EditableEntityMarkdown): string {
   return entity.markdown ?? entityToMarkdown(entity.frontmatter, entity.bodyMarkdown);
 }
 

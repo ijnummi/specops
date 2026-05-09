@@ -21,7 +21,7 @@ export function ProjectCreateForm({ isSubmitting, error, onSubmit }: ProjectCrea
     key: K,
     value: CreateProjectRequest[K]
   ) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current: CreateProjectRequest) => ({ ...current, [key]: value }));
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {

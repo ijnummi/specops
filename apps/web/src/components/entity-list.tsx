@@ -33,12 +33,20 @@ export function EntityList({
   }
 
   return (
-    <nav className="max-h-[calc(100vh-360px)] overflow-auto p-2">
+    <nav className="min-h-0 flex-1 overflow-auto p-2">
       {grouped.map(([type, typeEntities]) => (
-        <section key={type} className="mb-3">
-          <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {formatType(type)}
-          </h2>
+        <section
+          key={type}
+          className="mb-3 border-t border-slate-200 pt-2 first:border-t-0 first:pt-0"
+        >
+          <div className="mb-1 flex items-center justify-between gap-2 rounded bg-slate-100 px-2 py-1.5">
+            <h2 className="truncate text-xs font-semibold uppercase text-slate-600">
+              {formatType(type)}
+            </h2>
+            <span className="shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs font-medium text-slate-500">
+              {typeEntities.length}
+            </span>
+          </div>
           <div className="grid gap-1">
             {typeEntities.map((entity) => (
               <Link
@@ -57,9 +65,15 @@ export function EntityList({
                     : "entity-row border-transparent hover:border-slate-200 hover:bg-slate-50"
                 }
               >
-                <span className="truncate text-sm font-medium text-slate-900">{entity.title}</span>
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium text-slate-900">
+                    {entity.title}
+                  </span>
+                  <span className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-xs font-medium text-slate-600">
+                    {entity.status}
+                  </span>
+                </span>
                 <span className="truncate text-xs text-slate-500">{entity.entityId}</span>
-                <span className="truncate text-xs text-slate-500">{entity.status}</span>
               </Link>
             ))}
           </div>

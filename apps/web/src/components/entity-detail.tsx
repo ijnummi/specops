@@ -25,10 +25,12 @@ import { MarkdownEditor } from "./markdown-editor.js";
 type EntityDetailProps = {
   projectId: string;
   entityId: string;
+  query?: string;
   draft: EntityDraft | null;
   onFetchedMarkdown: (markdown: string, contentHash: string) => void;
   onDraftChange: (markdown: string) => void;
   onSaveDraft: (markdown: string, contentHash: string) => void;
+  onBeforeSelect?: () => boolean;
 };
 
 type PreviewTaskMutationInput = {
@@ -45,10 +47,12 @@ type SaveTaskMutationInput = {
 export function EntityDetail({
   projectId,
   entityId,
+  query = "",
   draft,
   onFetchedMarkdown,
   onDraftChange,
-  onSaveDraft
+  onSaveDraft,
+  onBeforeSelect
 }: EntityDetailProps) {
   const queryClient = useQueryClient();
   const currentEntityIdRef = useRef(entityId);
@@ -170,10 +174,11 @@ export function EntityDetail({
         setTaskSaveError(null);
       }
 
-      const contextBacklinkInvalidations = request.preview.contextSpecIds.map((contextSpecId) =>
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.backlinks(request.projectId, contextSpecId)
-        })
+      const contextBacklinkInvalidations = request.preview.contextSpecIds.map(
+        (contextSpecId: string) =>
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.backlinks(request.projectId, contextSpecId)
+          })
       );
 
       await Promise.all([
@@ -238,9 +243,12 @@ export function EntityDetail({
   }
 
   return (
-    <div className="grid gap-3">
-      <section className="overflow-hidden rounded border border-slate-200 bg-white">
-        <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 p-3 xl:flex-row xl:items-center xl:justify-between">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <section
+        className="flex min-h-0 flex-[3_1_0%] flex-col overflow-hidden rounded border border-slate-200 bg-white"
+        data-testid="entity-editor-panel"
+      >
+        <div className="flex min-w-0 shrink-0 flex-col gap-3 border-b border-slate-200 p-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-slate-950">{entity.data.title}</h2>
             <p className="truncate text-xs text-slate-500">
@@ -317,6 +325,9 @@ export function EntityDetail({
         </div>
         <MarkdownEditor
           value={editorMarkdown}
+          height="100%"
+          minHeight="0px"
+          className="min-h-0 flex-1"
           onChange={(value) => {
             setSaveError(null);
             onDraftChange(value);
@@ -336,7 +347,9 @@ export function EntityDetail({
           saveError={taskSaveError}
           onMarkdownChange={(markdown) => {
             setTaskSaveError(null);
-            setTaskPreview((current) => (current ? { ...current, markdown } : current));
+            setTaskPreview((current: AgentTaskPreviewResponse | null) =>
+              current ? { ...current, markdown } : current
+            );
           }}
           onSave={() =>
             saveTaskMutation.mutate({ projectId, sourceEntityId: entityId, preview: taskPreview })
@@ -349,7 +362,15 @@ export function EntityDetail({
         />
       ) : null}
 
-      <LinkPanels outgoing={outgoing.data ?? []} backlinks={backlinks.data ?? []} />
+      <LinkPanels
+        projectId={projectId}
+        currentEntityId={entityId}
+        query={query}
+        className="min-h-0 flex-[1_1_0%]"
+        outgoing={outgoing.data ?? []}
+        backlinks={backlinks.data ?? []}
+        onBeforeSelect={onBeforeSelect}
+      />
       <EntityValidation projectId={projectId} entityId={entityId} />
     </div>
   );

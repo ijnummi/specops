@@ -1,4 +1,4 @@
-import type { AgentTaskPreviewResponse } from "@specops/contracts";
+import type { AgentTaskPreviewResponse, AgentTaskWarningDto } from "@specops/contracts";
 import { Copy, Save, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -71,7 +71,7 @@ export function AgentTaskPreview({
       {preview.warnings.length > 0 ? (
         <div className="border-b border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           <ul className="grid gap-1">
-            {preview.warnings.map((warning) => (
+            {preview.warnings.map((warning: AgentTaskWarningDto) => (
               <li key={`${warning.code}-${warning.entityId ?? "project"}`}>
                 <span className="font-medium">{warning.code}</span>: {warning.message}
               </li>

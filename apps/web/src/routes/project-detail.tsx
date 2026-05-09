@@ -232,10 +232,12 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
         <EntityDetail
           projectId={projectId}
           entityId={selectedEntityId}
+          query={query}
           draft={selectedDraft}
           onFetchedMarkdown={syncSelectedFetchedMarkdown}
           onDraftChange={updateSelectedDraft}
           onSaveDraft={saveSelectedDraft}
+          onBeforeSelect={confirmEntitySwitch}
         />
       ) : entities.isLoading ? (
         <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">

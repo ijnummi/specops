@@ -68,20 +68,35 @@ export function EntityCreateForm({ projectId }: { projectId: string }) {
             required
             placeholder="Entity ID"
             value={form.entityId}
-            onChange={(event) => setForm((current) => ({ ...current, entityId: event.target.value }))}
+            onChange={(event) =>
+              setForm((current: CreateEntityRequest) => ({
+                ...current,
+                entityId: event.target.value
+              }))
+            }
           />
           <input
             className="input"
             required
             placeholder="Title"
             value={form.title}
-            onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+            onChange={(event) =>
+              setForm((current: CreateEntityRequest) => ({
+                ...current,
+                title: event.target.value
+              }))
+            }
           />
           <div className="grid grid-cols-2 gap-2">
             <select
               className="input"
               value={form.type}
-              onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}
+              onChange={(event) =>
+                setForm((current: CreateEntityRequest) => ({
+                  ...current,
+                  type: event.target.value
+                }))
+              }
             >
               {entityTypes.map((type) => (
                 <option key={type} value={type}>
@@ -94,7 +109,10 @@ export function EntityCreateForm({ projectId }: { projectId: string }) {
               required
               value={form.status}
               onChange={(event) =>
-                setForm((current) => ({ ...current, status: event.target.value }))
+                setForm((current: CreateEntityRequest) => ({
+                  ...current,
+                  status: event.target.value
+                }))
               }
             />
           </div>
