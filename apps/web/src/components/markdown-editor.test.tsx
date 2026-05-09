@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { Text } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
 
-import { MarkdownEditor, markdownEditorExtensions } from "./markdown-editor.js";
+import {
+  buildFrontmatterLineDecorations,
+  MarkdownEditor,
+  markdownEditorExtensions
+} from "./markdown-editor.js";
 
 vi.mock("@uiw/react-codemirror", () => ({
   default: ({
@@ -43,10 +48,23 @@ describe("MarkdownEditor", () => {
     expect(html).toContain('data-min-height="280px"');
   });
 
-  it("enables line wrapping and calmer markdown token styling", () => {
+  it("enables line wrapping and frontmatter-only styling extensions", () => {
     const html = renderToStaticMarkup(<MarkdownEditor value="" onChange={() => undefined} />);
 
-    expect(markdownEditorExtensions).toHaveLength(3);
-    expect(html).toContain('data-extension-count="3"');
+    expect(markdownEditorExtensions).toHaveLength(4);
+    expect(html).toContain('data-extension-count="4"');
+  });
+
+  it("marks only the opening frontmatter block for calmer styling", () => {
+    const decorations = buildFrontmatterLineDecorations(
+      Text.of(["---", "id: domain.decision", "---", "", "# Decision"])
+    );
+
+    const decoratedLines: number[] = [];
+    decorations.between(0, 40, (from) => {
+      decoratedLines.push(from);
+    });
+
+    expect(decoratedLines).toEqual([0, 4, 24]);
   });
 });
