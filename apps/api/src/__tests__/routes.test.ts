@@ -459,6 +459,34 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("uses a transaction snapshot for route-facing source inventory reads", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(project.repoPath, "src", "alpha.ts"), "export const alpha = 1;\n");
+
+    const sourceScanService = createSourceScanService(db);
+    await sourceScanService.scanAndPersistProject({
+      projectId: project.id,
+      repoPath: project.repoPath,
+      indexRunId: project.id
+    });
+
+    let transactionCount = 0;
+    const observedDb = Object.create(db) as typeof db;
+    observedDb.transaction = (async (...args: Parameters<typeof db.transaction>) => {
+      transactionCount += 1;
+      return db.transaction(...args);
+    }) as typeof db.transaction;
+    const observedService = createSourceScanService(observedDb);
+
+    const files = await observedService.listSourceFiles(project.id, { limit: 50, offset: 0 });
+    await observedService.getSourceFileDetail(project.id, files[0]!.id);
+    await observedService.getSourceAggregate(project.id);
+
+    expect(transactionCount).toBe(3);
+  });
+
   it("previews an agent task with one-hop context", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);

@@ -13,11 +13,14 @@ import {
   validationMessages
 } from "@specops/db";
 import { scanRepository, type ScanRepositoryResult } from "@specops/repo-scanner";
-import { and, asc, count, eq, ilike, inArray } from "drizzle-orm";
+import { and, asc, count, eq, ilike, inArray, sql } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
 
-type SourceScanDb = Pick<Db, "delete" | "insert" | "select">;
+type SourceScanTransactionDb = Pick<Db, "delete" | "execute" | "insert" | "select">;
+type SourceScanDb = SourceScanTransactionDb & {
+  transaction?: <T>(callback: (tx: SourceScanTransactionDb) => Promise<T>) => Promise<T>;
+};
 
 export type SourceScanCounts = {
   sourceFileCount: number;
@@ -42,20 +45,36 @@ export function createSourceScanService(db: SourceScanDb) {
       projectId: string,
       query: SourceFileListQuery
     ): Promise<SourceFileSummaryDto[]> {
-      return listSourceFiles(db, projectId, query);
+      return withSourceReadSnapshot(db, (snapshotDb) => listSourceFiles(snapshotDb, projectId, query));
     },
 
     async getSourceFileDetail(
       projectId: string,
       sourceFileId: string
     ): Promise<SourceFileDetailDto> {
-      return getSourceFileDetail(db, projectId, sourceFileId);
+      return withSourceReadSnapshot(db, (snapshotDb) =>
+        getSourceFileDetail(snapshotDb, projectId, sourceFileId)
+      );
     },
 
     async getSourceAggregate(projectId: string): Promise<SourceAggregateDto> {
-      return getSourceAggregate(db, projectId);
+      return withSourceReadSnapshot(db, (snapshotDb) => getSourceAggregate(snapshotDb, projectId));
     }
   };
+}
+
+async function withSourceReadSnapshot<T>(
+  db: SourceScanDb,
+  callback: (snapshotDb: SourceScanTransactionDb) => Promise<T>
+): Promise<T> {
+  if (!db.transaction) {
+    return callback(db);
+  }
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`set transaction isolation level repeatable read read only`);
+    return callback(tx);
+  });
 }
 
 async function persistSourceScan(
@@ -213,11 +232,27 @@ async function listSourceFiles(
   }
 
   const sourceFileIds = rows.map((row) => row.id);
-  const [importCounts, exportCounts, symbolCounts] = await Promise.all([
-    countSourceFacts(db, sourceImports, sourceImports.sourceFileId, projectId, sourceFileIds),
-    countSourceFacts(db, sourceExports, sourceExports.sourceFileId, projectId, sourceFileIds),
-    countSourceFacts(db, sourceSymbols, sourceSymbols.sourceFileId, projectId, sourceFileIds)
-  ]);
+  const importCounts = await countSourceFacts(
+    db,
+    sourceImports,
+    sourceImports.sourceFileId,
+    projectId,
+    sourceFileIds
+  );
+  const exportCounts = await countSourceFacts(
+    db,
+    sourceExports,
+    sourceExports.sourceFileId,
+    projectId,
+    sourceFileIds
+  );
+  const symbolCounts = await countSourceFacts(
+    db,
+    sourceSymbols,
+    sourceSymbols.sourceFileId,
+    projectId,
+    sourceFileIds
+  );
 
   return rows.map((row) =>
     mapSourceFileSummary({
@@ -243,23 +278,21 @@ async function getSourceFileDetail(
     throw new NotFoundError("Source file not found", { projectId, sourceFileId });
   }
 
-  const [imports, exports, symbols] = await Promise.all([
-    db
-      .select()
-      .from(sourceImports)
-      .where(and(eq(sourceImports.projectId, projectId), eq(sourceImports.sourceFileId, sourceFileId)))
-      .orderBy(asc(sourceImports.specifier), asc(sourceImports.importKind), asc(sourceImports.id)),
-    db
-      .select()
-      .from(sourceExports)
-      .where(and(eq(sourceExports.projectId, projectId), eq(sourceExports.sourceFileId, sourceFileId)))
-      .orderBy(asc(sourceExports.exportedName), asc(sourceExports.exportKind), asc(sourceExports.id)),
-    db
-      .select()
-      .from(sourceSymbols)
-      .where(and(eq(sourceSymbols.projectId, projectId), eq(sourceSymbols.sourceFileId, sourceFileId)))
-      .orderBy(asc(sourceSymbols.name), asc(sourceSymbols.symbolKind), asc(sourceSymbols.id))
-  ]);
+  const imports = await db
+    .select()
+    .from(sourceImports)
+    .where(and(eq(sourceImports.projectId, projectId), eq(sourceImports.sourceFileId, sourceFileId)))
+    .orderBy(asc(sourceImports.specifier), asc(sourceImports.importKind), asc(sourceImports.id));
+  const exports = await db
+    .select()
+    .from(sourceExports)
+    .where(and(eq(sourceExports.projectId, projectId), eq(sourceExports.sourceFileId, sourceFileId)))
+    .orderBy(asc(sourceExports.exportedName), asc(sourceExports.exportKind), asc(sourceExports.id));
+  const symbols = await db
+    .select()
+    .from(sourceSymbols)
+    .where(and(eq(sourceSymbols.projectId, projectId), eq(sourceSymbols.sourceFileId, sourceFileId)))
+    .orderBy(asc(sourceSymbols.name), asc(sourceSymbols.symbolKind), asc(sourceSymbols.id));
 
   return {
     id: sourceFile.id,
@@ -318,22 +351,20 @@ async function getSourceAggregate(
   db: SourceScanDb,
   projectId: string
 ): Promise<SourceAggregateDto> {
-  const [[totalRow], languageRows, kindRows] = await Promise.all([
-    db
-      .select({ totalFiles: count() })
-      .from(sourceFiles)
-      .where(eq(sourceFiles.projectId, projectId)),
-    db
-      .select({ key: sourceFiles.language, total: count() })
-      .from(sourceFiles)
-      .where(eq(sourceFiles.projectId, projectId))
-      .groupBy(sourceFiles.language),
-    db
-      .select({ key: sourceFiles.kind, total: count() })
-      .from(sourceFiles)
-      .where(eq(sourceFiles.projectId, projectId))
-      .groupBy(sourceFiles.kind)
-  ]);
+  const [totalRow] = await db
+    .select({ totalFiles: count() })
+    .from(sourceFiles)
+    .where(eq(sourceFiles.projectId, projectId));
+  const languageRows = await db
+    .select({ key: sourceFiles.language, total: count() })
+    .from(sourceFiles)
+    .where(eq(sourceFiles.projectId, projectId))
+    .groupBy(sourceFiles.language);
+  const kindRows = await db
+    .select({ key: sourceFiles.kind, total: count() })
+    .from(sourceFiles)
+    .where(eq(sourceFiles.projectId, projectId))
+    .groupBy(sourceFiles.kind);
 
   return {
     totalFiles: totalRow?.totalFiles ?? 0,
