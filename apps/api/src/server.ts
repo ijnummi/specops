@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 
 import { isHttpError } from "./lib/http-errors.js";
+import { registerAgentTaskRoutes } from "./routes/agent-tasks.js";
 import { registerEntityRoutes } from "./routes/entities.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
 import { registerProjectRoutes } from "./routes/projects.js";
@@ -56,6 +57,7 @@ export function buildServer(databaseUrl: string) {
   app.get("/health", async () => ({ ok: true }));
   app.register(registerProjectRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
+  app.register(registerAgentTaskRoutes, { prefix: "/api", db });
   app.register(registerSearchRoutes, { prefix: "/api", db });
   app.register(registerValidationRoutes, { prefix: "/api", db });
   app.register(registerIndexRunRoutes, { prefix: "/api", db });
