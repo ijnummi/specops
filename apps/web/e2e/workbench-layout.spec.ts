@@ -107,6 +107,48 @@ test("project workbench fits one browser viewport with links at the bottom", asy
   expect(linkBottom).toBeLessThanOrEqual(viewport!.height);
 });
 
+test("project registry deletes metadata after confirmation", async ({ page }) => {
+  let deleted = false;
+  let deleteRequests = 0;
+
+  await page.route("**", async (route) => {
+    const url = new URL(route.request().url());
+    if (!url.pathname.startsWith("/api/")) {
+      await route.continue();
+      return;
+    }
+
+    if (url.pathname === "/api/projects" && route.request().method() === "GET") {
+      await route.fulfill({ json: deleted ? [] : [project] });
+      return;
+    }
+
+    if (url.pathname === "/api/projects/demo" && route.request().method() === "DELETE") {
+      deleteRequests += 1;
+      deleted = true;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+
+    await route.fulfill({ status: 404, json: { message: `Unhandled ${url.pathname}` } });
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Project Registry" })).toBeVisible();
+  await expect(page.getByText("Decision Workspace")).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toBe(
+      "Remove Decision Workspace from SpecOps? This only deletes workbench metadata; repository files and spec files stay on disk."
+    );
+    await dialog.accept();
+  });
+  await page.getByRole("button", { name: "Remove Decision Workspace from SpecOps" }).click();
+
+  await expect(page.getByText("No projects registered.")).toBeVisible();
+  expect(deleteRequests).toBe(1);
+});
+
 function entity(entityId: string, type: string, title: string, filePath: string) {
   return {
     id: entityId,

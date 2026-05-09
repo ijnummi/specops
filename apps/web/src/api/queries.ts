@@ -127,6 +127,10 @@ export function createProject(input: CreateProjectRequest) {
   return apiSend<ProjectDto>("POST", "/api/projects", input);
 }
 
+export function deleteProject(projectId: string) {
+  return apiSend<void>("DELETE", `/api/projects/${encodeURIComponent(projectId)}`);
+}
+
 export function initializeSpecops(projectId: string) {
   return apiSend<ProjectSummaryDto>(
     "POST",

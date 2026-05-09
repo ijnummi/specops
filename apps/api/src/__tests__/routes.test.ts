@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -89,6 +89,50 @@ describeWithDb("database-backed routes", () => {
       repoPath: project.repoPath,
       specopsPath: project.specopsPath
     });
+  });
+
+  it("deletes project metadata without deleting repository or spec files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const specFilePath = path.join(project.specopsPath, "domain", "domain.keep.md");
+    await mkdir(path.dirname(specFilePath), { recursive: true });
+    await writeFile(specFilePath, "---\nid: domain.keep\n---\n\n# Keep\n");
+    await pool.query("insert into index_runs (project_id, status) values ($1, 'completed')", [
+      project.id
+    ]);
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${project.id}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(204);
+    expect(await fileExists(project.repoPath)).toBe(true);
+    expect(await fileExists(project.specopsPath)).toBe(true);
+    expect(await fileExists(specFilePath)).toBe(true);
+    const indexRunsResult = await pool.query(
+      "select count(*)::int as count from index_runs where project_id = $1",
+      [project.id]
+    );
+    expect(indexRunsResult.rows[0].count).toBe(0);
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}`
+    });
+
+    expect(getResponse.statusCode).toBe(404);
+  });
+
+  it("returns 404 when deleting a missing project", async () => {
+    app = buildServer(testDatabaseUrl!);
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/projects/00000000-0000-4000-8000-000000000000"
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 
   it("creates an entity markdown file, indexes it, and returns searchable entities", async () => {
@@ -744,7 +788,7 @@ async function migrateTestDatabase(connectionString: string) {
 
 async function fileExists(value: string): Promise<boolean> {
   try {
-    await readFile(value);
+    await stat(value);
     return true;
   } catch (error) {
     if (

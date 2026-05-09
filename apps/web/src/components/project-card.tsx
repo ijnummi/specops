@@ -1,14 +1,27 @@
 import { Link } from "@tanstack/react-router";
 import type { ProjectDto } from "@specops/contracts";
-import { ArrowRight, FolderGit2 } from "lucide-react";
+import { ArrowRight, FolderGit2, Trash2 } from "lucide-react";
 
 import type { ProjectSummaryDto } from "../api/queries.js";
 
 type ProjectCardProps = {
   project: ProjectDto | ProjectSummaryDto;
+  onDelete?: (project: ProjectDto | ProjectSummaryDto) => void;
+  isDeleting?: boolean;
 };
 
-export function ProjectCard({ project }: ProjectCardProps) {
+type ConfirmProjectDelete = (message: string) => boolean;
+
+export function confirmProjectMetadataDelete(
+  projectName: string,
+  confirm: ConfirmProjectDelete = window.confirm
+) {
+  return confirm(
+    `Remove ${projectName} from SpecOps? This only deletes workbench metadata; repository files and spec files stay on disk.`
+  );
+}
+
+export function ProjectCard({ project, onDelete, isDeleting = false }: ProjectCardProps) {
   const summary = readSummary(project);
 
   return (
@@ -21,16 +34,34 @@ export function ProjectCard({ project }: ProjectCardProps) {
           </div>
           <p className="mt-1 truncate text-xs text-slate-500">{project.slug}</p>
         </div>
-        <Link
-          to="/projects/$projectId"
-          params={{ projectId: project.id }}
-          search={{ q: undefined }}
-          className="icon-button"
-          title="Open project"
-          aria-label={`Open ${project.name}`}
-        >
-          <ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {onDelete ? (
+            <button
+              type="button"
+              className="icon-button border-red-200 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Delete project metadata"
+              aria-label={`Remove ${project.name} from SpecOps`}
+              disabled={isDeleting}
+              onClick={() => {
+                if (confirmProjectMetadataDelete(project.name)) {
+                  onDelete(project);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
+          <Link
+            to="/projects/$projectId"
+            params={{ projectId: project.id }}
+            search={{ q: undefined }}
+            className="icon-button"
+            title="Open project"
+            aria-label={`Open ${project.name}`}
+          >
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
       </div>
 
       {project.description ? (

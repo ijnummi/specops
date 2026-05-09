@@ -107,6 +107,17 @@ export function createProjectService(db: Db) {
     }
   }
 
+  async function deleteProject(projectId: string): Promise<void> {
+    const [row] = await db
+      .delete(projects)
+      .where(eq(projects.id, projectId))
+      .returning({ id: projects.id });
+
+    if (!row) {
+      throw new NotFoundError("Project not found", { projectId });
+    }
+  }
+
   async function getProjectSummary(projectId: string): Promise<ProjectSummaryDto> {
     const project = await getProject(projectId);
     const [entityCount, linkCount, validationErrorCount, validationWarningCount, latestRun] =
@@ -138,6 +149,7 @@ export function createProjectService(db: Db) {
     createProject,
     getProject,
     updateProject,
+    deleteProject,
     getProjectSummary
   };
 }

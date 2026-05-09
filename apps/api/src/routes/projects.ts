@@ -40,6 +40,12 @@ export const registerProjectRoutes: FastifyPluginAsync<RouteOptions> = async (ap
     return projectService.updateProject(projectId, input);
   });
 
+  app.delete("/projects/:projectId", async (request, reply) => {
+    const { projectId } = projectParamsSchema.parse(request.params);
+    await projectService.deleteProject(projectId);
+    return reply.code(204).send();
+  });
+
   app.post("/projects/:projectId/init-specops", async (request) => {
     const { projectId } = projectParamsSchema.parse(request.params);
     return initializerService.initializeProjectSpecops(projectId);

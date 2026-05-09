@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
-import { createProject, projectsQuery, queryKeys } from "../api/queries.js";
+import { createProject, deleteProject, projectsQuery, queryKeys } from "../api/queries.js";
 import { ProjectCreateForm } from "../components/project-create-form.js";
 import { ProjectCard } from "../components/project-card.js";
 
@@ -18,6 +18,12 @@ export function ProjectsPage() {
         params: { projectId: project.id },
         search: { q: undefined }
       });
+    }
+  });
+  const deleteProjectMutation = useMutation({
+    mutationFn: deleteProject,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     }
   });
 
@@ -41,6 +47,12 @@ export function ProjectsPage() {
           <span className="text-xs text-slate-500">{projects.data?.length ?? 0} projects</span>
         </div>
 
+        {deleteProjectMutation.error ? (
+          <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            {deleteProjectMutation.error.message}
+          </div>
+        ) : null}
+
         {projects.isLoading ? (
           <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
             Loading projects...
@@ -52,7 +64,14 @@ export function ProjectsPage() {
         ) : projects.data && projects.data.length > 0 ? (
           <div className="grid gap-3 xl:grid-cols-2">
             {projects.data.map((project) => (
-              <ProjectCard key={project.id} project={project} />
+              <ProjectCard
+                key={project.id}
+                project={project}
+                isDeleting={
+                  deleteProjectMutation.isPending && deleteProjectMutation.variables === project.id
+                }
+                onDelete={(projectToDelete) => deleteProjectMutation.mutate(projectToDelete.id)}
+              />
             ))}
           </div>
         ) : (
