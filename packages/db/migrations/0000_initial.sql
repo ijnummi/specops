@@ -119,23 +119,41 @@ CREATE TABLE IF NOT EXISTS source_files (
   size_bytes bigint NOT NULL,
   content_hash text NOT NULL,
   last_seen_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT source_files_project_id_path_unique UNIQUE (project_id, path)
+  CONSTRAINT source_files_project_id_path_unique UNIQUE (project_id, path),
+  CONSTRAINT source_files_id_project_id_unique UNIQUE (id, project_id)
 );
 
 CREATE INDEX IF NOT EXISTS source_files_project_id_idx ON source_files(project_id);
 CREATE INDEX IF NOT EXISTS source_files_project_path_idx ON source_files(project_id, path);
+
+WITH ranked_source_files AS (
+  SELECT
+    id,
+    row_number() OVER (
+      PARTITION BY project_id, path
+      ORDER BY last_seen_at DESC, id DESC
+    ) AS duplicate_rank
+  FROM source_files
+)
+DELETE FROM source_files
+USING ranked_source_files
+WHERE source_files.id = ranked_source_files.id
+  AND ranked_source_files.duplicate_rank > 1;
+
 CREATE UNIQUE INDEX IF NOT EXISTS source_files_project_id_path_unique ON source_files(project_id, path);
+CREATE UNIQUE INDEX IF NOT EXISTS source_files_id_project_id_unique ON source_files(id, project_id);
 
 CREATE TABLE IF NOT EXISTS source_imports (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  source_file_id uuid NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL,
   file_path text NOT NULL,
   specifier text NOT NULL,
   import_kind text NOT NULL,
   imported_names text[] NOT NULL DEFAULT ARRAY[]::text[],
   is_relative boolean NOT NULL,
-  resolved_path text
+  resolved_path text,
+  CONSTRAINT source_imports_source_file_project_fk FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS source_imports_project_id_idx ON source_imports(project_id);
@@ -145,11 +163,12 @@ CREATE INDEX IF NOT EXISTS source_imports_project_specifier_idx ON source_import
 CREATE TABLE IF NOT EXISTS source_exports (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  source_file_id uuid NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL,
   file_path text NOT NULL,
   exported_name text NOT NULL,
   export_kind text NOT NULL,
-  source_specifier text
+  source_specifier text,
+  CONSTRAINT source_exports_source_file_project_fk FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS source_exports_project_id_idx ON source_exports(project_id);
@@ -159,18 +178,89 @@ CREATE INDEX IF NOT EXISTS source_exports_project_exported_name_idx ON source_ex
 CREATE TABLE IF NOT EXISTS source_symbols (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  source_file_id uuid NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL,
   file_path text NOT NULL,
   name text NOT NULL,
   symbol_kind text NOT NULL,
   is_exported boolean NOT NULL DEFAULT false,
   line integer,
-  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  CONSTRAINT source_symbols_source_file_project_fk FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS source_symbols_project_id_idx ON source_symbols(project_id);
 CREATE INDEX IF NOT EXISTS source_symbols_source_file_id_idx ON source_symbols(source_file_id);
 CREATE INDEX IF NOT EXISTS source_symbols_project_name_idx ON source_symbols(project_id, name);
+
+DELETE FROM source_imports
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM source_files
+  WHERE source_files.id = source_imports.source_file_id
+    AND source_files.project_id = source_imports.project_id
+);
+
+DELETE FROM source_exports
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM source_files
+  WHERE source_files.id = source_exports.source_file_id
+    AND source_files.project_id = source_exports.project_id
+);
+
+DELETE FROM source_symbols
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM source_files
+  WHERE source_files.id = source_symbols.source_file_id
+    AND source_files.project_id = source_symbols.project_id
+);
+
+ALTER TABLE source_imports DROP CONSTRAINT IF EXISTS source_imports_source_file_id_fkey;
+ALTER TABLE source_exports DROP CONSTRAINT IF EXISTS source_exports_source_file_id_fkey;
+ALTER TABLE source_symbols DROP CONSTRAINT IF EXISTS source_symbols_source_file_id_fkey;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_imports_source_file_project_fk'
+      AND conrelid = 'source_imports'::regclass
+  ) THEN
+    ALTER TABLE source_imports
+      ADD CONSTRAINT source_imports_source_file_project_fk
+      FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_exports_source_file_project_fk'
+      AND conrelid = 'source_exports'::regclass
+  ) THEN
+    ALTER TABLE source_exports
+      ADD CONSTRAINT source_exports_source_file_project_fk
+      FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_symbols_source_file_project_fk'
+      AND conrelid = 'source_symbols'::regclass
+  ) THEN
+    ALTER TABLE source_symbols
+      ADD CONSTRAINT source_symbols_source_file_project_fk
+      FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS ai_proposals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -175,6 +176,7 @@ export const sourceFiles = pgTable(
     projectIdx: index("source_files_project_id_idx").on(table.projectId),
     projectPathIdx: index("source_files_project_path_idx").on(table.projectId, table.path),
     projectPathUnique: unique("source_files_project_id_path_unique").on(table.projectId, table.path),
+    idProjectUnique: unique("source_files_id_project_id_unique").on(table.id, table.projectId),
   }),
 );
 
@@ -185,9 +187,7 @@ export const sourceImports = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    sourceFileId: uuid("source_file_id")
-      .notNull()
-      .references(() => sourceFiles.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id").notNull(),
     filePath: text("file_path").notNull(),
     specifier: text("specifier").notNull(),
     importKind: text("import_kind").notNull(),
@@ -199,6 +199,11 @@ export const sourceImports = pgTable(
     projectIdx: index("source_imports_project_id_idx").on(table.projectId),
     sourceFileIdx: index("source_imports_source_file_id_idx").on(table.sourceFileId),
     specifierIdx: index("source_imports_project_specifier_idx").on(table.projectId, table.specifier),
+    sourceFileProjectFk: foreignKey({
+      name: "source_imports_source_file_project_fk",
+      columns: [table.sourceFileId, table.projectId],
+      foreignColumns: [sourceFiles.id, sourceFiles.projectId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -209,9 +214,7 @@ export const sourceExports = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    sourceFileId: uuid("source_file_id")
-      .notNull()
-      .references(() => sourceFiles.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id").notNull(),
     filePath: text("file_path").notNull(),
     exportedName: text("exported_name").notNull(),
     exportKind: text("export_kind").notNull(),
@@ -221,6 +224,11 @@ export const sourceExports = pgTable(
     projectIdx: index("source_exports_project_id_idx").on(table.projectId),
     sourceFileIdx: index("source_exports_source_file_id_idx").on(table.sourceFileId),
     exportedNameIdx: index("source_exports_project_exported_name_idx").on(table.projectId, table.exportedName),
+    sourceFileProjectFk: foreignKey({
+      name: "source_exports_source_file_project_fk",
+      columns: [table.sourceFileId, table.projectId],
+      foreignColumns: [sourceFiles.id, sourceFiles.projectId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -231,9 +239,7 @@ export const sourceSymbols = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    sourceFileId: uuid("source_file_id")
-      .notNull()
-      .references(() => sourceFiles.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id").notNull(),
     filePath: text("file_path").notNull(),
     name: text("name").notNull(),
     symbolKind: text("symbol_kind").notNull(),
@@ -245,6 +251,11 @@ export const sourceSymbols = pgTable(
     projectIdx: index("source_symbols_project_id_idx").on(table.projectId),
     sourceFileIdx: index("source_symbols_source_file_id_idx").on(table.sourceFileId),
     symbolNameIdx: index("source_symbols_project_name_idx").on(table.projectId, table.name),
+    sourceFileProjectFk: foreignKey({
+      name: "source_symbols_source_file_project_fk",
+      columns: [table.sourceFileId, table.projectId],
+      foreignColumns: [sourceFiles.id, sourceFiles.projectId],
+    }).onDelete("cascade"),
   }),
 );
 
