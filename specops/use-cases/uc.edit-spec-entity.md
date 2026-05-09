@@ -12,7 +12,7 @@ links:
     - interface.spec-entity-service
     - interface.markdown-indexer
   decisions:
-    - adr.001-markdown-source-of-truth
+    - adr.001-markdown-is-source-of-truth
   related:
     - uc.index-spec-files
 ---

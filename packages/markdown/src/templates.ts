@@ -183,10 +183,10 @@ export function initialSpecopsFiles(): SpecopsFile[] {
   const files: SpecopsFile[] = [
     {
       path: "project.yaml",
-      content: `name: SpecOps Workbench
-version: 1
-specs:
-  root: .
+      content: `id: specops-workbench
+name: SpecOps Workbench
+specops_version: 1
+description: Local-first markdown-native workbench for specs-driven AI-assisted software development.
 `
     },
     ...starterSpecs.map((spec) => ({

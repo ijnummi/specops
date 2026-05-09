@@ -15,7 +15,7 @@ links:
     - interface.markdown-indexer
     - interface.graph-query-service
   decisions:
-    - adr.001-markdown-source-of-truth
+    - adr.001-markdown-is-source-of-truth
     - adr.002-postgresql-derived-cache
     - adr.003-flexible-spec-graph
 ---

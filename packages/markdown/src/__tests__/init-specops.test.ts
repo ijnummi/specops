@@ -76,6 +76,26 @@ describe("initialSpecopsFiles", () => {
     expect(paths).toContain("templates/use-case.template.md");
     expect(paths).toContain("templates/adr.template.md");
   });
+
+  it("emits the canonical project config shape", () => {
+    const projectFile = initialSpecopsFiles().find(
+      (file) => file.path === "project.yaml"
+    );
+
+    expect(projectFile?.content).toBe(`id: specops-workbench
+name: SpecOps Workbench
+specops_version: 1
+description: Local-first markdown-native workbench for specs-driven AI-assisted software development.
+`);
+  });
+
+  it("emits the canonical ADR 001 id", () => {
+    const adrFile = initialSpecopsFiles().find(
+      (file) => file.path === "decisions/adr-001-markdown-is-source-of-truth.md"
+    );
+
+    expect(adrFile?.content).toContain("id: adr.001-markdown-is-source-of-truth\n");
+  });
 });
 
 describe("initializeSpecopsFolder", () => {

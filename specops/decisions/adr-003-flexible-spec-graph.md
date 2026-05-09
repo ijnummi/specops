@@ -5,7 +5,7 @@ title: Flexible spec graph
 status: accepted
 links:
   decisions:
-    - adr.001-markdown-source-of-truth
+    - adr.001-markdown-is-source-of-truth
   domain:
     - domain.spec-entity
     - domain.spec-link

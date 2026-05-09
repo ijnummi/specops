@@ -10,7 +10,7 @@ links:
     - uc.create-project
     - uc.initialize-specops-folder
   decisions:
-    - adr.001-markdown-source-of-truth
+    - adr.001-markdown-is-source-of-truth
 ---
 
 # Project

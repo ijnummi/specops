@@ -1,5 +1,5 @@
 ---
-id: adr.001-markdown-source-of-truth
+id: adr.001-markdown-is-source-of-truth
 type: adr
 title: Markdown is the source of truth
 status: accepted

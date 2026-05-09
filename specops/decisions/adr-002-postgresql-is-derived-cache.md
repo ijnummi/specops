@@ -5,7 +5,7 @@ title: PostgreSQL is a derived cache
 status: accepted
 links:
   decisions:
-    - adr.001-markdown-source-of-truth
+    - adr.001-markdown-is-source-of-truth
   domain:
     - domain.index-run
     - domain.validation-message

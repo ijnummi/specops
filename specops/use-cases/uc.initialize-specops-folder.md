@@ -10,7 +10,7 @@ links:
   interfaces:
     - interface.project-registry-service
   decisions:
-    - adr.001-markdown-source-of-truth
+    - adr.001-markdown-is-source-of-truth
   next:
     - uc.index-spec-files
 ---
