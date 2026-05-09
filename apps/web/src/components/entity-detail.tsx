@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save } from "lucide-react";
+import type { AgentTaskPreviewRequest, AgentTaskPreviewResponse } from "@specops/contracts";
+import { Bot, Save } from "lucide-react";
 
 import {
   backlinksQuery,
   entityQuery,
   outgoingLinksQuery,
+  previewAgentTask,
   queryKeys,
+  saveAgentTask,
   updateEntityMarkdown,
   validationMessagesQuery
 } from "../api/queries.js";
+import { AgentTaskPreview } from "./agent-task-preview.js";
+import { defaultTargetAgent, suggestedTaskIdForSource } from "./agent-task-preview-state.js";
 import type { EntityDraft } from "./entity-drafts.js";
 import { isDraftDirty } from "./entity-drafts.js";
 import { entityMarkdownForEditing } from "./entity-editor-markdown.js";
@@ -26,6 +31,17 @@ type EntityDetailProps = {
   onSaveDraft: (markdown: string, contentHash: string) => void;
 };
 
+type PreviewTaskMutationInput = {
+  projectId: string;
+  input: AgentTaskPreviewRequest;
+};
+
+type SaveTaskMutationInput = {
+  projectId: string;
+  sourceEntityId: string;
+  preview: AgentTaskPreviewResponse;
+};
+
 export function EntityDetail({
   projectId,
   entityId,
@@ -35,11 +51,20 @@ export function EntityDetail({
   onSaveDraft
 }: EntityDetailProps) {
   const queryClient = useQueryClient();
+  const currentEntityIdRef = useRef(entityId);
+  const currentProjectIdRef = useRef(projectId);
   const entity = useQuery(entityQuery(projectId, entityId));
   const [outgoing, backlinks] = useQueries({
     queries: [outgoingLinksQuery(projectId, entityId), backlinksQuery(projectId, entityId)]
   });
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [taskPreview, setTaskPreview] = useState<AgentTaskPreviewResponse | null>(null);
+  const [taskPreviewOriginalMarkdown, setTaskPreviewOriginalMarkdown] = useState<string>("");
+  const [taskTargetAgent, setTaskTargetAgent] = useState(defaultTargetAgent());
+  const [taskId, setTaskId] = useState(() => suggestedTaskIdForSource(entityId));
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskPreviewError, setTaskPreviewError] = useState<string | null>(null);
+  const [taskSaveError, setTaskSaveError] = useState<string | null>(null);
 
   const documentMarkdown = useMemo(
     () => (entity.data ? entityMarkdownForEditing(entity.data) : ""),
@@ -47,10 +72,23 @@ export function EntityDetail({
   );
   const editorMarkdown = draft?.markdown ?? documentMarkdown;
   const isDirty = isDraftDirty(draft);
+  const cannotGenerateTaskMessage = isDirty
+    ? "Save entity changes before generating a task."
+    : null;
+
+  currentEntityIdRef.current = entityId;
+  currentProjectIdRef.current = projectId;
 
   useEffect(() => {
     setSaveError(null);
-  }, [entityId]);
+    setTaskPreview(null);
+    setTaskPreviewOriginalMarkdown("");
+    setTaskTargetAgent(defaultTargetAgent());
+    setTaskId(suggestedTaskIdForSource(entityId));
+    setTaskTitle("");
+    setTaskPreviewError(null);
+    setTaskSaveError(null);
+  }, [entityId, projectId]);
 
   useEffect(() => {
     if (entity.data) {
@@ -79,6 +117,91 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) })
       ]);
+    }
+  });
+
+  const previewTaskMutation = useMutation({
+    mutationFn: ({ projectId: requestedProjectId, input }: PreviewTaskMutationInput) =>
+      previewAgentTask(requestedProjectId, input),
+    onMutate: () => {
+      setTaskPreviewError(null);
+    },
+    onSuccess: (preview, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.input.sourceEntityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
+      setTaskPreview(preview);
+      setTaskPreviewOriginalMarkdown(preview.markdown);
+      setTaskId(preview.taskId);
+      setTaskTitle(preview.title);
+      setTaskSaveError(null);
+      setTaskPreviewError(null);
+    },
+    onError: (error, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.input.sourceEntityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
+      setTaskPreviewError(error instanceof Error ? error.message : "Failed to preview agent task");
+    }
+  });
+
+  const saveTaskMutation = useMutation({
+    mutationFn: ({ projectId: requestedProjectId, preview }: SaveTaskMutationInput) =>
+      saveAgentTask(requestedProjectId, {
+        markdown: preview.markdown,
+        taskId: preview.taskId,
+        filePath: preview.filePath
+      }),
+    onSuccess: async (savedTask, request) => {
+      if (
+        request.projectId === currentProjectIdRef.current &&
+        request.sourceEntityId === currentEntityIdRef.current
+      ) {
+        setTaskPreview(null);
+        setTaskPreviewOriginalMarkdown("");
+        setTaskSaveError(null);
+      }
+
+      const contextBacklinkInvalidations = request.preview.contextSpecIds.map((contextSpecId) =>
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.backlinks(request.projectId, contextSpecId)
+        })
+      );
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.validation(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(request.projectId) }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.outgoingLinks(request.projectId, request.sourceEntityId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.backlinks(request.projectId, request.sourceEntityId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.entity(request.projectId, savedTask.entityId)
+        }),
+        ...contextBacklinkInvalidations
+      ]);
+    },
+    onError: (error, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.sourceEntityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
+      setTaskSaveError(error instanceof Error ? error.message : "Failed to save agent task");
     }
   });
 
@@ -124,22 +247,72 @@ export function EntityDetail({
               {entity.data.entityId} / {entity.data.filePath}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600">
-              {entity.data.type}
-            </span>
-            <span className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600">
-              {entity.data.status}
-            </span>
-            <button
-              type="button"
-              className="button-primary"
-              disabled={!isDirty || mutation.isPending}
-              onClick={handleSave}
-            >
-              <Save className="h-4 w-4" aria-hidden="true" />
-              Save
-            </button>
+          <div className="flex min-w-0 flex-col gap-2 xl:flex-1 xl:items-end">
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+              <span className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600">
+                {entity.data.type}
+              </span>
+              <span className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600">
+                {entity.data.status}
+              </span>
+            </div>
+            <div className="flex w-full min-w-0 flex-col gap-2 2xl:flex-row 2xl:items-center">
+              <div className="grid w-full min-w-0 gap-2 sm:grid-cols-3">
+                <input
+                  className="input h-9"
+                  value={taskTargetAgent}
+                  aria-label="Target agent"
+                  onChange={(event) => setTaskTargetAgent(event.target.value)}
+                />
+                <input
+                  className="input h-9"
+                  value={taskId}
+                  aria-label="Task ID"
+                  onChange={(event) => setTaskId(event.target.value)}
+                />
+                <input
+                  className="input h-9"
+                  value={taskTitle}
+                  placeholder={entity.data.title}
+                  aria-label="Task title"
+                  onChange={(event) => setTaskTitle(event.target.value)}
+                />
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="button-secondary"
+                  disabled={previewTaskMutation.isPending || isDirty}
+                  title={cannotGenerateTaskMessage ?? undefined}
+                  onClick={() =>
+                    previewTaskMutation.mutate({
+                      projectId,
+                      input: {
+                        sourceEntityId: entityId,
+                        targetAgent: taskTargetAgent.trim() || defaultTargetAgent(),
+                        taskId: taskId.trim() || undefined,
+                        title: taskTitle.trim() || undefined
+                      }
+                    })
+                  }
+                >
+                  <Bot className="h-4 w-4" aria-hidden="true" />
+                  Generate Task
+                </button>
+                <button
+                  type="button"
+                  className="button-primary"
+                  disabled={!isDirty || mutation.isPending}
+                  onClick={handleSave}
+                >
+                  <Save className="h-4 w-4" aria-hidden="true" />
+                  Save
+                </button>
+              </div>
+            </div>
+            {cannotGenerateTaskMessage ? (
+              <p className="text-xs text-slate-500">{cannotGenerateTaskMessage}</p>
+            ) : null}
           </div>
         </div>
         <MarkdownEditor
@@ -153,6 +326,28 @@ export function EntityDetail({
 
       {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
       {mutation.error ? <p className="text-sm text-red-700">{mutation.error.message}</p> : null}
+      {taskPreviewError ? <p className="text-sm text-red-700">{taskPreviewError}</p> : null}
+
+      {taskPreview ? (
+        <AgentTaskPreview
+          preview={taskPreview}
+          originalMarkdown={taskPreviewOriginalMarkdown}
+          isSaving={saveTaskMutation.isPending}
+          saveError={taskSaveError}
+          onMarkdownChange={(markdown) => {
+            setTaskSaveError(null);
+            setTaskPreview((current) => (current ? { ...current, markdown } : current));
+          }}
+          onSave={() =>
+            saveTaskMutation.mutate({ projectId, sourceEntityId: entityId, preview: taskPreview })
+          }
+          onClose={() => {
+            setTaskPreview(null);
+            setTaskPreviewOriginalMarkdown("");
+            setTaskSaveError(null);
+          }}
+        />
+      ) : null}
 
       <LinkPanels outgoing={outgoing.data ?? []} backlinks={backlinks.data ?? []} />
       <EntityValidation projectId={projectId} entityId={entityId} />

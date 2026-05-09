@@ -52,7 +52,7 @@ export function AgentTaskPreview({
             {preview.taskId} / {preview.filePath}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <button type="button" className="button-secondary" onClick={copyMarkdown}>
             <Copy className="h-4 w-4" aria-hidden="true" />
             Copy
