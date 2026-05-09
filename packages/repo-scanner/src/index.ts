@@ -13,5 +13,6 @@ export type {
   SourceImportFact,
   SourceLanguage,
   SourceScanWarning,
+  SourceSpecopsAnnotationFact,
   SourceSymbolFact
 } from "./types.js";

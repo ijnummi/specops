@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ScanRepositoryResult } from "@specops/repo-scanner";
+import type { ScanRepositoryResult, SourceSymbolFact } from "@specops/repo-scanner";
 
 import { generateBootstrapSpecFiles, slugifySourceSymbol } from "./generate.js";
 
@@ -41,7 +41,13 @@ describe("generateBootstrapSpecFiles", () => {
           imports: [],
           exports: [{ exportedName: "default", exportKind: "default", sourceSpecifier: null }],
           symbols: [
-            { name: "Internal", symbolKind: "interface", isExported: false, line: 1, metadata: {} }
+            sourceSymbol({
+              name: "Internal",
+              symbolKind: "interface",
+              isExported: false,
+              line: 1,
+              metadata: {}
+            })
           ]
         },
         {
@@ -53,7 +59,13 @@ describe("generateBootstrapSpecFiles", () => {
           imports: [],
           exports: [{ exportedName: "Decision", exportKind: "type", sourceSpecifier: null }],
           symbols: [
-            { name: "Decision", symbolKind: "interface", isExported: true, line: 1, metadata: {} }
+            sourceSymbol({
+              name: "Decision",
+              symbolKind: "interface",
+              isExported: true,
+              line: 1,
+              metadata: {}
+            })
           ]
         },
         {
@@ -65,7 +77,13 @@ describe("generateBootstrapSpecFiles", () => {
           imports: [],
           exports: [{ exportedName: "ConfigShape", exportKind: "type", sourceSpecifier: null }],
           symbols: [
-            { name: "ConfigShape", symbolKind: "interface", isExported: true, line: 1, metadata: {} }
+            sourceSymbol({
+              name: "ConfigShape",
+              symbolKind: "interface",
+              isExported: true,
+              line: 1,
+              metadata: {}
+            })
           ]
         },
         {
@@ -77,7 +95,13 @@ describe("generateBootstrapSpecFiles", () => {
           imports: [],
           exports: [{ exportedName: "default", exportKind: "default", sourceSpecifier: null }],
           symbols: [
-            { name: "default", symbolKind: "class", isExported: true, line: 1, metadata: {} }
+            sourceSymbol({
+              name: "default",
+              symbolKind: "class",
+              isExported: true,
+              line: 1,
+              metadata: {}
+            })
           ]
         }
       ],
@@ -91,10 +115,22 @@ describe("generateBootstrapSpecFiles", () => {
     const files = generateBootstrapSpecFiles({
       files: [
         sourceFile("src/domain.ts", [
-          { name: "Decision", symbolKind: "interface", isExported: true, line: 1, metadata: {} }
+          sourceSymbol({
+            name: "Decision",
+            symbolKind: "interface",
+            isExported: true,
+            line: 1,
+            metadata: {}
+          })
         ]),
         sourceFile("src/model.ts", [
-          { name: "Decision", symbolKind: "type_alias", isExported: true, line: 2, metadata: {} }
+          sourceSymbol({
+            name: "Decision",
+            symbolKind: "type_alias",
+            isExported: true,
+            line: 2,
+            metadata: {}
+          })
         ])
       ],
       warnings: []
@@ -117,7 +153,13 @@ describe("generateBootstrapSpecFiles", () => {
           imports: [],
           exports: [{ exportedName: "PublicDecision", exportKind: "type", sourceSpecifier: null }],
           symbols: [
-            { name: "Decision", symbolKind: "interface", isExported: true, line: 1, metadata: {} }
+            sourceSymbol({
+              name: "Decision",
+              symbolKind: "interface",
+              isExported: true,
+              line: 1,
+              metadata: {}
+            })
           ]
         }
       ],
@@ -135,8 +177,20 @@ describe("generateBootstrapSpecFiles", () => {
     const files = generateBootstrapSpecFiles({
       files: [
         sourceFile("src/http.ts", [
-          { name: "SearchHandler", symbolKind: "function", isExported: true, line: 3, metadata: {} },
-          { name: "ApiClient", symbolKind: "const", isExported: true, line: 9, metadata: {} }
+          sourceSymbol({
+            name: "SearchHandler",
+            symbolKind: "function",
+            isExported: true,
+            line: 3,
+            metadata: {}
+          }),
+          sourceSymbol({
+            name: "ApiClient",
+            symbolKind: "const",
+            isExported: true,
+            line: 9,
+            metadata: {}
+          })
         ])
       ],
       warnings: []
@@ -165,20 +219,60 @@ function scanResult(): ScanRepositoryResult {
   return {
     files: [
       sourceFile("src/domain.ts", [
-        { name: "Workspace", symbolKind: "interface", isExported: true, line: 1, metadata: {} },
-        { name: "Decision", symbolKind: "interface", isExported: true, line: 7, metadata: {} },
-        { name: "DecisionLink", symbolKind: "type_alias", isExported: true, line: 14, metadata: {} },
-        { name: "internalHelper", symbolKind: "function", isExported: false, line: 20, metadata: {} }
+        sourceSymbol({
+          name: "Workspace",
+          symbolKind: "interface",
+          isExported: true,
+          line: 1,
+          metadata: {}
+        }),
+        sourceSymbol({
+          name: "Decision",
+          symbolKind: "interface",
+          isExported: true,
+          line: 7,
+          metadata: {}
+        }),
+        sourceSymbol({
+          name: "DecisionLink",
+          symbolKind: "type_alias",
+          isExported: true,
+          line: 14,
+          metadata: {}
+        }),
+        sourceSymbol({
+          name: "internalHelper",
+          symbolKind: "function",
+          isExported: false,
+          line: 20,
+          metadata: {}
+        })
       ]),
       sourceFile("src/services/decision-service.ts", [
-        { name: "DecisionService", symbolKind: "class", isExported: true, line: 4, metadata: {} }
+        sourceSymbol({
+          name: "DecisionService",
+          symbolKind: "class",
+          isExported: true,
+          line: 4,
+          metadata: {}
+        })
       ]),
       sourceFile("src/services/reminder-scheduler.ts", [
-        { name: "ReminderScheduler", symbolKind: "class", isExported: true, line: 5, metadata: {} }
+        sourceSymbol({
+          name: "ReminderScheduler",
+          symbolKind: "class",
+          isExported: true,
+          line: 5,
+          metadata: {}
+        })
       ])
     ],
     warnings: []
   };
+}
+
+function sourceSymbol(symbol: Omit<SourceSymbolFact, "specopsAnnotations">): SourceSymbolFact {
+  return { ...symbol, specopsAnnotations: [] };
 }
 
 function sourceFile(path: string, symbols: ScanRepositoryResult["files"][number]["symbols"]) {
