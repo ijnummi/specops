@@ -14,9 +14,10 @@ import { and, asc, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 
-import { ConflictError, NotFoundError } from "../lib/http-errors.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
 import {
   assertAbsolutePath,
+  assertExistingParentInsideDirectory,
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
@@ -89,7 +90,14 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
 
     const relativePath = entityRelativePath(input.type, input.entityId);
     const targetPath = assertInsideDirectory(specopsPath, path.join(specopsPath, relativePath));
-    await mkdir(path.dirname(targetPath), { recursive: true });
+    const targetParent = path.dirname(targetPath);
+    await assertSafePath("Entity markdown parent is outside specopsPath", () =>
+      assertExistingParentInsideDirectory(specopsPath, targetParent)
+    );
+    await mkdir(targetParent, { recursive: true });
+    await assertSafePath("Entity markdown parent is outside specopsPath", () =>
+      assertRealPathInsideDirectory(specopsPath, targetParent)
+    );
 
     try {
       await writeFile(targetPath, createEntityMarkdown(input), { flag: "wx" });
@@ -114,6 +122,9 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
     const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
     await assertRealPathInsideDirectory(project.repoPath, specopsPath);
     const targetPath = assertInsideDirectory(specopsPath, path.join(specopsPath, entity.filePath));
+    await assertSafePath("Entity markdown path is outside specopsPath", () =>
+      assertExistingParentInsideDirectory(specopsPath, targetPath)
+    );
 
     await writeFile(targetPath, input.markdown, { flag: "w" });
     await indexerService.indexProject(projectId);
@@ -215,4 +226,12 @@ function isFileExistsError(error: unknown): boolean {
     "code" in error &&
     error.code === "EEXIST"
   );
+}
+
+async function assertSafePath(message: string, check: () => Promise<string>) {
+  try {
+    await check();
+  } catch (error) {
+    throw new BadRequestError(message, { cause: error instanceof Error ? error.message : String(error) });
+  }
 }

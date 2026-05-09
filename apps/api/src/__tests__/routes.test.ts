@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -116,6 +116,64 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("rejects entity creation when an existing parent directory symlink escapes specops", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
+    tempRoots.push(outside);
+    await mkdir(project.specopsPath, { recursive: true });
+    await symlink(outside, path.join(project.specopsPath, "domain"), "dir");
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/entities`,
+      payload: {
+        entityId: "domain.escape",
+        type: "domain_entity",
+        title: "Escaping Entity",
+        status: "draft"
+      }
+    });
+
+    await expect(fileExists(path.join(outside, "domain.escape.md"))).resolves.toBe(false);
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("rejects markdown save when the indexed file symlink escapes specops", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const createEntityResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/entities`,
+      payload: {
+        entityId: "domain.safe",
+        type: "domain_entity",
+        title: "Safe Entity",
+        status: "draft"
+      }
+    });
+    expect(createEntityResponse.statusCode).toBe(201);
+
+    const outside = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
+    tempRoots.push(outside);
+    const outsideFile = path.join(outside, "outside.md");
+    await writeFile(outsideFile, "outside original\n");
+    const indexedPath = path.join(project.specopsPath, "domain", "domain.safe.md");
+    await unlink(indexedPath);
+    await symlink(outsideFile, indexedPath);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.id}/entities/domain.safe/markdown`,
+      payload: {
+        markdown: "---\nid: domain.safe\ntype: domain_entity\ntitle: Safe Entity\nstatus: draft\n---\n\nchanged\n"
+      }
+    });
+
+    await expect(readFile(outsideFile, "utf8")).resolves.toBe("outside original\n");
+    expect(response.statusCode).toBe(400);
+  });
+
   async function createProjectViaApi() {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-"));
     tempRoots.push(root);
@@ -150,6 +208,24 @@ async function migrateTestDatabase(connectionString: string) {
     await client.query(sql);
   } finally {
     await client.end();
+  }
+}
+
+async function fileExists(value: string): Promise<boolean> {
+  try {
+    await readFile(value);
+    return true;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return false;
+    }
+
+    throw error;
   }
 }
 
