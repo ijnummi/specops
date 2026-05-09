@@ -35,6 +35,7 @@ export function createSourceBootstrapService(db: Db) {
       const realSpecopsPath = await assertRealPathInsideDirectory(repoPath, specopsPath);
 
       const projectYamlPath = path.join(realSpecopsPath, "project.yaml");
+      await assertSafeProjectYamlPath(realSpecopsPath, projectYamlPath);
       const projectYaml = await readProjectYaml(projectYamlPath);
       if (hasCompletedSourceBootstrap(projectYaml)) {
         throw new ConflictError("Source bootstrap has already completed");
@@ -58,7 +59,10 @@ export function createSourceBootstrapService(db: Db) {
             realSpecopsPath,
             path.join(realSpecopsPath, file.path)
           );
-          await mkdir(path.dirname(targetPath), { recursive: true });
+          const targetParent = path.dirname(targetPath);
+          await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
+          await mkdir(targetParent, { recursive: true });
+          await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
           await writeFile(targetPath, file.content, { flag: "wx" });
           writtenPaths.push(targetPath);
         }
@@ -71,6 +75,7 @@ export function createSourceBootstrapService(db: Db) {
       }
 
       const result = await createIndexerService(db).indexProject(projectId);
+      await assertSafeProjectYamlPath(realSpecopsPath, projectYamlPath);
       await writeProjectYaml(projectYamlPath, {
         ...projectYaml,
         source_bootstrap: {
@@ -83,6 +88,20 @@ export function createSourceBootstrapService(db: Db) {
       return result;
     }
   };
+}
+
+async function assertSafeProjectYamlPath(specopsPath: string, projectYamlPath: string) {
+  assertInsideDirectory(specopsPath, projectYamlPath);
+
+  try {
+    await assertRealPathInsideDirectory(specopsPath, projectYamlPath);
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+
+    await assertExistingParentInsideDirectory(specopsPath, projectYamlPath);
+  }
 }
 
 async function assertNoExistingEntitySpecs(specopsPath: string) {

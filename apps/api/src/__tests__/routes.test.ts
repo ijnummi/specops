@@ -12,6 +12,7 @@ import { buildServer } from "../server.js";
 import { createAgentTaskService } from "../services/agent-task-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
+import { createSourceBootstrapService } from "../services/source-bootstrap-service.js";
 import { createSourceScanService } from "../services/source-scan-service.js";
 
 const testDatabaseUrl = readTestDatabaseUrl();
@@ -537,6 +538,40 @@ describeWithDb("database-backed routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().error.message).toBe("No eligible exported source symbols found");
+  });
+
+  it("rejects source bootstrap when the generated file parent symlink escapes specops", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    const outside = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
+    tempRoots.push(outside);
+    await writeSampleSourceProject(project.repoPath);
+    await mkdir(project.specopsPath, { recursive: true });
+    await symlink(outside, path.join(project.specopsPath, "domain"), "dir");
+
+    await expect(createSourceBootstrapService(db).bootstrapProject(project.id)).rejects.toThrow(
+      /inside/
+    );
+    await expect(fileExists(path.join(outside, "decision.md"))).resolves.toBe(false);
+    await expect(fileExists(path.join(outside, "workspace.md"))).resolves.toBe(false);
+  });
+
+  it("rejects source bootstrap when project.yaml symlink escapes specops without modifying it", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    const outside = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
+    tempRoots.push(outside);
+    const outsideProjectYaml = path.join(outside, "project.yaml");
+    const originalProjectYaml = "id: outside\n";
+    await writeSampleSourceProject(project.repoPath);
+    await mkdir(project.specopsPath, { recursive: true });
+    await writeFile(outsideProjectYaml, originalProjectYaml);
+    await symlink(outsideProjectYaml, path.join(project.specopsPath, "project.yaml"));
+
+    await expect(createSourceBootstrapService(db).bootstrapProject(project.id)).rejects.toThrow(
+      /inside/
+    );
+    await expect(readFile(outsideProjectYaml, "utf8")).resolves.toBe(originalProjectYaml);
   });
 
   it("refreshes source files and facts during project indexing", async () => {

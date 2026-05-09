@@ -47,6 +47,9 @@ importers:
       '@specops/repo-scanner':
         specifier: workspace:*
         version: link:../../packages/repo-scanner
+      '@specops/source-bootstrap':
+        specifier: workspace:*
+        version: link:../../packages/source-bootstrap
       '@specops/taskgen':
         specifier: workspace:*
         version: link:../../packages/taskgen
