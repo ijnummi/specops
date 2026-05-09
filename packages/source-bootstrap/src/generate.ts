@@ -109,13 +109,17 @@ function isEligibleSymbol(sourceFile: SourceFileFact, symbol: SourceSymbolFact):
   if (!symbol.name || symbol.name === "default") return false;
   if (!domainSymbolKinds.has(symbol.symbolKind) && !isInterfaceLikeName(symbol.name)) return false;
 
-  return sourceFile.exports.some(
-    (sourceExport) =>
-      sourceExport.exportedName === symbol.name &&
-      sourceExport.exportKind !== "default" &&
-      sourceExport.exportKind !== "namespace" &&
-      sourceExport.exportKind !== "re_export"
-  );
+  if (
+    sourceFile.exports.length > 0 &&
+    sourceFile.exports.every(
+      (sourceExport) =>
+        sourceExport.exportKind === "default" || sourceExport.exportedName === "default"
+    )
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function classifySymbol(name: string): "domain_entity" | "interface" {

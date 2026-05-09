@@ -105,6 +105,32 @@ describe("generateBootstrapSpecFiles", () => {
     expect(files[0]?.content).toContain("`src/model.ts` exports `Decision` as a type alias.");
   });
 
+  it("generates specs for locally aliased exports using the source symbol name", () => {
+    const files = generateBootstrapSpecFiles({
+      files: [
+        {
+          path: "src/public-domain.ts",
+          language: "typescript",
+          kind: "source",
+          sizeBytes: 100,
+          contentHash: "hash",
+          imports: [],
+          exports: [{ exportedName: "PublicDecision", exportKind: "type", sourceSpecifier: null }],
+          symbols: [
+            { name: "Decision", symbolKind: "interface", isExported: true, line: 1, metadata: {} }
+          ]
+        }
+      ],
+      warnings: []
+    });
+
+    expect(files.map((file) => file.path)).toEqual(["domain/decision.md"]);
+    expect(files[0]?.entityId).toBe("domain.decision");
+    expect(files[0]?.content).toContain(
+      "`src/public-domain.ts` exports `Decision` as an interface."
+    );
+  });
+
   it("generates interface specs from exported suffix-named functions and constants", () => {
     const files = generateBootstrapSpecFiles({
       files: [
