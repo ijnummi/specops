@@ -142,6 +142,13 @@ export function reindexProject(projectId: string) {
   return apiSend<IndexRunDto>("POST", `/api/projects/${encodeURIComponent(projectId)}/index`);
 }
 
+export function bootstrapFromSource(projectId: string) {
+  return apiSend<IndexRunDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/bootstrap-from-source`
+  );
+}
+
 export function createEntity(projectId: string, input: CreateEntityRequest) {
   return apiSend<SpecEntityDto>(
     "POST",
