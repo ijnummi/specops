@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 
 import { initializeSpecopsFolder } from "../init-specops.js";
+import { parseSpecMarkdown } from "../parse.js";
 import { createEntityMarkdown, initialSpecopsFiles } from "../templates.js";
 
 describe("createEntityMarkdown", () => {
@@ -28,6 +29,37 @@ links: {}
 
 Describe this domain_entity and the decisions that shape it.
 `);
+  });
+
+  it("round-trips titles containing YAML punctuation", () => {
+    const title = "Customer: Profile #1";
+    const markdown = createEntityMarkdown({
+      entityId: "domain.customer-profile",
+      type: "domain_entity",
+      title,
+      status: "draft"
+    });
+
+    const result = parseSpecMarkdown("domain/customer-profile.md", markdown);
+
+    expect(result.messages).toEqual([]);
+    expect(result.entity).toMatchObject({
+      entityId: "domain.customer-profile",
+      type: "domain_entity",
+      title,
+      status: "draft"
+    });
+  });
+
+  it("rejects multiline frontmatter scalars", () => {
+    expect(() =>
+      createEntityMarkdown({
+        entityId: "domain.customer",
+        type: "domain_entity",
+        title: "Customer\nProfile",
+        status: "draft"
+      })
+    ).toThrow(/title must be a single-line string/);
   });
 });
 

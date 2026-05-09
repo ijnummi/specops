@@ -116,6 +116,39 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("creates and indexes entities with YAML punctuation in titles", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const title = "Customer: Profile #1";
+
+    const createEntityResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/entities`,
+      payload: {
+        entityId: "domain.customer-profile",
+        type: "domain_entity",
+        title,
+        status: "draft"
+      }
+    });
+
+    expect(createEntityResponse.statusCode).toBe(201);
+    expect(createEntityResponse.json()).toMatchObject({
+      projectId: project.id,
+      entityId: "domain.customer-profile",
+      type: "domain_entity",
+      title
+    });
+
+    const getEntityResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.customer-profile`
+    });
+
+    expect(getEntityResponse.statusCode).toBe(200);
+    expect(getEntityResponse.json()).toMatchObject({ title });
+  });
+
   it("rejects entity creation when an existing parent directory symlink escapes specops", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

@@ -1,4 +1,5 @@
 import type { CreateEntityMarkdownInput, SpecopsFile } from "./types.js";
+import { stringify } from "yaml";
 
 const starterSpecs = [
   {
@@ -147,18 +148,35 @@ const templateTypes = [
 ] as const;
 
 export function createEntityMarkdown(input: CreateEntityMarkdownInput): string {
+  assertSingleLine("entityId", input.entityId);
+  assertSingleLine("type", input.type);
+  assertSingleLine("title", input.title);
+  assertSingleLine("status", input.status);
+  const frontmatter = stringify(
+    {
+      id: input.entityId,
+      type: input.type,
+      title: input.title,
+      status: input.status,
+      links: {}
+    },
+    { lineWidth: 0 }
+  ).trimEnd();
+
   return `---
-id: ${input.entityId}
-type: ${input.type}
-title: ${input.title}
-status: ${input.status}
-links: {}
+${frontmatter}
 ---
 
 # ${input.title}
 
 Describe this ${input.type} and the decisions that shape it.
 `;
+}
+
+function assertSingleLine(field: string, value: string) {
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`${field} must be a single-line string`);
+  }
 }
 
 export function initialSpecopsFiles(): SpecopsFile[] {

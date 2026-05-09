@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -9,7 +9,7 @@ import {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import { specEntities, specLinks } from "@specops/db";
-import { createEntityMarkdown } from "@specops/markdown";
+import { createEntityMarkdown, parseSpecMarkdown } from "@specops/markdown";
 import { and, asc, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
@@ -98,9 +98,10 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
     await assertSafePath("Entity markdown parent is outside specopsPath", () =>
       assertRealPathInsideDirectory(specopsPath, targetParent)
     );
+    const markdown = createValidatedEntityMarkdown(relativePath, input);
 
     try {
-      await writeFile(targetPath, createEntityMarkdown(input), { flag: "wx" });
+      await writeFile(targetPath, markdown, { flag: "wx" });
     } catch (error) {
       if (isFileExistsError(error)) {
         throw new ConflictError("Entity markdown file already exists", { filePath: relativePath });
@@ -109,9 +110,14 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
       throw error;
     }
 
-    await indexerService.indexProject(projectId);
-    const entity = await getEntity(db, projectId, input.entityId);
-    return reply.code(201).send(entity);
+    try {
+      await indexerService.indexProject(projectId);
+      const entity = await getEntity(db, projectId, input.entityId);
+      return reply.code(201).send(entity);
+    } catch (error) {
+      await unlink(targetPath).catch(() => undefined);
+      throw error;
+    }
   });
 
   app.put("/projects/:projectId/entities/:entityId/markdown", async (request) => {
@@ -168,6 +174,39 @@ async function getEntity(db: Db, projectId: string, entityId: string): Promise<S
   }
 
   return mapEntity(row);
+}
+
+function createValidatedEntityMarkdown(
+  relativePath: string,
+  input: {
+    entityId: string;
+    type: string;
+    title: string;
+    status: string;
+  }
+): string {
+  let markdown: string;
+
+  try {
+    markdown = createEntityMarkdown(input);
+  } catch (error) {
+    throw new BadRequestError("Invalid entity markdown input", {
+      cause: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  const parsed = parseSpecMarkdown(relativePath, markdown);
+  if (
+    parsed.messages.some((message) => message.level === "error") ||
+    parsed.entity?.entityId !== input.entityId ||
+    parsed.entity.title !== input.title
+  ) {
+    throw new BadRequestError("Generated entity markdown is invalid", {
+      messages: parsed.messages
+    });
+  }
+
+  return markdown;
 }
 
 function entityRelativePath(type: string, entityId: string): string {
