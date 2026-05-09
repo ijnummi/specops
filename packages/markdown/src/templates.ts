@@ -137,14 +137,215 @@ const starterSpecs = [
   }
 ] as const;
 
-const templateTypes = [
-  ["use-case.template.md", "use_case", "Use Case"],
-  ["domain-entity.template.md", "domain_entity", "Domain Entity"],
-  ["interface.template.md", "interface", "Interface"],
-  ["data-model.template.md", "data_model", "Data Model"],
-  ["ui-view.template.md", "ui_view", "UI View"],
-  ["agent-task.template.md", "agent_task", "Agent Task"],
-  ["adr.template.md", "adr", "Architecture Decision Record"]
+const templateFiles = [
+  {
+    path: "templates/use-case.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Goal
+
+Describe the outcome this use case delivers.
+
+## Actors
+
+- Primary actor
+
+## Preconditions
+
+- Required starting condition.
+
+## Main Flow
+
+1. First step.
+2. Next step.
+
+## Postconditions
+
+- Resulting state.
+
+## Validation
+
+- Important constraints or failure cases.
+`
+  },
+  {
+    path: "templates/domain-entity.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Definition
+
+Define the domain concept in one or two paragraphs.
+
+## Key Fields
+
+- \`field\`: meaning.
+
+## Rules
+
+- Invariant or business rule.
+
+## Related Behavior
+
+Describe use cases or interfaces that depend on this entity.
+`
+  },
+  {
+    path: "templates/interface.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Responsibility
+
+Describe what this interface owns.
+
+## Operations
+
+- \`operation(input)\`: result.
+
+## Inputs And Outputs
+
+Describe important request and response shapes.
+
+## Errors
+
+- Expected error or validation case.
+`
+  },
+  {
+    path: "templates/data-model.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Purpose
+
+Describe the persisted or derived data model.
+
+## Fields
+
+- \`field\`: meaning.
+
+## Relationships
+
+- Related entity or table.
+
+## Constraints
+
+- Required constraint or index.
+`
+  },
+  {
+    path: "templates/ui-view.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Purpose
+
+Describe what the view helps the user accomplish.
+
+## Primary Content
+
+- Main information shown.
+
+## Interactions
+
+- User action and expected response.
+
+## States
+
+- Empty, loading, error, and success states.
+`
+  },
+  {
+    path: "templates/agent-task.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Objective
+
+State the implementation outcome.
+
+## Context
+
+- Relevant spec entity IDs.
+
+## Requirements
+
+- Required behavior or document change.
+
+## Verification
+
+- Command or review step that proves the work is complete.
+`
+  },
+  {
+    path: "templates/adr.template.md",
+    content: `---
+id: {{id}}
+type: {{type}}
+title: {{title}}
+status: {{status}}
+links: {}
+---
+
+# {{title}}
+
+## Context
+
+Describe the forces, constraints, and alternatives.
+
+## Decision
+
+State the chosen direction.
+
+## Consequences
+
+- Expected benefit or tradeoff.
+`
+  }
 ] as const;
 
 export function createEntityMarkdown(input: CreateEntityMarkdownInput): string {
@@ -193,31 +394,8 @@ description: Local-first markdown-native workbench for specs-driven AI-assisted 
       path: spec.path,
       content: createEntityMarkdown(spec)
     })),
-    ...templateTypes.map(([fileName, type, title]) => ({
-      path: `templates/${fileName}`,
-      content: templateMarkdown(type, title)
-    }))
+    ...templateFiles
   ];
 
   return files;
-}
-
-function templateMarkdown(type: string, title: string): string {
-  return `---
-id: {{id}}
-type: {{type}}
-title: {{title}}
-status: {{status}}
-links: {}
----
-
-# {{title}}
-
-Describe this ${title.toLowerCase()}.
-
-## Notes
-
-- Replace template tokens before saving.
-- Keep markdown as the source of truth.
-`;
 }

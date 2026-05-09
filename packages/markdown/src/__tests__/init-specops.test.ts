@@ -104,6 +104,67 @@ description: Local-first markdown-native workbench for specs-driven AI-assisted 
 
     expect(adrFile?.content).toContain("id: adr.002-postgresql-derived-cache\n");
   });
+
+  it("emits type-specific starter template bodies", () => {
+    const expectedHeadingsByPath = {
+      "templates/use-case.template.md": [
+        "## Goal",
+        "## Actors",
+        "## Preconditions",
+        "## Main Flow",
+        "## Postconditions",
+        "## Validation"
+      ],
+      "templates/domain-entity.template.md": [
+        "## Definition",
+        "## Key Fields",
+        "## Rules",
+        "## Related Behavior"
+      ],
+      "templates/interface.template.md": [
+        "## Responsibility",
+        "## Operations",
+        "## Inputs And Outputs",
+        "## Errors"
+      ],
+      "templates/data-model.template.md": [
+        "## Purpose",
+        "## Fields",
+        "## Relationships",
+        "## Constraints"
+      ],
+      "templates/ui-view.template.md": [
+        "## Purpose",
+        "## Primary Content",
+        "## Interactions",
+        "## States"
+      ],
+      "templates/agent-task.template.md": [
+        "## Objective",
+        "## Context",
+        "## Requirements",
+        "## Verification"
+      ],
+      "templates/adr.template.md": [
+        "## Context",
+        "## Decision",
+        "## Consequences"
+      ]
+    };
+
+    const files = new Map(
+      initialSpecopsFiles().map((file) => [file.path, file.content])
+    );
+
+    for (const [path, headings] of Object.entries(expectedHeadingsByPath)) {
+      const content = files.get(path);
+      expect(content, path).toContain("id: {{id}}");
+      expect(content, path).not.toContain("## Notes");
+      for (const heading of headings) {
+        expect(content, path).toContain(heading);
+      }
+    }
+  });
 });
 
 describe("initializeSpecopsFolder", () => {
