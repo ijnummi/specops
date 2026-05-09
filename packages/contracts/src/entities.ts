@@ -8,7 +8,7 @@ export const specEntitySchema = z.object({
   title: z.string(),
   status: z.string(),
   filePath: z.string(),
-  frontmatter: z.record(z.unknown()),
+  frontmatter: z.record(z.string(), z.unknown()),
   bodyMarkdown: z.string(),
   bodyText: z.string(),
   contentHash: z.string(),

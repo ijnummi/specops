@@ -10,7 +10,11 @@ export const indexRunSchema = z.object({
   linkCount: z.number(),
   errorCount: z.number(),
   warningCount: z.number(),
-  gitCommit: z.string().nullable()
+  gitCommit: z.string().nullable(),
+  sourceFileCount: z.number().optional(),
+  sourceImportCount: z.number().optional(),
+  sourceExportCount: z.number().optional(),
+  sourceSymbolCount: z.number().optional()
 });
 
 export type IndexRunDto = z.infer<typeof indexRunSchema>;
