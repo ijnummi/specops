@@ -351,6 +351,60 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it("refreshes source files and facts during project indexing", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "math.ts"),
+      "import { strict as assert } from 'node:assert';\n" +
+        "export function add(left: number, right: number) {\n" +
+        "  assert.ok(true);\n" +
+        "  return left + right;\n" +
+        "}\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sourceFileCount: 1,
+      sourceImportCount: 1,
+      sourceExportCount: 1,
+      sourceSymbolCount: 1
+    });
+  });
+
+  it("persists source parse warnings as validation messages during project indexing", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(project.repoPath, "src", "broken.ts"), "export function broken(\n");
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const messagesResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/validation-messages`
+    });
+
+    expect(messagesResponse.statusCode).toBe(200);
+    expect(messagesResponse.json()).toContainEqual(
+      expect.objectContaining({
+        code: "source_parse_error",
+        filePath: "src/broken.ts",
+        level: "warning"
+      })
+    );
+  });
+
   it("previews an agent task with one-hop context", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);

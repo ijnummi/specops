@@ -42,6 +42,10 @@ function mapIndexRun(row: typeof indexRuns.$inferSelect): IndexRunDto {
     linkCount: row.linkCount,
     errorCount: row.errorCount,
     warningCount: row.warningCount,
-    gitCommit: row.gitCommit
+    gitCommit: row.gitCommit,
+    sourceFileCount: row.sourceFileCount,
+    sourceImportCount: row.sourceImportCount,
+    sourceExportCount: row.sourceExportCount,
+    sourceSymbolCount: row.sourceSymbolCount
   };
 }

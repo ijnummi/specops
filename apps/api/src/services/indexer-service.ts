@@ -16,6 +16,7 @@ import {
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
 import { createProjectService } from "./project-service.js";
+import { createSourceScanService } from "./source-scan-service.js";
 
 type IndexedFile = {
   path: string;
@@ -176,6 +177,12 @@ export function createIndexerService(db: Db) {
             );
           }
 
+          const sourceCounts = await createSourceScanService(tx).scanAndPersistProject({
+            projectId,
+            repoPath,
+            indexRunId: startedRun.id
+          });
+
           return tx
             .update(indexRuns)
             .set({
@@ -184,7 +191,11 @@ export function createIndexerService(db: Db) {
               entityCount: entities.length,
               linkCount: links.length,
               errorCount,
-              warningCount
+              warningCount: warningCount + sourceCounts.warningCount,
+              sourceFileCount: sourceCounts.sourceFileCount,
+              sourceImportCount: sourceCounts.sourceImportCount,
+              sourceExportCount: sourceCounts.sourceExportCount,
+              sourceSymbolCount: sourceCounts.sourceSymbolCount
             })
             .where(eq(indexRuns.id, startedRun.id))
             .returning();
@@ -217,7 +228,11 @@ function mapIndexRun(row: typeof indexRuns.$inferSelect): IndexRunDto {
     linkCount: row.linkCount,
     errorCount: row.errorCount,
     warningCount: row.warningCount,
-    gitCommit: row.gitCommit
+    gitCommit: row.gitCommit,
+    sourceFileCount: row.sourceFileCount,
+    sourceImportCount: row.sourceImportCount,
+    sourceExportCount: row.sourceExportCount,
+    sourceSymbolCount: row.sourceSymbolCount
   };
 }
 

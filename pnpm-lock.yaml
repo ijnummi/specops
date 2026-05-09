@@ -44,6 +44,9 @@ importers:
       '@specops/markdown':
         specifier: workspace:*
         version: link:../../packages/markdown
+      '@specops/repo-scanner':
+        specifier: workspace:*
+        version: link:../../packages/repo-scanner
       '@specops/taskgen':
         specifier: workspace:*
         version: link:../../packages/taskgen
