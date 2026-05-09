@@ -1,5 +1,6 @@
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
+import { EditorView } from "@codemirror/view";
 
 type MarkdownEditorProps = {
   value: string;
@@ -8,6 +9,25 @@ type MarkdownEditorProps = {
   className?: string;
   onChange: (value: string) => void;
 };
+
+export const markdownEditorExtensions = [
+  markdown(),
+  EditorView.lineWrapping,
+  EditorView.theme({
+    ".cm-content": {
+      overflowWrap: "anywhere"
+    },
+    ".cmt-heading, .cmt-strong, .cmt-meta, .cmt-keyword": {
+      fontWeight: "400"
+    },
+    ".cmt-link, .cmt-url, .cmt-meta": {
+      textDecoration: "none"
+    },
+    ".cmt-meta": {
+      color: "#475569"
+    }
+  })
+];
 
 export function MarkdownEditor({
   value,
@@ -22,7 +42,7 @@ export function MarkdownEditor({
       height={height}
       minHeight={minHeight}
       className={className}
-      extensions={[markdown()]}
+      extensions={markdownEditorExtensions}
       basicSetup={{
         lineNumbers: true,
         foldGutter: true,
