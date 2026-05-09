@@ -181,4 +181,90 @@ describe("parseSourceFacts", () => {
       sourceSpecifier: null
     });
   });
+
+  it("extracts specops annotations from leading JSDoc", () => {
+    const result = parseSourceFacts({
+      path: "src/decision.ts",
+      content:
+        "/**\n" +
+        " * Domain decision record.\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision { id: string }\n"
+    });
+
+    expect(result.symbols).toContainEqual(
+      expect.objectContaining({
+        name: "Decision",
+        specopsAnnotations: [
+          {
+            entityId: "domain.decision",
+            line: 3
+          }
+        ]
+      })
+    );
+  });
+
+  it("extracts multiple specops annotations on one declaration", () => {
+    const result = parseSourceFacts({
+      path: "src/decision-service.ts",
+      content:
+        "/**\n" +
+        " * @specops interface.decision-service\n" +
+        " * @specops uc.create-decision\n" +
+        " */\n" +
+        "export class DecisionService {}\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "DecisionService")).toMatchObject({
+      specopsAnnotations: [
+        { entityId: "interface.decision-service", line: 2 },
+        { entityId: "uc.create-decision", line: 3 }
+      ]
+    });
+  });
+
+  it("ignores unrelated leading comments", () => {
+    const result = parseSourceFacts({
+      path: "src/workspace.ts",
+      content:
+        "// specops: domain.workspace\n" +
+        "/** not a specops tag */\n" +
+        "export type Workspace = { id: string }\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "Workspace")).toMatchObject({ specopsAnnotations: [] });
+  });
+
+  it("keeps empty specops annotations for API validation", () => {
+    const result = parseSourceFacts({
+      path: "src/broken-annotation.ts",
+      content:
+        "/**\n" +
+        " * @specops\n" +
+        " */\n" +
+        "export interface BrokenAnnotation { id: string }\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "BrokenAnnotation")).toMatchObject({
+      specopsAnnotations: [{ entityId: "", line: 2 }]
+    });
+  });
+
+  it("warns when a specops JSDoc tag is not attached to a symbol declaration", () => {
+    const result = parseSourceFacts({
+      path: "src/barrel.ts",
+      content:
+        "/** @specops domain.decision */\n" +
+        "export { Decision } from './decision';\n"
+    });
+
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_unresolved_symbol",
+        filePath: "src/barrel.ts"
+      })
+    );
+  });
 });

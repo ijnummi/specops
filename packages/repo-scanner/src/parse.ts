@@ -33,6 +33,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
       imports.push(parseImportDeclaration(statement));
+      warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
@@ -40,6 +41,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
       const reExportImport = parseReExportImportDeclaration(statement);
       if (reExportImport) imports.push(reExportImport);
       exports.push(...parseExportDeclaration(statement));
+      warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
@@ -54,6 +56,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
 
     if (ts.isFunctionDeclaration(statement)) {
       if (hasDefaultModifier(statement)) exports.push(defaultExport());
+      warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
@@ -68,6 +71,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
 
     if (ts.isClassDeclaration(statement)) {
       if (hasDefaultModifier(statement)) exports.push(defaultExport());
+      warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
@@ -105,7 +109,11 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
 
     if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
       exports.push(defaultExport());
+      warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
+      continue;
     }
+
+    warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
   }
 
   return { imports, exports, symbols, warnings };
@@ -248,8 +256,49 @@ function symbolFact(
     symbolKind,
     isExported,
     line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
-    metadata: {}
+    metadata: {},
+    specopsAnnotations: readSpecopsAnnotations(sourceFile, node)
   };
+}
+
+function readSpecopsAnnotations(
+  sourceFile: ts.SourceFile,
+  node: ts.Node
+): SourceSymbolFact["specopsAnnotations"] {
+  const fullText = sourceFile.getFullText();
+  const ranges = jsDocCommentRanges(node, fullText);
+  const annotations: SourceSymbolFact["specopsAnnotations"] = [];
+
+  for (const range of ranges) {
+    const text = fullText.slice(range.pos, range.end);
+    const startLine = sourceFile.getLineAndCharacterOfPosition(range.pos).line + 1;
+    const lines = text.split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = /@specops(?:\s+([^\s*]+))?/.exec(lines[index] ?? "");
+      if (!match) continue;
+      annotations.push({
+        entityId: match[1]?.trim() ?? "",
+        line: startLine + index
+      });
+    }
+  }
+
+  return annotations;
+}
+
+function jsDocCommentRanges(node: ts.Node, fullText: string): ts.CommentRange[] {
+  return (ts.getLeadingCommentRanges(fullText, node.pos) ?? []).filter((range) =>
+    fullText.startsWith("/**", range.pos)
+  );
+}
+
+function unresolvedSpecopsWarnings(sourceFile: ts.SourceFile, node: ts.Node): SourceScanWarning[] {
+  return readSpecopsAnnotations(sourceFile, node).map((annotation) => ({
+    code: "source_spec_unresolved_symbol",
+    filePath: sourceFile.fileName,
+    message: `Source annotation "${annotation.entityId || "@specops"}" is not attached to a supported top-level symbol.`
+  }));
 }
 
 function variableSymbolKind(name: string, declaration: ts.VariableDeclaration): string {

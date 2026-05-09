@@ -15,16 +15,22 @@ export type SourceExportFact = {
   sourceSpecifier: string | null;
 };
 
+export type SourceSpecopsAnnotationFact = {
+  entityId: string;
+  line: number | null;
+};
+
 export type SourceSymbolFact = {
   name: string;
   symbolKind: string;
   isExported: boolean;
   line: number | null;
   metadata: Record<string, unknown>;
+  specopsAnnotations: SourceSpecopsAnnotationFact[];
 };
 
 export type SourceScanWarning = {
-  code: "source_parse_error" | "source_read_error";
+  code: "source_parse_error" | "source_read_error" | "source_spec_unresolved_symbol";
   message: string;
   filePath: string;
 };
