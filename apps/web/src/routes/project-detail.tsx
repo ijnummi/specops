@@ -12,6 +12,15 @@ import {
   reindexProject,
   validationMessagesQuery
 } from "../api/queries.js";
+import {
+  entityDraftKey,
+  getDraft,
+  isDraftDirty,
+  saveDraft,
+  syncFetchedMarkdown,
+  updateDraft,
+  type EntityDrafts
+} from "../components/entity-drafts.js";
 import { EntityCreateForm } from "../components/entity-create-form.js";
 import { EntityDetail } from "../components/entity-detail.js";
 import { EntityList } from "../components/entity-list.js";
@@ -27,7 +36,7 @@ type ProjectDetailPageProps = {
 export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailPageProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [isEditorDirty, setIsEditorDirty] = useState(false);
+  const [entityDrafts, setEntityDrafts] = useState<EntityDrafts>({});
   const project = useQuery(projectQuery(projectId));
   const [entities, validation, indexRuns] = useQueries({
     queries: [
@@ -53,6 +62,9 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   }, [entities.data, normalizedQuery]);
 
   const selectedEntityId = entityId ?? filteredEntities[0]?.entityId ?? null;
+  const selectedDraftKey = selectedEntityId ? entityDraftKey(projectId, selectedEntityId) : null;
+  const selectedDraft = selectedDraftKey ? getDraft(entityDrafts, selectedDraftKey) : null;
+  const isEditorDirty = isDraftDirty(selectedDraft);
   const selectedValidation = (validation.data ?? []).filter(
     (message) => !selectedEntityId || message.entityId === selectedEntityId || message.entityId === null
   );
@@ -65,6 +77,41 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
 
     return window.confirm("Discard unsaved editor changes?");
   }, [isEditorDirty]);
+
+  const syncSelectedFetchedMarkdown = useCallback(
+    (fetchedMarkdown: string) => {
+      if (!selectedDraftKey) {
+        return;
+      }
+
+      setEntityDrafts((drafts) =>
+        syncFetchedMarkdown(drafts, selectedDraftKey, fetchedMarkdown)
+      );
+    },
+    [selectedDraftKey]
+  );
+
+  const updateSelectedDraft = useCallback(
+    (markdown: string) => {
+      if (!selectedDraftKey) {
+        return;
+      }
+
+      setEntityDrafts((drafts) => updateDraft(drafts, selectedDraftKey, markdown));
+    },
+    [selectedDraftKey]
+  );
+
+  const saveSelectedDraft = useCallback(
+    (markdown: string) => {
+      if (!selectedDraftKey) {
+        return;
+      }
+
+      setEntityDrafts((drafts) => saveDraft(drafts, selectedDraftKey, markdown));
+    },
+    [selectedDraftKey]
+  );
 
   const invalidateProject = async () => {
     await Promise.all([
@@ -184,7 +231,10 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
         <EntityDetail
           projectId={projectId}
           entityId={selectedEntityId}
-          onDirtyChange={setIsEditorDirty}
+          draft={selectedDraft}
+          onFetchedMarkdown={syncSelectedFetchedMarkdown}
+          onDraftChange={updateSelectedDraft}
+          onSaveDraft={saveSelectedDraft}
         />
       ) : entities.isLoading ? (
         <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">

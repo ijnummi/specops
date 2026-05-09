@@ -10,6 +10,8 @@ import {
   updateEntityMarkdown,
   validationMessagesQuery
 } from "../api/queries.js";
+import type { EntityDraft } from "./entity-drafts.js";
+import { isDraftDirty } from "./entity-drafts.js";
 import { validateEntityMarkdownIdentity } from "./entity-markdown.js";
 import { LinkPanels } from "./link-panels.js";
 import { MarkdownEditor } from "./markdown-editor.js";
@@ -17,25 +19,24 @@ import { MarkdownEditor } from "./markdown-editor.js";
 type EntityDetailProps = {
   projectId: string;
   entityId: string;
-  onDirtyChange?: (isDirty: boolean) => void;
+  draft: EntityDraft | null;
+  onFetchedMarkdown: (markdown: string) => void;
+  onDraftChange: (markdown: string) => void;
+  onSaveDraft: (markdown: string) => void;
 };
 
-type EditorState = {
-  entityId: string;
-  markdown: string;
-  savedMarkdown: string;
-};
-
-export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetailProps) {
+export function EntityDetail({
+  projectId,
+  entityId,
+  draft,
+  onFetchedMarkdown,
+  onDraftChange,
+  onSaveDraft
+}: EntityDetailProps) {
   const queryClient = useQueryClient();
   const entity = useQuery(entityQuery(projectId, entityId));
   const [outgoing, backlinks] = useQueries({
     queries: [outgoingLinksQuery(projectId, entityId), backlinksQuery(projectId, entityId)]
-  });
-  const [editorState, setEditorState] = useState<EditorState>({
-    entityId: "",
-    markdown: "",
-    savedMarkdown: ""
   });
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -43,51 +44,18 @@ export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetai
     () => (entity.data ? entityToMarkdown(entity.data.frontmatter, entity.data.bodyMarkdown) : ""),
     [entity.data]
   );
-  const isDirty = editorState.markdown !== editorState.savedMarkdown;
+  const editorMarkdown = draft?.markdown ?? documentMarkdown;
+  const isDirty = isDraftDirty(draft);
 
   useEffect(() => {
     setSaveError(null);
   }, [entityId]);
 
   useEffect(() => {
-    if (!entity.data) {
-      return;
+    if (entity.data) {
+      onFetchedMarkdown(documentMarkdown);
     }
-
-    setEditorState((current) => {
-      const selectedEntityChanged = current.entityId !== entityId;
-      const currentIsDirty = current.markdown !== current.savedMarkdown;
-
-      if (selectedEntityChanged) {
-        return {
-          entityId,
-          markdown: documentMarkdown,
-          savedMarkdown: documentMarkdown
-        };
-      }
-
-      if (!currentIsDirty) {
-        return {
-          entityId,
-          markdown: documentMarkdown,
-          savedMarkdown: documentMarkdown
-        };
-      }
-
-      return current;
-    });
-  }, [documentMarkdown, entity.data, entityId]);
-
-  useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
-
-  useEffect(
-    () => () => {
-      onDirtyChange?.(false);
-    },
-    [onDirtyChange]
-  );
+  }, [documentMarkdown, entity.data, onFetchedMarkdown]);
 
   const mutation = useMutation({
     mutationFn: (markdownToSave: string) =>
@@ -95,11 +63,7 @@ export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetai
     onSuccess: async (savedEntity) => {
       const savedMarkdown = entityToMarkdown(savedEntity.frontmatter, savedEntity.bodyMarkdown);
       setSaveError(null);
-      setEditorState({
-        entityId,
-        markdown: savedMarkdown,
-        savedMarkdown
-      });
+      onSaveDraft(savedMarkdown);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.entity(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
@@ -113,7 +77,7 @@ export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetai
   });
 
   function handleSave() {
-    const validation = validateEntityMarkdownIdentity(editorState.markdown, entityId);
+    const validation = validateEntityMarkdownIdentity(editorMarkdown, entityId);
 
     if (!validation.ok) {
       setSaveError(validation.message);
@@ -121,7 +85,7 @@ export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetai
     }
 
     setSaveError(null);
-    mutation.mutate(editorState.markdown);
+    mutation.mutate(editorMarkdown);
   }
 
   if (entity.isLoading) {
@@ -173,10 +137,10 @@ export function EntityDetail({ projectId, entityId, onDirtyChange }: EntityDetai
           </div>
         </div>
         <MarkdownEditor
-          value={editorState.markdown}
+          value={editorMarkdown}
           onChange={(value) => {
             setSaveError(null);
-            setEditorState((current) => ({ ...current, markdown: value }));
+            onDraftChange(value);
           }}
         />
       </section>

@@ -1,3 +1,5 @@
+import { isMap, parseDocument, type Scalar, type YAMLMap } from "yaml";
+
 export type EntityMarkdownIdentityResult =
   | { ok: true; id: string }
   | { ok: false; message: string };
@@ -12,14 +14,28 @@ export function validateEntityMarkdownIdentity(
     return { ok: false, message: frontmatter.message };
   }
 
-  const syntaxError = findMalformedFrontmatterLine(frontmatter.value);
-  if (syntaxError) {
-    return { ok: false, message: syntaxError };
+  const document = parseDocument(frontmatter.value, { uniqueKeys: true });
+  if (document.errors.length > 0) {
+    const hasDuplicateKey = document.errors.some((error) => /duplicate|unique/i.test(error.message));
+    return {
+      ok: false,
+      message: hasDuplicateKey
+        ? "Frontmatter contains duplicate keys."
+        : "Frontmatter YAML is malformed."
+    };
   }
 
-  const id = readScalar(frontmatter.value, "id");
-  if (!id) {
+  if (!document.contents || !isMap(document.contents)) {
+    return { ok: false, message: "Frontmatter must be a mapping." };
+  }
+
+  const id = readStringKey(document.contents, "id");
+  if (id === undefined) {
     return { ok: false, message: "Frontmatter must include an id." };
+  }
+
+  if (id === null) {
+    return { ok: false, message: "Frontmatter id must be a string." };
   }
 
   if (id !== expectedEntityId) {
@@ -30,21 +46,6 @@ export function validateEntityMarkdownIdentity(
   }
 
   return { ok: true, id };
-}
-
-function findMalformedFrontmatterLine(frontmatter: string): string | null {
-  for (const line of frontmatter.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed === "---") {
-      continue;
-    }
-
-    if (!trimmed.includes(":")) {
-      return `Malformed frontmatter near: ${trimmed}`;
-    }
-  }
-
-  return null;
 }
 
 function extractFrontmatter(markdown: string): { ok: true; value: string } | { ok: false; message: string } {
@@ -65,41 +66,16 @@ function extractFrontmatter(markdown: string): { ok: true; value: string } | { o
   return { ok: true, value: normalized.slice(4, closingIndex) };
 }
 
-function readScalar(frontmatter: string, key: string): string | null {
-  for (const line of frontmatter.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
+function readStringKey(map: YAMLMap, key: string): string | null | undefined {
+  const pair = map.items.find((item) => {
+    const itemKey = item.key as Scalar | null;
+    return itemKey?.value === key;
+  });
 
-    const separatorIndex = trimmed.indexOf(":");
-    if (separatorIndex === -1) {
-      return null;
-    }
-
-    const name = trimmed.slice(0, separatorIndex).trim();
-    if (name !== key) {
-      continue;
-    }
-
-    const value = trimmed.slice(separatorIndex + 1).trim();
-    if (!value || value.startsWith("[") || value.startsWith("{")) {
-      return null;
-    }
-
-    return unquote(value);
+  if (!pair) {
+    return undefined;
   }
 
-  return null;
-}
-
-function unquote(value: string): string {
-  if (
-    (value.startsWith("\"") && value.endsWith("\"")) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
+  const value = (pair.value as Scalar | null)?.value;
+  return typeof value === "string" ? value : null;
 }

@@ -41,7 +41,45 @@ describe("validateEntityMarkdownIdentity", () => {
       )
     ).toEqual({
       ok: false,
-      message: "Malformed frontmatter near: id uc.create-project"
+      message: "Frontmatter YAML is malformed."
+    });
+  });
+
+  it("rejects malformed nested YAML", () => {
+    expect(
+      validateEntityMarkdownIdentity(
+        "---\nid: uc.create-project\nlinks:\n  related: [uc.other\n---\n",
+        "uc.create-project"
+      )
+    ).toEqual({
+      ok: false,
+      message: "Frontmatter YAML is malformed."
+    });
+  });
+
+  it("rejects duplicate id keys", () => {
+    expect(
+      validateEntityMarkdownIdentity(
+        "---\nid: uc.create-project\nid: uc.other\n---\n",
+        "uc.create-project"
+      )
+    ).toEqual({
+      ok: false,
+      message: "Frontmatter contains duplicate keys."
+    });
+  });
+
+  it("rejects non-object frontmatter", () => {
+    expect(validateEntityMarkdownIdentity("---\n- id: uc.create-project\n---\n", "uc.create-project")).toEqual({
+      ok: false,
+      message: "Frontmatter must be a mapping."
+    });
+  });
+
+  it("rejects non-string id", () => {
+    expect(validateEntityMarkdownIdentity("---\nid: 123\n---\n", "uc.create-project")).toEqual({
+      ok: false,
+      message: "Frontmatter id must be a string."
     });
   });
 });
