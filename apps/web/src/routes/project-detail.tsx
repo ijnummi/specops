@@ -136,6 +136,8 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     mutationFn: () => bootstrapFromSource(projectId),
     onSuccess: invalidateProject
   });
+  const isProjectActionPending =
+    initializeMutation.isPending || bootstrapMutation.isPending || indexMutation.isPending;
 
   return (
     <WorkbenchLayout
@@ -146,6 +148,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           isInitializing={initializeMutation.isPending}
           isBootstrapping={bootstrapMutation.isPending}
           isIndexing={indexMutation.isPending}
+          isProjectActionPending={isProjectActionPending}
           onInitialize={() => initializeMutation.mutate()}
           onBootstrap={() => bootstrapMutation.mutate()}
           onReindex={() => indexMutation.mutate()}

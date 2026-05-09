@@ -10,6 +10,7 @@ describe("ProjectActions", () => {
         isInitializing={false}
         isBootstrapping={false}
         isIndexing={false}
+        isProjectActionPending={false}
         onInitialize={() => undefined}
         onBootstrap={() => undefined}
         onReindex={() => undefined}
@@ -27,6 +28,7 @@ describe("ProjectActions", () => {
         isInitializing={false}
         isBootstrapping={true}
         isIndexing={false}
+        isProjectActionPending={true}
         onInitialize={() => undefined}
         onBootstrap={() => undefined}
         onReindex={() => undefined}
@@ -35,5 +37,23 @@ describe("ProjectActions", () => {
 
     expect(html).toContain("Bootstrap from source");
     expect(html).toContain('disabled=""');
+  });
+
+  it("disables all project actions while any project action is pending", () => {
+    const html = renderToStaticMarkup(
+      <ProjectActions
+        isInitializing={false}
+        isBootstrapping={true}
+        isIndexing={false}
+        isProjectActionPending={true}
+        onInitialize={() => undefined}
+        onBootstrap={() => undefined}
+        onReindex={() => undefined}
+      />
+    );
+
+    expect(html.match(/disabled=""/g)).toHaveLength(3);
+    expect(html).toContain("Bootstrap from source");
+    expect(html).toContain("animate-spin");
   });
 });

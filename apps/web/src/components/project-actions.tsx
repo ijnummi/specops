@@ -4,6 +4,7 @@ export type ProjectActionsProps = {
   isInitializing: boolean;
   isBootstrapping: boolean;
   isIndexing: boolean;
+  isProjectActionPending: boolean;
   onInitialize: () => void;
   onBootstrap: () => void;
   onReindex: () => void;
@@ -13,6 +14,7 @@ export function ProjectActions({
   isInitializing,
   isBootstrapping,
   isIndexing,
+  isProjectActionPending,
   onInitialize,
   onBootstrap,
   onReindex
@@ -22,7 +24,7 @@ export function ProjectActions({
       <button
         type="button"
         className="button-secondary"
-        disabled={isInitializing}
+        disabled={isProjectActionPending}
         onClick={onInitialize}
       >
         <FolderSync className="h-4 w-4" aria-hidden="true" />
@@ -31,7 +33,7 @@ export function ProjectActions({
       <button
         type="button"
         className="button-secondary"
-        disabled={isBootstrapping}
+        disabled={isProjectActionPending}
         onClick={onBootstrap}
       >
         {isBootstrapping ? (
@@ -41,7 +43,12 @@ export function ProjectActions({
         )}
         Bootstrap from source
       </button>
-      <button type="button" className="button-primary" disabled={isIndexing} onClick={onReindex}>
+      <button
+        type="button"
+        className="button-primary"
+        disabled={isProjectActionPending}
+        onClick={onReindex}
+      >
         {isIndexing ? (
           <RotateCw className="h-4 w-4 animate-spin" aria-hidden="true" />
         ) : (
