@@ -11,17 +11,19 @@ type MarkdownEditorProps = {
   onChange: (value: string) => void;
 };
 
-const frontmatterLineDecoration = Decoration.line({ class: "cm-frontmatter-line" });
+const yamlFrontmatterBlockLineDecoration = Decoration.line({
+  class: "cm-yaml-frontmatter-block-line"
+});
 
-export function buildFrontmatterLineDecorations(doc: Text): DecorationSet {
+export function buildYamlFrontmatterBlockDecorations(doc: Text): DecorationSet {
   if (doc.lines < 2 || doc.line(1).text.trim() !== "---") {
     return Decoration.none;
   }
 
-  const ranges = [frontmatterLineDecoration.range(doc.line(1).from)];
+  const ranges = [yamlFrontmatterBlockLineDecoration.range(doc.line(1).from)];
   for (let lineNumber = 2; lineNumber <= doc.lines; lineNumber += 1) {
     const line = doc.line(lineNumber);
-    ranges.push(frontmatterLineDecoration.range(line.from));
+    ranges.push(yamlFrontmatterBlockLineDecoration.range(line.from));
     if (line.text.trim() === "---") {
       return Decoration.set(ranges, true);
     }
@@ -30,13 +32,13 @@ export function buildFrontmatterLineDecorations(doc: Text): DecorationSet {
   return Decoration.none;
 }
 
-const frontmatterLineField = StateField.define<DecorationSet>({
+const yamlFrontmatterBlockField = StateField.define<DecorationSet>({
   create(state) {
-    return buildFrontmatterLineDecorations(state.doc);
+    return buildYamlFrontmatterBlockDecorations(state.doc);
   },
   update(decorations, transaction) {
     if (transaction.docChanged) {
-      return buildFrontmatterLineDecorations(transaction.state.doc);
+      return buildYamlFrontmatterBlockDecorations(transaction.state.doc);
     }
     return decorations.map(transaction.changes);
   },
@@ -45,11 +47,11 @@ const frontmatterLineField = StateField.define<DecorationSet>({
   }
 });
 
-const frontmatterTheme = EditorView.theme({
+const yamlFrontmatterBlockTheme = EditorView.theme({
   ".cm-content": {
     overflowWrap: "anywhere"
   },
-  ".cm-frontmatter-line span": {
+  ".cm-yaml-frontmatter-block-line span": {
     fontWeight: "400",
     textDecoration: "none",
     color: "#334155"
@@ -59,8 +61,8 @@ const frontmatterTheme = EditorView.theme({
 export const markdownEditorExtensions = [
   markdown(),
   EditorView.lineWrapping,
-  frontmatterLineField,
-  frontmatterTheme
+  yamlFrontmatterBlockField,
+  yamlFrontmatterBlockTheme
 ] satisfies Extension[];
 
 export function MarkdownEditor({

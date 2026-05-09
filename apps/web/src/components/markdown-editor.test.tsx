@@ -3,7 +3,7 @@ import { Text } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  buildFrontmatterLineDecorations,
+  buildYamlFrontmatterBlockDecorations,
   MarkdownEditor,
   markdownEditorExtensions
 } from "./markdown-editor.js";
@@ -55,8 +55,8 @@ describe("MarkdownEditor", () => {
     expect(html).toContain('data-extension-count="4"');
   });
 
-  it("marks only the opening frontmatter block for calmer styling", () => {
-    const decorations = buildFrontmatterLineDecorations(
+  it("marks only the opening YAML frontmatter block for calmer styling", () => {
+    const decorations = buildYamlFrontmatterBlockDecorations(
       Text.of(["---", "id: domain.decision", "---", "", "# Decision"])
     );
 
