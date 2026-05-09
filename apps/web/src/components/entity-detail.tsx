@@ -12,6 +12,7 @@ import {
 } from "../api/queries.js";
 import type { EntityDraft } from "./entity-drafts.js";
 import { isDraftDirty } from "./entity-drafts.js";
+import { entityMarkdownForEditing } from "./entity-editor-markdown.js";
 import { validateEntityMarkdownIdentity } from "./entity-markdown.js";
 import { LinkPanels } from "./link-panels.js";
 import { MarkdownEditor } from "./markdown-editor.js";
@@ -20,9 +21,9 @@ type EntityDetailProps = {
   projectId: string;
   entityId: string;
   draft: EntityDraft | null;
-  onFetchedMarkdown: (markdown: string) => void;
+  onFetchedMarkdown: (markdown: string, contentHash: string) => void;
   onDraftChange: (markdown: string) => void;
-  onSaveDraft: (markdown: string) => void;
+  onSaveDraft: (markdown: string, contentHash: string) => void;
 };
 
 export function EntityDetail({
@@ -41,7 +42,7 @@ export function EntityDetail({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const documentMarkdown = useMemo(
-    () => (entity.data ? entityToMarkdown(entity.data.frontmatter, entity.data.bodyMarkdown) : ""),
+    () => (entity.data ? entityMarkdownForEditing(entity.data) : ""),
     [entity.data]
   );
   const editorMarkdown = draft?.markdown ?? documentMarkdown;
@@ -53,17 +54,22 @@ export function EntityDetail({
 
   useEffect(() => {
     if (entity.data) {
-      onFetchedMarkdown(documentMarkdown);
+      onFetchedMarkdown(documentMarkdown, entity.data.contentHash);
     }
   }, [documentMarkdown, entity.data, onFetchedMarkdown]);
 
   const mutation = useMutation({
     mutationFn: (markdownToSave: string) =>
-      updateEntityMarkdown(projectId, entityId, markdownToSave),
+      updateEntityMarkdown(
+        projectId,
+        entityId,
+        markdownToSave,
+        draft?.baseContentHash ?? entity.data?.contentHash ?? ""
+      ),
     onSuccess: async (savedEntity) => {
-      const savedMarkdown = entityToMarkdown(savedEntity.frontmatter, savedEntity.bodyMarkdown);
+      const savedMarkdown = entityMarkdownForEditing(savedEntity);
       setSaveError(null);
-      onSaveDraft(savedMarkdown);
+      onSaveDraft(savedMarkdown, savedEntity.contentHash);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.entity(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
@@ -174,28 +180,4 @@ function EntityValidation({ projectId, entityId }: { projectId: string; entityId
       </ul>
     </section>
   );
-}
-
-function entityToMarkdown(frontmatter: Record<string, unknown>, bodyMarkdown: string) {
-  return `---\n${stringifyFrontmatter(frontmatter)}---\n\n${bodyMarkdown}`;
-}
-
-function stringifyFrontmatter(frontmatter: Record<string, unknown>) {
-  return Object.entries(frontmatter)
-    .map(([key, value]) => `${key}: ${formatYamlValue(value)}`)
-    .join("\n")
-    .concat("\n");
-}
-
-function formatYamlValue(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  return JSON.stringify(value ?? {});
 }

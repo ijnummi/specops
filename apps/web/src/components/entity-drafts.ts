@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 export type EntityDraft = {
   markdown: string;
   savedMarkdown: string;
+  baseContentHash: string;
 };
 
 export type EntityDrafts = Record<string, EntityDraft>;
@@ -63,14 +64,19 @@ export function isDraftDirty(draft: EntityDraft | null): boolean {
 export function syncFetchedMarkdown(
   drafts: EntityDrafts,
   key: string,
-  fetchedMarkdown: string
+  fetchedMarkdown: string,
+  contentHash: string
 ): EntityDrafts {
   const current = drafts[key];
   if (isDraftDirty(current ?? null)) {
     return drafts;
   }
 
-  if (current?.markdown === fetchedMarkdown && current.savedMarkdown === fetchedMarkdown) {
+  if (
+    current?.markdown === fetchedMarkdown &&
+    current.savedMarkdown === fetchedMarkdown &&
+    current.baseContentHash === contentHash
+  ) {
     return drafts;
   }
 
@@ -78,13 +84,14 @@ export function syncFetchedMarkdown(
     ...drafts,
     [key]: {
       markdown: fetchedMarkdown,
-      savedMarkdown: fetchedMarkdown
+      savedMarkdown: fetchedMarkdown,
+      baseContentHash: contentHash
     }
   };
 }
 
 export function updateDraft(drafts: EntityDrafts, key: string, markdown: string): EntityDrafts {
-  const current = drafts[key] ?? { markdown: "", savedMarkdown: "" };
+  const current = drafts[key] ?? { markdown: "", savedMarkdown: "", baseContentHash: "" };
 
   return {
     ...drafts,
@@ -95,12 +102,18 @@ export function updateDraft(drafts: EntityDrafts, key: string, markdown: string)
   };
 }
 
-export function saveDraft(drafts: EntityDrafts, key: string, savedMarkdown: string): EntityDrafts {
+export function saveDraft(
+  drafts: EntityDrafts,
+  key: string,
+  savedMarkdown: string,
+  contentHash: string
+): EntityDrafts {
   return {
     ...drafts,
     [key]: {
       markdown: savedMarkdown,
-      savedMarkdown
+      savedMarkdown,
+      baseContentHash: contentHash
     }
   };
 }

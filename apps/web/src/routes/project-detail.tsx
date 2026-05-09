@@ -80,13 +80,13 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   }, [isEditorDirty]);
 
   const syncSelectedFetchedMarkdown = useCallback(
-    (fetchedMarkdown: string) => {
+    (fetchedMarkdown: string, contentHash: string) => {
       if (!selectedDraftKey) {
         return;
       }
 
       setEntityDrafts((drafts) =>
-        syncFetchedMarkdown(drafts, selectedDraftKey, fetchedMarkdown)
+        syncFetchedMarkdown(drafts, selectedDraftKey, fetchedMarkdown, contentHash)
       );
     },
     [selectedDraftKey]
@@ -104,12 +104,12 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   );
 
   const saveSelectedDraft = useCallback(
-    (markdown: string) => {
+    (markdown: string, contentHash: string) => {
       if (!selectedDraftKey) {
         return;
       }
 
-      setEntityDrafts((drafts) => saveDraft(drafts, selectedDraftKey, markdown));
+      setEntityDrafts((drafts) => saveDraft(drafts, selectedDraftKey, markdown, contentHash));
     },
     [selectedDraftKey]
   );

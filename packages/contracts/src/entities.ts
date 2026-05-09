@@ -12,6 +12,7 @@ export const specEntitySchema = z.object({
   bodyMarkdown: z.string(),
   bodyText: z.string(),
   contentHash: z.string(),
+  markdown: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string()
 });
@@ -35,7 +36,8 @@ export const createEntityRequestSchema = z.object({
 });
 
 export const updateEntityMarkdownRequestSchema = z.object({
-  markdown: z.string()
+  markdown: z.string(),
+  baseContentHash: z.string().min(1)
 });
 
 export type SpecEntityDto = z.infer<typeof specEntitySchema>;

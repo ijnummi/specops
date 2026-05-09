@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createEntityRequestSchema } from "./entities.js";
+import { createEntityRequestSchema, updateEntityMarkdownRequestSchema } from "./entities.js";
 
 describe("createEntityRequestSchema", () => {
   it("defaults status to draft", () => {
@@ -11,5 +11,25 @@ describe("createEntityRequestSchema", () => {
     });
 
     expect(parsed.status).toBe("draft");
+  });
+});
+
+describe("updateEntityMarkdownRequestSchema", () => {
+  it("requires a base content hash for optimistic concurrency", () => {
+    expect(() =>
+      updateEntityMarkdownRequestSchema.parse({
+        markdown: "---\nid: feature-auth\n---\n"
+      })
+    ).toThrow();
+
+    expect(
+      updateEntityMarkdownRequestSchema.parse({
+        markdown: "---\nid: feature-auth\n---\n",
+        baseContentHash: "abc123"
+      })
+    ).toEqual({
+      markdown: "---\nid: feature-auth\n---\n",
+      baseContentHash: "abc123"
+    });
   });
 });

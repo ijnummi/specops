@@ -140,12 +140,17 @@ export function createEntity(projectId: string, input: CreateEntityRequest) {
   );
 }
 
-export function updateEntityMarkdown(projectId: string, entityId: string, markdown: string) {
+export function updateEntityMarkdown(
+  projectId: string,
+  entityId: string,
+  markdown: string,
+  baseContentHash: string
+) {
   return apiSend<SpecEntityDto>(
     "PUT",
     `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
       entityId
     )}/markdown`,
-    { markdown }
+    { markdown, baseContentHash }
   );
 }

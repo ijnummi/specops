@@ -1,8 +1,10 @@
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
   createEntityRequestSchema,
+  type ProjectDto,
   updateEntityMarkdownRequestSchema,
   type SpecEntityDto,
   type SpecLinkDto
@@ -10,6 +12,7 @@ import {
 import type { Db } from "@specops/db";
 import { specEntities, specLinks } from "@specops/db";
 import { createEntityMarkdown, parseSpecMarkdown } from "@specops/markdown";
+import type { ParsedSpecEntity } from "@specops/markdown";
 import { and, asc, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
@@ -77,7 +80,8 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
 
   app.get("/projects/:projectId/entities/:entityId", async (request) => {
     const { projectId, entityId } = entityParamsSchema.parse(request.params);
-    return getEntity(db, projectId, entityId);
+    const project = await projectService.getProject(projectId);
+    return getEntityForEditing(db, project, projectId, entityId);
   });
 
   app.post("/projects/:projectId/entities", async (request, reply) => {
@@ -112,7 +116,7 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
 
     try {
       await indexerService.indexProject(projectId);
-      const entity = await getEntity(db, projectId, input.entityId);
+      const entity = await getEntityForEditing(db, project, projectId, input.entityId);
       return reply.code(201).send(entity);
     } catch (error) {
       await unlink(targetPath).catch(() => undefined);
@@ -125,16 +129,20 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
     const input = updateEntityMarkdownRequestSchema.parse(request.body);
     const project = await projectService.getProject(projectId);
     const entity = await getEntity(db, projectId, entityId);
-    const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
-    await assertRealPathInsideDirectory(project.repoPath, specopsPath);
-    const targetPath = assertInsideDirectory(specopsPath, path.join(specopsPath, entity.filePath));
-    await assertSafePath("Entity markdown path is outside specopsPath", () =>
-      assertExistingParentInsideDirectory(specopsPath, targetPath)
-    );
+    const { targetPath, contentHash: currentContentHash } =
+      await readCanonicalEntityMarkdown(project, entity.filePath);
 
+    if (input.baseContentHash !== currentContentHash) {
+      throw new ConflictError("Entity markdown has changed since it was loaded", {
+        expectedContentHash: currentContentHash,
+        receivedContentHash: input.baseContentHash
+      });
+    }
+
+    validateUpdatedEntityMarkdown(entity.filePath, input.markdown, entityId);
     await writeFile(targetPath, input.markdown, { flag: "w" });
     await indexerService.indexProject(projectId);
-    return getEntity(db, projectId, entityId);
+    return getEntityForEditing(db, project, projectId, entityId);
   });
 
   app.get("/projects/:projectId/entities/:entityId/outgoing-links", async (request) => {
@@ -174,6 +182,64 @@ async function getEntity(db: Db, projectId: string, entityId: string): Promise<S
   }
 
   return mapEntity(row);
+}
+
+async function getEntityForEditing(
+  db: Db,
+  project: ProjectDto,
+  projectId: string,
+  entityId: string
+): Promise<SpecEntityDto> {
+  const entity = await getEntity(db, projectId, entityId);
+  const canonical = await readCanonicalEntityMarkdown(project, entity.filePath);
+
+  return {
+    ...entity,
+    markdown: canonical.markdown,
+    contentHash: canonical.contentHash
+  };
+}
+
+async function readCanonicalEntityMarkdown(
+  project: Pick<ProjectDto, "repoPath" | "specopsPath">,
+  filePath: string
+): Promise<{ targetPath: string; markdown: string; contentHash: string }> {
+  const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
+  await assertSafePath("specopsPath is outside repoPath", () =>
+    assertRealPathInsideDirectory(project.repoPath, specopsPath)
+  );
+  const indexedPath = assertInsideDirectory(specopsPath, path.join(specopsPath, filePath));
+  const targetPath = await assertSafePath("Entity markdown path is outside specopsPath", () =>
+    assertRealPathInsideDirectory(specopsPath, indexedPath)
+  );
+  const markdown = await readFile(targetPath, "utf8");
+
+  return {
+    targetPath,
+    markdown,
+    contentHash: sha256(markdown)
+  };
+}
+
+function validateUpdatedEntityMarkdown(
+  filePath: string,
+  markdown: string,
+  expectedEntityId: string
+): ParsedSpecEntity {
+  const parsed = parseSpecMarkdown(filePath, markdown);
+
+  if (parsed.messages.some((message) => message.level === "error") || !parsed.entity) {
+    throw new BadRequestError("Invalid entity markdown", { messages: parsed.messages });
+  }
+
+  if (parsed.entity.entityId !== expectedEntityId) {
+    throw new BadRequestError("Entity id mismatch", {
+      expectedEntityId,
+      receivedEntityId: parsed.entity.entityId
+    });
+  }
+
+  return parsed.entity;
 }
 
 function createValidatedEntityMarkdown(
@@ -269,8 +335,12 @@ function isFileExistsError(error: unknown): boolean {
 
 async function assertSafePath(message: string, check: () => Promise<string>) {
   try {
-    await check();
+    return await check();
   } catch (error) {
     throw new BadRequestError(message, { cause: error instanceof Error ? error.message : String(error) });
   }
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
