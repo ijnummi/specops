@@ -354,6 +354,7 @@ describeWithDb("database-backed routes", () => {
   it("refreshes source files and facts during project indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
+    await mkdir(project.specopsPath, { recursive: true });
     await mkdir(path.join(project.repoPath, "src"), { recursive: true });
     await writeFile(
       path.join(project.repoPath, "src", "math.ts"),
@@ -381,6 +382,7 @@ describeWithDb("database-backed routes", () => {
   it("persists source parse warnings as validation messages during project indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
+    await mkdir(project.specopsPath, { recursive: true });
     await mkdir(path.join(project.repoPath, "src"), { recursive: true });
     await writeFile(path.join(project.repoPath, "src", "broken.ts"), "export function broken(\n");
 
