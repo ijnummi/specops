@@ -256,6 +256,28 @@ describe("parseSourceFacts", () => {
     );
   });
 
+  it("warns instead of attaching variable statement annotations to multiple symbols", () => {
+    const result = parseSourceFacts({
+      path: "src/multi-variable.ts",
+      content:
+        "/** @specops domain.foo */\n" +
+        "export const Foo = 1, Bar = 2;\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "Foo")).toMatchObject({
+      specopsAnnotations: []
+    });
+    expect(result.symbols.find((symbol) => symbol.name === "Bar")).toMatchObject({
+      specopsAnnotations: []
+    });
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_unresolved_symbol",
+        filePath: "src/multi-variable.ts"
+      })
+    );
+  });
+
   it("ignores unrelated leading comments", () => {
     const result = parseSourceFacts({
       path: "src/workspace.ts",
@@ -266,6 +288,22 @@ describe("parseSourceFacts", () => {
     });
 
     expect(result.symbols.find((symbol) => symbol.name === "Workspace")).toMatchObject({ specopsAnnotations: [] });
+  });
+
+  it("ignores prose mentions of specops tags in JSDoc", () => {
+    const result = parseSourceFacts({
+      path: "src/prose.ts",
+      content:
+        "/**\n" +
+        " * Use @specops in examples.\n" +
+        " */\n" +
+        "export interface Foo {}\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "Foo")).toMatchObject({
+      specopsAnnotations: []
+    });
+    expect(result.warnings).toEqual([]);
   });
 
   it("keeps empty specops annotations for API validation", () => {

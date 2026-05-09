@@ -10,6 +10,8 @@ import type {
   SourceSymbolFact
 } from "./types.js";
 
+const SPECOPS_TAG_LINE_PATTERN = /^\s*(?:\/\*\*)?\s*\*?\s*@specops(?:\s+([^\s*/]+))?\s*(?:\*\/)?\s*$/;
+
 export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFactsResult {
   const sourceFile = ts.createSourceFile(
     input.path,
@@ -97,16 +99,16 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     }
 
     if (ts.isVariableStatement(statement)) {
-      let createdSymbol = false;
-      for (const declaration of statement.declarationList.declarations) {
-        if (!ts.isIdentifier(declaration.name)) continue;
+      const identifierDeclarations = statement.declarationList.declarations.filter(hasIdentifierName);
+      const annotationNode = identifierDeclarations.length === 1 ? statement : undefined;
+
+      for (const declaration of identifierDeclarations) {
         const name = declaration.name.text;
         const isExported = hasExportModifier(statement) || localExportedNames.has(name);
-        symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported, statement));
-        createdSymbol = true;
+        symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported, annotationNode));
         if (hasExportModifier(statement)) exports.push(namedExport(name));
       }
-      if (!createdSymbol) warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
+      if (identifierDeclarations.length !== 1) warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
@@ -247,6 +249,10 @@ function hasDefaultModifier(node: ts.Node): boolean {
   return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword);
 }
 
+function hasIdentifierName(declaration: ts.VariableDeclaration): declaration is ts.VariableDeclaration & { name: ts.Identifier } {
+  return ts.isIdentifier(declaration.name);
+}
+
 function symbolFact(
   sourceFile: ts.SourceFile,
   node: ts.Node,
@@ -279,7 +285,7 @@ function readSpecopsAnnotations(
     const lines = text.split(/\r?\n/);
 
     for (let index = 0; index < lines.length; index += 1) {
-      const match = /@specops(?:\s+([^\s*]+))?/.exec(lines[index] ?? "");
+      const match = SPECOPS_TAG_LINE_PATTERN.exec(lines[index] ?? "");
       if (!match) continue;
       annotations.push({
         entityId: match[1]?.trim() ?? "",
