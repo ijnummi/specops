@@ -10,7 +10,11 @@ import { discoverMarkdownFiles, parseSpecMarkdown } from "@specops/markdown";
 import type { ParsedSpecEntity, ParsedSpecLink, ParseMessage } from "@specops/markdown";
 import { eq, sql } from "drizzle-orm";
 
-import { assertInsideDirectory, assertRealPathInsideDirectory } from "../lib/path-safety.js";
+import {
+  assertAbsolutePath,
+  assertInsideDirectory,
+  assertRealPathInsideDirectory
+} from "../lib/path-safety.js";
 import { createProjectService } from "./project-service.js";
 
 type IndexedFile = {
@@ -25,6 +29,8 @@ export function createIndexerService(db: Db) {
   return {
     async indexProject(projectId: string): Promise<IndexRunDto> {
       const project = await createProjectService(db).getProject(projectId);
+      const repoPath = assertAbsolutePath("repoPath", project.repoPath);
+      const persistedSpecopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
       const [startedRun] = await db
         .insert(indexRuns)
         .values({ projectId, status: "running" })
@@ -38,8 +44,8 @@ export function createIndexerService(db: Db) {
         const [finishedRun] = await db.transaction(async (tx) => {
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
 
-          assertInsideDirectory(project.repoPath, project.specopsPath);
-          const specopsPath = await assertRealPathInsideDirectory(project.repoPath, project.specopsPath);
+          assertInsideDirectory(repoPath, persistedSpecopsPath);
+          const specopsPath = await assertRealPathInsideDirectory(repoPath, persistedSpecopsPath);
           const relativePaths = await discoverMarkdownFiles(specopsPath);
           const parsedFiles = await Promise.all(
             relativePaths.map(async (relativePath) => {

@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
+import { createSpecopsInitializerService } from "../services/specops-initializer.js";
 
 const testDatabaseUrl = readTestDatabaseUrl();
 const describeWithDb = testDatabaseUrl ? describe : describe.skip;
@@ -376,6 +377,30 @@ describeWithDb("indexProject", () => {
     await expect(createIndexerService(db).indexProject(project.id)).rejects.toThrow(/inside/);
   });
 
+  it("rejects indexing a persisted project with relative paths before filesystem work", async () => {
+    const projectId = await insertProjectRow({
+      name: "Relative persisted index project",
+      slug: `relative-index-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      repoPath: "relative-repo",
+      specopsPath: "relative-repo/.specops"
+    });
+
+    await expect(createIndexerService(db).indexProject(projectId)).rejects.toThrow(/absolute/);
+  });
+
+  it("rejects initializing a persisted project with relative paths before filesystem work", async () => {
+    const projectId = await insertProjectRow({
+      name: "Relative persisted init project",
+      slug: `relative-init-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      repoPath: "relative-repo",
+      specopsPath: "relative-repo/.specops"
+    });
+
+    await expect(createSpecopsInitializerService(db).initializeProjectSpecops(projectId)).rejects.toThrow(
+      /absolute/
+    );
+  });
+
   async function createProjectFixture() {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-indexer-"));
     tempRoots.push(root);
@@ -389,6 +414,17 @@ describeWithDb("indexProject", () => {
     fixtureProjectIds.push(project.id);
 
     return { projectId: project.id, root, specopsPath };
+  }
+
+  async function insertProjectRow(input: {
+    name: string;
+    slug: string;
+    repoPath: string;
+    specopsPath: string;
+  }) {
+    const [project] = await db.insert(projects).values(input).returning();
+    fixtureProjectIds.push(project.id);
+    return project.id;
   }
 
   async function expectProjectCounts(
