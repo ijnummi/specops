@@ -1,0 +1,4 @@
+id: specops-workbench
+name: SpecOps Workbench
+specops_version: 1
+description: Local-first markdown-native workbench for specs-driven AI-assisted software development.
