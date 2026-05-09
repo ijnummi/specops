@@ -56,4 +56,29 @@ describe("scanRepository", () => {
       })
     );
   });
+
+  it("scans the sample project as a milestone 3 trial fixture", async () => {
+    const sampleRoot = path.resolve(__dirname, "../../../../sample");
+    const result = await scanRepository({ repoPath: sampleRoot });
+    const byPath = new Map(result.files.map((file) => [file.path, file]));
+
+    expect(byPath.get("src/main.ts")?.kind).toBe("entrypoint");
+    expect(byPath.get("src/index.ts")?.kind).toBe("source");
+    expect(byPath.get("src/domain.ts")?.kind).toBe("source");
+    expect(byPath.get("src/services/decision-service.ts")?.kind).toBe("source");
+    expect(byPath.get("src/__tests__/decision-service.test.ts")?.kind).toBe("test");
+    expect(byPath.get("vitest.config.ts")?.kind).toBe("config");
+
+    const decisionService = byPath.get("src/services/decision-service.ts");
+    expect(decisionService?.imports.map((sourceImport) => sourceImport.specifier)).toContain("../domain");
+    expect(decisionService?.exports.map((sourceExport) => sourceExport.exportedName)).toEqual(
+      expect.arrayContaining(["DecisionService", "toDecisionId"]),
+    );
+    expect(decisionService?.symbols.map((symbol) => symbol.name)).toEqual(
+      expect.arrayContaining(["DecisionService", "toDecisionId"]),
+    );
+
+    expect(result.files.length).toBeGreaterThanOrEqual(7);
+    expect(result.warnings).toEqual([]);
+  });
 });
