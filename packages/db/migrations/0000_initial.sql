@@ -22,8 +22,17 @@ CREATE TABLE IF NOT EXISTS index_runs (
   link_count integer NOT NULL DEFAULT 0,
   error_count integer NOT NULL DEFAULT 0,
   warning_count integer NOT NULL DEFAULT 0,
+  source_file_count integer NOT NULL DEFAULT 0,
+  source_import_count integer NOT NULL DEFAULT 0,
+  source_export_count integer NOT NULL DEFAULT 0,
+  source_symbol_count integer NOT NULL DEFAULT 0,
   git_commit text
 );
+
+ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS source_file_count integer NOT NULL DEFAULT 0;
+ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS source_import_count integer NOT NULL DEFAULT 0;
+ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS source_export_count integer NOT NULL DEFAULT 0;
+ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS source_symbol_count integer NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS index_runs_project_id_idx ON index_runs(project_id);
 CREATE INDEX IF NOT EXISTS index_runs_project_started_at_idx ON index_runs(project_id, started_at);
@@ -109,11 +118,59 @@ CREATE TABLE IF NOT EXISTS source_files (
   kind text NOT NULL,
   size_bytes bigint NOT NULL,
   content_hash text NOT NULL,
-  last_seen_at timestamptz NOT NULL DEFAULT now()
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT source_files_project_id_path_unique UNIQUE (project_id, path)
 );
 
 CREATE INDEX IF NOT EXISTS source_files_project_id_idx ON source_files(project_id);
 CREATE INDEX IF NOT EXISTS source_files_project_path_idx ON source_files(project_id, path);
+CREATE UNIQUE INDEX IF NOT EXISTS source_files_project_id_path_unique ON source_files(project_id, path);
+
+CREATE TABLE IF NOT EXISTS source_imports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+  file_path text NOT NULL,
+  specifier text NOT NULL,
+  import_kind text NOT NULL,
+  imported_names text[] NOT NULL DEFAULT ARRAY[]::text[],
+  is_relative boolean NOT NULL,
+  resolved_path text
+);
+
+CREATE INDEX IF NOT EXISTS source_imports_project_id_idx ON source_imports(project_id);
+CREATE INDEX IF NOT EXISTS source_imports_source_file_id_idx ON source_imports(source_file_id);
+CREATE INDEX IF NOT EXISTS source_imports_project_specifier_idx ON source_imports(project_id, specifier);
+
+CREATE TABLE IF NOT EXISTS source_exports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+  file_path text NOT NULL,
+  exported_name text NOT NULL,
+  export_kind text NOT NULL,
+  source_specifier text
+);
+
+CREATE INDEX IF NOT EXISTS source_exports_project_id_idx ON source_exports(project_id);
+CREATE INDEX IF NOT EXISTS source_exports_source_file_id_idx ON source_exports(source_file_id);
+CREATE INDEX IF NOT EXISTS source_exports_project_exported_name_idx ON source_exports(project_id, exported_name);
+
+CREATE TABLE IF NOT EXISTS source_symbols (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL REFERENCES source_files(id) ON DELETE CASCADE,
+  file_path text NOT NULL,
+  name text NOT NULL,
+  symbol_kind text NOT NULL,
+  is_exported boolean NOT NULL DEFAULT false,
+  line integer,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS source_symbols_project_id_idx ON source_symbols(project_id);
+CREATE INDEX IF NOT EXISTS source_symbols_source_file_id_idx ON source_symbols(source_file_id);
+CREATE INDEX IF NOT EXISTS source_symbols_project_name_idx ON source_symbols(project_id, name);
 
 CREATE TABLE IF NOT EXISTS ai_proposals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

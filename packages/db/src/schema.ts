@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   doublePrecision,
   index,
   integer,
@@ -47,6 +48,10 @@ export const indexRuns = pgTable(
     linkCount: integer("link_count").notNull().default(0),
     errorCount: integer("error_count").notNull().default(0),
     warningCount: integer("warning_count").notNull().default(0),
+    sourceFileCount: integer("source_file_count").notNull().default(0),
+    sourceImportCount: integer("source_import_count").notNull().default(0),
+    sourceExportCount: integer("source_export_count").notNull().default(0),
+    sourceSymbolCount: integer("source_symbol_count").notNull().default(0),
     gitCommit: text("git_commit"),
   },
   (table) => ({
@@ -169,6 +174,77 @@ export const sourceFiles = pgTable(
   (table) => ({
     projectIdx: index("source_files_project_id_idx").on(table.projectId),
     projectPathIdx: index("source_files_project_path_idx").on(table.projectId, table.path),
+    projectPathUnique: unique("source_files_project_id_path_unique").on(table.projectId, table.path),
+  }),
+);
+
+export const sourceImports = pgTable(
+  "source_imports",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id")
+      .notNull()
+      .references(() => sourceFiles.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    specifier: text("specifier").notNull(),
+    importKind: text("import_kind").notNull(),
+    importedNames: text("imported_names").array().notNull().default(sql`ARRAY[]::text[]`),
+    isRelative: boolean("is_relative").notNull(),
+    resolvedPath: text("resolved_path"),
+  },
+  (table) => ({
+    projectIdx: index("source_imports_project_id_idx").on(table.projectId),
+    sourceFileIdx: index("source_imports_source_file_id_idx").on(table.sourceFileId),
+    specifierIdx: index("source_imports_project_specifier_idx").on(table.projectId, table.specifier),
+  }),
+);
+
+export const sourceExports = pgTable(
+  "source_exports",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id")
+      .notNull()
+      .references(() => sourceFiles.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    exportedName: text("exported_name").notNull(),
+    exportKind: text("export_kind").notNull(),
+    sourceSpecifier: text("source_specifier"),
+  },
+  (table) => ({
+    projectIdx: index("source_exports_project_id_idx").on(table.projectId),
+    sourceFileIdx: index("source_exports_source_file_id_idx").on(table.sourceFileId),
+    exportedNameIdx: index("source_exports_project_exported_name_idx").on(table.projectId, table.exportedName),
+  }),
+);
+
+export const sourceSymbols = pgTable(
+  "source_symbols",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id")
+      .notNull()
+      .references(() => sourceFiles.id, { onDelete: "cascade" }),
+    filePath: text("file_path").notNull(),
+    name: text("name").notNull(),
+    symbolKind: text("symbol_kind").notNull(),
+    isExported: boolean("is_exported").notNull().default(false),
+    line: integer("line"),
+    metadataJson: jsonb("metadata_json").notNull().default(sql`'{}'::jsonb`),
+  },
+  (table) => ({
+    projectIdx: index("source_symbols_project_id_idx").on(table.projectId),
+    sourceFileIdx: index("source_symbols_source_file_id_idx").on(table.sourceFileId),
+    symbolNameIdx: index("source_symbols_project_name_idx").on(table.projectId, table.name),
   }),
 );
 
