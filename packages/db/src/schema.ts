@@ -259,6 +259,41 @@ export const sourceSymbols = pgTable(
   }),
 );
 
+export const sourceSpecLinks = pgTable(
+  "source_spec_links",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id").notNull(),
+    filePath: text("file_path").notNull(),
+    entityId: text("entity_id").notNull(),
+    symbolName: text("symbol_name").notNull(),
+    symbolKind: text("symbol_kind").notNull(),
+    symbolLine: integer("symbol_line"),
+    annotationLine: integer("annotation_line"),
+    contentHash: text("content_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    projectIdx: index("source_spec_links_project_id_idx").on(table.projectId),
+    projectEntityIdx: index("source_spec_links_project_entity_id_idx").on(table.projectId, table.entityId),
+    sourceFileIdx: index("source_spec_links_source_file_id_idx").on(table.sourceFileId),
+    projectSourceSymbolEntityUnique: unique("source_spec_links_project_file_symbol_entity_unique").on(
+      table.projectId,
+      table.sourceFileId,
+      table.symbolName,
+      table.entityId,
+    ),
+    sourceFileProjectFk: foreignKey({
+      name: "source_spec_links_source_file_project_fk",
+      columns: [table.sourceFileId, table.projectId],
+      foreignColumns: [sourceFiles.id, sourceFiles.projectId],
+    }).onDelete("cascade"),
+  }),
+);
+
 export const aiProposals = pgTable(
   "ai_proposals",
   {

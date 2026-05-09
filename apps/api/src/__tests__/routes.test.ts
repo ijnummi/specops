@@ -630,6 +630,119 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("persists source spec links during project indexing", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "domain.decision.md"),
+      "---\n" +
+        "id: domain.decision\n" +
+        "type: domain_entity\n" +
+        "title: Decision\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Decision\n"
+    );
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "/**\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision {}\n"
+    );
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const links = await pool.query(
+      "select file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line from source_spec_links where project_id = $1",
+      [project.id]
+    );
+
+    expect(links.rows).toEqual([
+      expect.objectContaining({
+        file_path: "src/decision.ts",
+        entity_id: "domain.decision",
+        symbol_name: "Decision",
+        symbol_kind: "interface",
+        symbol_line: 4,
+        annotation_line: 2
+      })
+    ]);
+  });
+
+  it("warns when a source spec annotation references a missing entity", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(project.specopsPath, { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "missing.ts"),
+      "/**\n" +
+        " * @specops domain.missing\n" +
+        " */\n" +
+        "export interface Missing {}\n"
+    );
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const messagesResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/validation-messages`
+    });
+
+    expect(messagesResponse.statusCode).toBe(200);
+    expect(messagesResponse.json()).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_missing_entity",
+        entityId: "domain.missing",
+        filePath: "src/missing.ts",
+        level: "warning"
+      })
+    );
+  });
+
+  it("warns when a source spec annotation has an invalid entity id", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(project.specopsPath, { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "invalid.ts"),
+      "/** @specops */\n" + "export interface Invalid {}\n"
+    );
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const messagesResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/validation-messages`
+    });
+
+    expect(messagesResponse.statusCode).toBe(200);
+    expect(messagesResponse.json()).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_invalid_entity_id",
+        entityId: null,
+        filePath: "src/invalid.ts",
+        level: "warning"
+      })
+    );
+  });
+
   it("scopes source file detail lookup by project and source file id", async () => {
     const db = createTestDb();
     const firstProject = await createProjectDirectly(db);

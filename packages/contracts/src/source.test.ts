@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   sourceFileDetailSchema,
   sourceFileListQuerySchema,
-  sourceFileSummarySchema
+  sourceFileSummarySchema,
+  sourceSpecLinkSchema
 } from "./source.js";
 import { indexRunSchema } from "./indexing.js";
 
@@ -129,6 +130,38 @@ describe("source contracts", () => {
       sourceImportCount: 8,
       sourceExportCount: 4,
       sourceSymbolCount: 6
+    });
+  });
+
+  it("parses source spec link DTOs", () => {
+    expect(
+      sourceSpecLinkSchema.parse({
+        id: "link-1",
+        projectId: "project-1",
+        sourceFileId: "file-1",
+        filePath: "src/decision.ts",
+        entityId: "domain.decision",
+        symbolName: "Decision",
+        symbolKind: "interface",
+        symbolLine: 5,
+        annotationLine: 3,
+        contentHash: "abc123",
+        excerpt: {
+          status: "available",
+          startLine: 1,
+          endLine: 6,
+          text:
+            "/**\n" +
+            " * @specops domain.decision\n" +
+            " */\n" +
+            "export interface Decision {}\n"
+        },
+        createdAt: "2026-05-10T00:00:00.000Z"
+      })
+    ).toMatchObject({
+      entityId: "domain.decision",
+      filePath: "src/decision.ts",
+      excerpt: { status: "available" }
     });
   });
 });

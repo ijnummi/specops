@@ -80,6 +80,34 @@ export const sourceAggregateSchema = z.object({
   byKind: z.record(z.string(), z.number())
 });
 
+export const sourceExcerptSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("available"),
+    startLine: z.number(),
+    endLine: z.number(),
+    text: z.string()
+  }),
+  z.object({
+    status: z.enum(["missing", "changed", "unavailable"]),
+    message: z.string()
+  })
+]);
+
+export const sourceSpecLinkSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  sourceFileId: z.string(),
+  filePath: z.string(),
+  entityId: z.string(),
+  symbolName: z.string(),
+  symbolKind: z.string(),
+  symbolLine: z.number().nullable(),
+  annotationLine: z.number().nullable(),
+  contentHash: z.string(),
+  excerpt: sourceExcerptSchema.optional(),
+  createdAt: z.string()
+});
+
 export type SourceFileKind = z.infer<typeof sourceFileKindSchema>;
 export type SourceLanguage = z.infer<typeof sourceLanguageSchema>;
 export type SourceFileListQuery = z.infer<typeof sourceFileListQuerySchema>;
@@ -89,3 +117,5 @@ export type SourceExportDto = z.infer<typeof sourceExportSchema>;
 export type SourceSymbolDto = z.infer<typeof sourceSymbolSchema>;
 export type SourceFileDetailDto = z.infer<typeof sourceFileDetailSchema>;
 export type SourceAggregateDto = z.infer<typeof sourceAggregateSchema>;
+export type SourceExcerptDto = z.infer<typeof sourceExcerptSchema>;
+export type SourceSpecLinkDto = z.infer<typeof sourceSpecLinkSchema>;

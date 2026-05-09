@@ -9,7 +9,9 @@ import {
   sourceExports,
   sourceFiles,
   sourceImports,
+  sourceSpecLinks,
   sourceSymbols,
+  specEntities,
   validationMessages
 } from "@specops/db";
 import { scanRepository, type ScanRepositoryResult } from "@specops/repo-scanner";
@@ -83,6 +85,7 @@ async function persistSourceScan(
   indexRunId: string,
   result: ScanRepositoryResult
 ): Promise<SourceScanCounts> {
+  await db.delete(sourceSpecLinks).where(eq(sourceSpecLinks.projectId, projectId));
   await db.delete(sourceSymbols).where(eq(sourceSymbols.projectId, projectId));
   await db.delete(sourceExports).where(eq(sourceExports.projectId, projectId));
   await db.delete(sourceImports).where(eq(sourceImports.projectId, projectId));
@@ -168,6 +171,71 @@ async function persistSourceScan(
     await db.insert(sourceSymbols).values(symbolRows);
   }
 
+  const existingEntityRows = await db
+    .select({ entityId: specEntities.entityId })
+    .from(specEntities)
+    .where(eq(specEntities.projectId, projectId));
+  const existingEntityIds = new Set(existingEntityRows.map((row) => row.entityId));
+
+  const sourceSpecLinkRows = result.files.flatMap((file) => {
+    const sourceFileId = sourceFileIdsByPath.get(file.path);
+    if (!sourceFileId) return [];
+
+    return file.symbols.flatMap((symbol) =>
+      symbol.specopsAnnotations.map((annotation) => ({
+        projectId,
+        sourceFileId,
+        filePath: file.path,
+        entityId: annotation.entityId,
+        symbolName: symbol.name,
+        symbolKind: symbol.symbolKind,
+        symbolLine: symbol.line,
+        annotationLine: annotation.line,
+        contentHash: file.contentHash
+      }))
+    );
+  });
+
+  const invalidAnnotationWarnings = sourceSpecLinkRows
+    .filter((link) => !isValidSpecopsEntityId(link.entityId))
+    .map((link) => ({
+      projectId,
+      indexRunId,
+      filePath: link.filePath,
+      entityId: link.entityId || null,
+      level: "warning",
+      code: "source_spec_invalid_entity_id",
+      message: "Source annotation has an invalid SpecOps entity id."
+    }));
+
+  const validSourceSpecLinkRows = sourceSpecLinkRows.filter((link) =>
+    isValidSpecopsEntityId(link.entityId)
+  );
+
+  if (validSourceSpecLinkRows.length > 0) {
+    await db.insert(sourceSpecLinks).values(validSourceSpecLinkRows).onConflictDoNothing();
+  }
+
+  const missingEntityWarnings = validSourceSpecLinkRows
+    .filter((link) => !existingEntityIds.has(link.entityId))
+    .map((link) => ({
+      projectId,
+      indexRunId,
+      filePath: link.filePath,
+      entityId: link.entityId,
+      level: "warning",
+      code: "source_spec_missing_entity",
+      message: `Source annotation references missing spec entity "${link.entityId}".`
+    }));
+
+  if (missingEntityWarnings.length > 0) {
+    await db.insert(validationMessages).values(missingEntityWarnings);
+  }
+
+  if (invalidAnnotationWarnings.length > 0) {
+    await db.insert(validationMessages).values(invalidAnnotationWarnings);
+  }
+
   if (result.warnings.length > 0) {
     await db.insert(validationMessages).values(
       result.warnings.map((warning) => ({
@@ -187,7 +255,7 @@ async function persistSourceScan(
     sourceImportCount: result.files.reduce((total, file) => total + file.imports.length, 0),
     sourceExportCount: result.files.reduce((total, file) => total + file.exports.length, 0),
     sourceSymbolCount: result.files.reduce((total, file) => total + file.symbols.length, 0),
-    warningCount: result.warnings.length
+    warningCount: result.warnings.length + missingEntityWarnings.length + invalidAnnotationWarnings.length
   };
 }
 
@@ -409,4 +477,8 @@ function toRecord(value: unknown): Record<string, unknown> {
   }
 
   return {};
+}
+
+function isValidSpecopsEntityId(value: string): boolean {
+  return /^[a-z][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)+$/.test(value);
 }

@@ -192,6 +192,31 @@ CREATE INDEX IF NOT EXISTS source_symbols_project_id_idx ON source_symbols(proje
 CREATE INDEX IF NOT EXISTS source_symbols_source_file_id_idx ON source_symbols(source_file_id);
 CREATE INDEX IF NOT EXISTS source_symbols_project_name_idx ON source_symbols(project_id, name);
 
+CREATE TABLE IF NOT EXISTS source_spec_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL,
+  file_path text NOT NULL,
+  entity_id text NOT NULL,
+  symbol_name text NOT NULL,
+  symbol_kind text NOT NULL,
+  symbol_line integer,
+  annotation_line integer,
+  content_hash text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT source_spec_links_project_file_symbol_entity_unique UNIQUE (
+    project_id,
+    source_file_id,
+    symbol_name,
+    entity_id
+  ),
+  CONSTRAINT source_spec_links_source_file_project_fk FOREIGN KEY (source_file_id, project_id) REFERENCES source_files(id, project_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS source_spec_links_project_id_idx ON source_spec_links(project_id);
+CREATE INDEX IF NOT EXISTS source_spec_links_project_entity_id_idx ON source_spec_links(project_id, entity_id);
+CREATE INDEX IF NOT EXISTS source_spec_links_source_file_id_idx ON source_spec_links(source_file_id);
+
 DELETE FROM source_imports
 WHERE NOT EXISTS (
   SELECT 1
