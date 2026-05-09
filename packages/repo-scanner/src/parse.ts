@@ -50,6 +50,11 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
       continue;
     }
 
+    if (ts.isFunctionDeclaration(statement)) {
+      if (hasDefaultModifier(statement)) exports.push(defaultExport());
+      continue;
+    }
+
     if (ts.isClassDeclaration(statement) && statement.name) {
       const isDefaultExport = hasDefaultModifier(statement);
       const isExported = isDefaultExport || hasExportModifier(statement) || localExportedNames.has(statement.name.text);

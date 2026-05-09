@@ -111,6 +111,10 @@ describe("parseSourceFacts", () => {
       path: "src/default-expression.ts",
       content: "export default () => null;\n"
     });
+    const functionResult = parseSourceFacts({
+      path: "src/default-anonymous-function.ts",
+      content: "export default function () {}\n"
+    });
 
     expect(classResult.exports).toContainEqual({
       exportedName: "default",
@@ -118,6 +122,11 @@ describe("parseSourceFacts", () => {
       sourceSpecifier: null
     });
     expect(expressionResult.exports).toContainEqual({
+      exportedName: "default",
+      exportKind: "default",
+      sourceSpecifier: null
+    });
+    expect(functionResult.exports).toContainEqual({
       exportedName: "default",
       exportKind: "default",
       sourceSpecifier: null
