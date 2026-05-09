@@ -39,6 +39,23 @@ describe("ProjectActions", () => {
     expect(html).toContain('disabled=""');
   });
 
+  it("shows an active spinner while initializing", () => {
+    const html = renderToStaticMarkup(
+      <ProjectActions
+        isInitializing={true}
+        isBootstrapping={false}
+        isIndexing={false}
+        isProjectActionPending={true}
+        onInitialize={() => undefined}
+        onBootstrap={() => undefined}
+        onReindex={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Init specops");
+    expect(html).toContain("animate-spin");
+  });
+
   it("disables all project actions while any project action is pending", () => {
     const html = renderToStaticMarkup(
       <ProjectActions

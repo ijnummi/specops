@@ -27,7 +27,11 @@ export function ProjectActions({
         disabled={isProjectActionPending}
         onClick={onInitialize}
       >
-        <FolderSync className="h-4 w-4" aria-hidden="true" />
+        {isInitializing ? (
+          <RotateCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <FolderSync className="h-4 w-4" aria-hidden="true" />
+        )}
         Init specops
       </button>
       <button
