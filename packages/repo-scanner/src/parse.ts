@@ -101,7 +101,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
         if (!ts.isIdentifier(declaration.name)) continue;
         const name = declaration.name.text;
         const isExported = hasExportModifier(statement) || localExportedNames.has(name);
-        symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported));
+        symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported, statement));
         if (hasExportModifier(statement)) exports.push(namedExport(name));
       }
       continue;
@@ -249,7 +249,8 @@ function symbolFact(
   node: ts.Node,
   name: string,
   symbolKind: string,
-  isExported: boolean
+  isExported: boolean,
+  annotationNode: ts.Node = node
 ): SourceSymbolFact {
   return {
     name,
@@ -257,7 +258,7 @@ function symbolFact(
     isExported,
     line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
     metadata: {},
-    specopsAnnotations: readSpecopsAnnotations(sourceFile, node)
+    specopsAnnotations: readSpecopsAnnotations(sourceFile, annotationNode)
   };
 }
 

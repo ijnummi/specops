@@ -225,6 +225,21 @@ describe("parseSourceFacts", () => {
     });
   });
 
+  it("extracts specops annotations from variable statement JSDoc", () => {
+    const result = parseSourceFacts({
+      path: "src/search-handler.ts",
+      content:
+        "/**\n" +
+        " * @specops interface.search-handler\n" +
+        " */\n" +
+        "export const SearchHandler = () => null;\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "SearchHandler")).toMatchObject({
+      specopsAnnotations: [{ entityId: "interface.search-handler", line: 2 }]
+    });
+  });
+
   it("ignores unrelated leading comments", () => {
     const result = parseSourceFacts({
       path: "src/workspace.ts",
