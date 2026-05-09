@@ -8,9 +8,9 @@ import { indexRuns, specEntities, specFiles, specLinks, validationMessages } fro
 import { findBrokenLinks, findOrphanEntities } from "@specops/graph";
 import { discoverMarkdownFiles, parseSpecMarkdown } from "@specops/markdown";
 import type { ParsedSpecEntity, ParsedSpecLink, ParseMessage } from "@specops/markdown";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
-import { assertInsideDirectory } from "../lib/path-safety.js";
+import { assertInsideDirectory, assertRealPathInsideDirectory } from "../lib/path-safety.js";
 import { createProjectService } from "./project-service.js";
 
 type IndexedFile = {
@@ -35,77 +35,81 @@ export function createIndexerService(db: Db) {
       }
 
       try {
-        const relativePaths = await discoverMarkdownFiles(project.specopsPath);
-        const parsedFiles = await Promise.all(
-          relativePaths.map(async (relativePath) => {
-            const absolutePath = assertInsideDirectory(
-              project.specopsPath,
-              path.join(project.specopsPath, relativePath)
-            );
-            const content = await readFile(absolutePath, "utf8");
-            const parseResult = parseSpecMarkdown(relativePath, content);
-            const indexedFile: IndexedFile = {
-              path: relativePath,
-              content,
-              contentHash: sha256(content),
-              frontmatterHash: parseResult.entity ? sha256(stableJson(parseResult.entity.frontmatter)) : null,
-              bodyHash: sha256(parseResult.entity?.bodyMarkdown ?? content)
-            };
+        const [finishedRun] = await db.transaction(async (tx) => {
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
 
-            return { indexedFile, parseResult };
-          })
-        );
+          assertInsideDirectory(project.repoPath, project.specopsPath);
+          const specopsPath = await assertRealPathInsideDirectory(project.repoPath, project.specopsPath);
+          const relativePaths = await discoverMarkdownFiles(specopsPath);
+          const parsedFiles = await Promise.all(
+            relativePaths.map(async (relativePath) => {
+              const absolutePath = assertInsideDirectory(
+                specopsPath,
+                path.join(specopsPath, relativePath)
+              );
+              const content = await readFile(absolutePath, "utf8");
+              const parseResult = parseSpecMarkdown(relativePath, content);
+              const indexedFile: IndexedFile = {
+                path: relativePath,
+                content,
+                contentHash: sha256(content),
+                frontmatterHash: parseResult.entity ? sha256(stableJson(parseResult.entity.frontmatter)) : null,
+                bodyHash: sha256(parseResult.entity?.bodyMarkdown ?? content)
+              };
 
-        const messages: ParseMessage[] = parsedFiles.flatMap(({ parseResult }) => parseResult.messages);
-        const parsedEntities = parsedFiles
-          .map(({ parseResult }) => parseResult.entity)
-          .filter((entity): entity is ParsedSpecEntity => entity !== null);
-        const duplicateIds = findDuplicateEntityIds(parsedEntities);
+              return { indexedFile, parseResult };
+            })
+          );
 
-        for (const entity of parsedEntities) {
-          if (duplicateIds.has(entity.entityId)) {
+          const messages: ParseMessage[] = parsedFiles.flatMap(({ parseResult }) => parseResult.messages);
+          const parsedEntities = parsedFiles
+            .map(({ parseResult }) => parseResult.entity)
+            .filter((entity): entity is ParsedSpecEntity => entity !== null);
+          const duplicateIds = findDuplicateEntityIds(parsedEntities);
+
+          for (const entity of parsedEntities) {
+            if (duplicateIds.has(entity.entityId)) {
+              messages.push({
+                level: "error",
+                code: "duplicate_entity_id",
+                message: `Duplicate entity id "${entity.entityId}" appears in multiple files.`,
+                filePath: entity.filePath,
+                entityId: entity.entityId
+              });
+            }
+          }
+
+          const entities = parsedEntities.filter((entity) => !duplicateIds.has(entity.entityId));
+          const entityIds = new Set(entities.map((entity) => entity.entityId));
+          const parsedLinks = parsedFiles.flatMap(({ parseResult }) => parseResult.links);
+          const sourceValidLinks = parsedLinks.filter((link) => entityIds.has(link.fromEntityId));
+          const brokenLinks = findBrokenLinks(entities, sourceValidLinks);
+          const brokenLinkKeys = new Set(brokenLinks.map(linkKey));
+
+          for (const link of brokenLinks) {
             messages.push({
-              level: "error",
-              code: "duplicate_entity_id",
-              message: `Duplicate entity id "${entity.entityId}" appears in multiple files.`,
+              level: "warning",
+              code: "broken_link",
+              message: `Broken ${link.linkType} link from "${link.fromEntityId}" to "${link.toEntityId}".`,
+              filePath: findEntityFilePath(parsedEntities, link.fromEntityId),
+              entityId: link.fromEntityId
+            });
+          }
+
+          for (const entity of findOrphanEntities(entities, sourceValidLinks.filter((link) => !brokenLinkKeys.has(linkKey(link))))) {
+            messages.push({
+              level: "info",
+              code: "orphan_entity",
+              message: `Entity "${entity.entityId}" has no valid links.`,
               filePath: entity.filePath,
               entityId: entity.entityId
             });
           }
-        }
 
-        const entities = parsedEntities.filter((entity) => !duplicateIds.has(entity.entityId));
-        const entityIds = new Set(entities.map((entity) => entity.entityId));
-        const parsedLinks = parsedFiles.flatMap(({ parseResult }) => parseResult.links);
-        const sourceValidLinks = parsedLinks.filter((link) => entityIds.has(link.fromEntityId));
-        const brokenLinks = findBrokenLinks(entities, sourceValidLinks);
-        const brokenLinkKeys = new Set(brokenLinks.map(linkKey));
+          const links = dedupeLinks(sourceValidLinks.filter((link) => !brokenLinkKeys.has(linkKey(link))));
+          const errorCount = messages.filter((message) => message.level === "error").length;
+          const warningCount = messages.filter((message) => message.level === "warning").length;
 
-        for (const link of brokenLinks) {
-          messages.push({
-            level: "warning",
-            code: "broken_link",
-            message: `Broken ${link.linkType} link from "${link.fromEntityId}" to "${link.toEntityId}".`,
-            filePath: findEntityFilePath(parsedEntities, link.fromEntityId),
-            entityId: link.fromEntityId
-          });
-        }
-
-        for (const entity of findOrphanEntities(entities, sourceValidLinks.filter((link) => !brokenLinkKeys.has(linkKey(link))))) {
-          messages.push({
-            level: "info",
-            code: "orphan_entity",
-            message: `Entity "${entity.entityId}" has no valid links.`,
-            filePath: entity.filePath,
-            entityId: entity.entityId
-          });
-        }
-
-        const links = dedupeLinks(sourceValidLinks.filter((link) => !brokenLinkKeys.has(linkKey(link))));
-        const errorCount = messages.filter((message) => message.level === "error").length;
-        const warningCount = messages.filter((message) => message.level === "warning").length;
-
-        const [finishedRun] = await db.transaction(async (tx) => {
           await tx.delete(validationMessages).where(eq(validationMessages.projectId, projectId));
           await tx.delete(specLinks).where(eq(specLinks.projectId, projectId));
           await tx.delete(specEntities).where(eq(specEntities.projectId, projectId));

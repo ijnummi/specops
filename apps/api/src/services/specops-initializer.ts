@@ -1,9 +1,13 @@
-import path from "node:path";
+import { mkdir } from "node:fs/promises";
 
 import type { Db } from "@specops/db";
 import { initializeSpecopsFolder } from "@specops/markdown";
 
-import { assertInsideDirectory } from "../lib/path-safety.js";
+import {
+  assertExistingParentInsideDirectory,
+  assertInsideDirectory,
+  assertRealPathInsideDirectory
+} from "../lib/path-safety.js";
 import { createProjectService } from "./project-service.js";
 
 export function createSpecopsInitializerService(db: Db) {
@@ -11,11 +15,13 @@ export function createSpecopsInitializerService(db: Db) {
     async initializeProjectSpecops(projectId: string) {
       const project = await createProjectService(db).getProject(projectId);
 
-      if (path.isAbsolute(project.repoPath) && path.isAbsolute(project.specopsPath)) {
-        assertInsideDirectory(project.repoPath, project.specopsPath);
-      }
+      assertInsideDirectory(project.repoPath, project.specopsPath);
+      await assertRealPathInsideDirectory(project.repoPath, project.repoPath);
+      await assertExistingParentInsideDirectory(project.repoPath, project.specopsPath);
+      await mkdir(project.specopsPath, { recursive: true });
+      const specopsPath = await assertRealPathInsideDirectory(project.repoPath, project.specopsPath);
 
-      return initializeSpecopsFolder(project.specopsPath);
+      return initializeSpecopsFolder(specopsPath);
     }
   };
 }

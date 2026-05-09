@@ -8,6 +8,7 @@ import { indexRuns, projects, specEntities, specLinks, validationMessages } from
 import { and, count, desc, eq } from "drizzle-orm";
 
 import { ConflictError, NotFoundError } from "../lib/http-errors.js";
+import { normalizeProjectPathsForPersistence } from "../lib/path-safety.js";
 
 export type ProjectSummaryDto = ProjectDto & {
   entityCount: number;
@@ -24,6 +25,11 @@ export function createProjectService(db: Db) {
   }
 
   async function createProject(input: CreateProjectRequest): Promise<ProjectDto> {
+    const paths = await normalizeProjectPathsForPersistence({
+      repoPath: input.repoPath,
+      specopsPath: input.specopsPath
+    });
+
     try {
       const [row] = await db
         .insert(projects)
@@ -31,8 +37,8 @@ export function createProjectService(db: Db) {
           name: input.name,
           slug: input.slug,
           description: input.description ?? null,
-          repoPath: input.repoPath,
-          specopsPath: input.specopsPath
+          repoPath: paths.repoPath,
+          specopsPath: paths.specopsPath
         })
         .returning();
 
@@ -60,6 +66,14 @@ export function createProjectService(db: Db) {
   }
 
   async function updateProject(projectId: string, input: UpdateProjectRequest): Promise<ProjectDto> {
+    const existing = await getProject(projectId);
+    const paths =
+      input.repoPath !== undefined || input.specopsPath !== undefined
+        ? await normalizeProjectPathsForPersistence({
+            repoPath: input.repoPath ?? existing.repoPath,
+            specopsPath: input.specopsPath ?? existing.specopsPath
+          })
+        : null;
     const values: Partial<typeof projects.$inferInsert> = {
       updatedAt: new Date()
     };
@@ -67,8 +81,10 @@ export function createProjectService(db: Db) {
     if (input.name !== undefined) values.name = input.name;
     if (input.slug !== undefined) values.slug = input.slug;
     if (input.description !== undefined) values.description = input.description;
-    if (input.repoPath !== undefined) values.repoPath = input.repoPath;
-    if (input.specopsPath !== undefined) values.specopsPath = input.specopsPath;
+    if (paths) {
+      values.repoPath = paths.repoPath;
+      values.specopsPath = paths.specopsPath;
+    }
 
     try {
       const [row] = await db

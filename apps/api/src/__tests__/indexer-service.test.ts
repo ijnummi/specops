@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,36 +7,35 @@ import { projects, specEntities, specFiles, specLinks, validationMessages } from
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
 
-const databaseUrl = process.env.DATABASE_URL;
-const describeWithDb = databaseUrl ? describe : describe.skip;
+const testDatabaseUrl = readTestDatabaseUrl();
+const describeWithDb = testDatabaseUrl ? describe : describe.skip;
 const { Pool } = pg;
 
 describeWithDb("indexProject", () => {
   const tempRoots: string[] = [];
+  const fixtureProjectIds: string[] = [];
   let pool: pg.Pool;
   let db: Db;
 
   beforeAll(async () => {
-    if (!databaseUrl) {
+    if (!testDatabaseUrl) {
       return;
     }
 
-    await migrateTestDatabase(databaseUrl);
-    pool = new Pool({ connectionString: databaseUrl });
+    await migrateTestDatabase(testDatabaseUrl);
+    pool = new Pool({ connectionString: testDatabaseUrl });
     db = drizzle(pool) as unknown as Db;
   });
 
-  beforeEach(async () => {
-    await db.delete(validationMessages);
-    await db.delete(specLinks);
-    await db.delete(specEntities);
-    await db.delete(specFiles);
-    await db.delete(projects);
+  afterEach(async () => {
+    for (const projectId of fixtureProjectIds.splice(0)) {
+      await db.delete(projects).where(eq(projects.id, projectId));
+    }
   });
 
   afterAll(async () => {
@@ -145,6 +144,44 @@ describeWithDb("indexProject", () => {
       errors: 0,
       warnings: 0
     });
+  });
+
+  it("waits on the per-project advisory lock before indexing", async () => {
+    const { projectId, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "tasks/TASK-1.md",
+      specMarkdown({
+        id: "TASK-1",
+        type: "task",
+        title: "Build indexer",
+        status: "draft",
+        body: "Implement the derived cache indexer."
+      })
+    );
+    const lockClient = await pool.connect();
+
+    try {
+      await lockClient.query("begin");
+      await lockClient.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        projectId
+      ]);
+
+      const indexPromise = createIndexerService(db).indexProject(projectId);
+      const pending = Symbol("pending");
+      const earlyResult = await Promise.race([indexPromise, delay(100).then(() => pending)]);
+      expect(earlyResult).toBe(pending);
+
+      await lockClient.query("commit");
+      await expect(indexPromise).resolves.toMatchObject({
+        projectId,
+        status: "succeeded",
+        entityCount: 1
+      });
+    } finally {
+      await lockClient.query("rollback").catch(() => undefined);
+      lockClient.release();
+    }
   });
 
   it("removes derived entities and links when a markdown file is deleted", async () => {
@@ -266,6 +303,79 @@ describeWithDb("indexProject", () => {
     expect(messages).toHaveLength(1);
   });
 
+  it("rejects relative or outside project paths before persisting", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-indexer-"));
+    tempRoots.push(root);
+    const service = createProjectService(db);
+
+    await expect(
+      service.createProject({
+        name: "Relative paths",
+        slug: `relative-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        repoPath: "relative/repo",
+        specopsPath: path.join(root, ".specops")
+      })
+    ).rejects.toThrow(/absolute/);
+
+    await expect(
+      service.createProject({
+        name: "Outside specops",
+        slug: `outside-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        repoPath: path.join(root, "repo"),
+        specopsPath: path.join(root, "sibling")
+      })
+    ).rejects.toThrow(/inside/);
+  });
+
+  it("rejects project creation when an existing specops path symlink escapes the repository", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-indexer-"));
+    tempRoots.push(root);
+    const repoPath = path.join(root, "repo");
+    const outside = path.join(root, "outside");
+    await mkdir(repoPath);
+    await mkdir(outside);
+    await symlink(outside, path.join(repoPath, ".specops"), "dir");
+
+    await expect(
+      createProjectService(db).createProject({
+        name: "Symlink escape",
+        slug: `symlink-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        repoPath,
+        specopsPath: path.join(repoPath, ".specops")
+      })
+    ).rejects.toThrow(/inside/);
+  });
+
+  it("rejects update paths that move specops outside the repository", async () => {
+    const { projectId, root } = await createProjectFixture();
+
+    await expect(
+      createProjectService(db).updateProject(projectId, {
+        specopsPath: path.join(path.dirname(root), "sibling")
+      })
+    ).rejects.toThrow(/inside/);
+  });
+
+  it("rejects indexing when a persisted specops path points outside the repository", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-indexer-"));
+    tempRoots.push(root);
+    const repoPath = path.join(root, "repo");
+    const specopsPath = path.join(root, "sibling");
+    await mkdir(specopsPath, { recursive: true });
+    const [project] = await db
+      .insert(projects)
+      .values({
+        name: "Unsafe persisted project",
+        slug: `unsafe-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        repoPath,
+        specopsPath
+      })
+      .returning();
+    fixtureProjectIds.push(project.id);
+
+    await expect(createIndexerService(db).indexProject(project.id)).rejects.toThrow(/inside/);
+  });
+
   async function createProjectFixture() {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-indexer-"));
     tempRoots.push(root);
@@ -276,6 +386,7 @@ describeWithDb("indexProject", () => {
       repoPath: root,
       specopsPath
     });
+    fixtureProjectIds.push(project.id);
 
     return { projectId: project.id, root, specopsPath };
   }
@@ -322,6 +433,34 @@ async function migrateTestDatabase(connectionString: string) {
     await client.query(sql);
   } finally {
     await client.end();
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readTestDatabaseUrl(): string | undefined {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url && process.env.CI) {
+    throw new Error("TEST_DATABASE_URL is required for DB-backed API tests in CI");
+  }
+
+  if (url) {
+    assertSafeTestDatabaseUrl(url);
+  }
+
+  return url;
+}
+
+function assertSafeTestDatabaseUrl(connectionString: string) {
+  const parsed = new URL(connectionString);
+  const databaseName = parsed.pathname.replace(/^\//, "");
+
+  if (!databaseName.includes("test") && !databaseName.includes("specops_test")) {
+    throw new Error(
+      `Refusing to run DB-backed API tests against non-test database "${databaseName}"`
+    );
   }
 }
 
