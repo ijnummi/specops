@@ -240,6 +240,22 @@ describe("parseSourceFacts", () => {
     });
   });
 
+  it("warns when variable statement specops annotations attach to no symbol", () => {
+    const result = parseSourceFacts({
+      path: "src/destructured.ts",
+      content:
+        "/** @specops domain.x */\n" +
+        "export const { x } = source;\n"
+    });
+
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_unresolved_symbol",
+        filePath: "src/destructured.ts"
+      })
+    );
+  });
+
   it("ignores unrelated leading comments", () => {
     const result = parseSourceFacts({
       path: "src/workspace.ts",

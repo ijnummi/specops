@@ -97,13 +97,16 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     }
 
     if (ts.isVariableStatement(statement)) {
+      let createdSymbol = false;
       for (const declaration of statement.declarationList.declarations) {
         if (!ts.isIdentifier(declaration.name)) continue;
         const name = declaration.name.text;
         const isExported = hasExportModifier(statement) || localExportedNames.has(name);
         symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported, statement));
+        createdSymbol = true;
         if (hasExportModifier(statement)) exports.push(namedExport(name));
       }
+      if (!createdSymbol) warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
