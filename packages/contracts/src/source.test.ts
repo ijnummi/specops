@@ -18,7 +18,21 @@ describe("source contracts", () => {
     ).toEqual({
       language: "typescript",
       kind: "source",
-      q: "indexer"
+      q: "indexer",
+      limit: 50,
+      offset: 0
+    });
+  });
+
+  it("coerces source file list pagination params", () => {
+    expect(
+      sourceFileListQuerySchema.parse({
+        limit: "10",
+        offset: "20"
+      })
+    ).toMatchObject({
+      limit: 10,
+      offset: 20
     });
   });
 

@@ -13,7 +13,7 @@ import {
   validationMessages
 } from "@specops/db";
 import { scanRepository, type ScanRepositoryResult } from "@specops/repo-scanner";
-import { and, asc, count, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, count, eq, ilike, inArray } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
 
@@ -200,25 +200,33 @@ async function listSourceFiles(
       kind: sourceFiles.kind,
       sizeBytes: sourceFiles.sizeBytes,
       contentHash: sourceFiles.contentHash,
-      lastSeenAt: sourceFiles.lastSeenAt,
-      importCount: sql<number>`(
-        select count(*)::int from ${sourceImports}
-        where ${sourceImports.sourceFileId} = ${sourceFiles.id}
-      )`,
-      exportCount: sql<number>`(
-        select count(*)::int from ${sourceExports}
-        where ${sourceExports.sourceFileId} = ${sourceFiles.id}
-      )`,
-      symbolCount: sql<number>`(
-        select count(*)::int from ${sourceSymbols}
-        where ${sourceSymbols.sourceFileId} = ${sourceFiles.id}
-      )`
+      lastSeenAt: sourceFiles.lastSeenAt
     })
     .from(sourceFiles)
     .where(and(...filters))
-    .orderBy(asc(sourceFiles.path));
+    .orderBy(asc(sourceFiles.path))
+    .limit(query.limit)
+    .offset(query.offset);
 
-  return rows.map(mapSourceFileSummary);
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const sourceFileIds = rows.map((row) => row.id);
+  const [importCounts, exportCounts, symbolCounts] = await Promise.all([
+    countSourceFacts(db, sourceImports, sourceImports.sourceFileId, projectId, sourceFileIds),
+    countSourceFacts(db, sourceExports, sourceExports.sourceFileId, projectId, sourceFileIds),
+    countSourceFacts(db, sourceSymbols, sourceSymbols.sourceFileId, projectId, sourceFileIds)
+  ]);
+
+  return rows.map((row) =>
+    mapSourceFileSummary({
+      ...row,
+      importCount: importCounts.get(row.id) ?? 0,
+      exportCount: exportCounts.get(row.id) ?? 0,
+      symbolCount: symbolCounts.get(row.id) ?? 0
+    })
+  );
 }
 
 async function getSourceFileDetail(
@@ -226,11 +234,12 @@ async function getSourceFileDetail(
   projectId: string,
   sourceFileId: string
 ): Promise<SourceFileDetailDto> {
-  const [summary] = await listSourceFiles(db, projectId, {}).then((rows) =>
-    rows.filter((row) => row.id === sourceFileId)
-  );
+  const [sourceFile] = await db
+    .select()
+    .from(sourceFiles)
+    .where(and(eq(sourceFiles.projectId, projectId), eq(sourceFiles.id, sourceFileId)));
 
-  if (!summary) {
+  if (!sourceFile) {
     throw new NotFoundError("Source file not found", { projectId, sourceFileId });
   }
 
@@ -253,14 +262,14 @@ async function getSourceFileDetail(
   ]);
 
   return {
-    id: summary.id,
-    projectId: summary.projectId,
-    path: summary.path,
-    language: summary.language,
-    kind: summary.kind,
-    sizeBytes: summary.sizeBytes,
-    contentHash: summary.contentHash,
-    lastSeenAt: summary.lastSeenAt,
+    id: sourceFile.id,
+    projectId: sourceFile.projectId,
+    path: sourceFile.path,
+    language: sourceFile.language as SourceFileDetailDto["language"],
+    kind: sourceFile.kind as SourceFileDetailDto["kind"],
+    sizeBytes: sourceFile.sizeBytes,
+    contentHash: sourceFile.contentHash,
+    lastSeenAt: sourceFile.lastSeenAt.toISOString(),
     imports: imports.map((sourceImport) => ({
       id: sourceImport.id,
       specifier: sourceImport.specifier,
@@ -284,6 +293,25 @@ async function getSourceFileDetail(
       metadata: toRecord(symbol.metadataJson)
     }))
   };
+}
+
+async function countSourceFacts(
+  db: SourceScanDb,
+  table: typeof sourceImports | typeof sourceExports | typeof sourceSymbols,
+  sourceFileIdColumn:
+    | typeof sourceImports.sourceFileId
+    | typeof sourceExports.sourceFileId
+    | typeof sourceSymbols.sourceFileId,
+  projectId: string,
+  sourceFileIds: string[]
+): Promise<Map<string, number>> {
+  const rows = await db
+    .select({ sourceFileId: sourceFileIdColumn, total: count() })
+    .from(table)
+    .where(and(eq(table.projectId, projectId), inArray(sourceFileIdColumn, sourceFileIds)))
+    .groupBy(sourceFileIdColumn);
+
+  return new Map(rows.map((row) => [row.sourceFileId, row.total]));
 }
 
 async function getSourceAggregate(

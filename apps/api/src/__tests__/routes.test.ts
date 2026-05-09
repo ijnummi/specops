@@ -12,6 +12,7 @@ import { buildServer } from "../server.js";
 import { createAgentTaskService } from "../services/agent-task-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
+import { createSourceScanService } from "../services/source-scan-service.js";
 
 const testDatabaseUrl = readTestDatabaseUrl();
 const describeWithDb = testDatabaseUrl ? describe : describe.skip;
@@ -405,6 +406,57 @@ describeWithDb("database-backed routes", () => {
         level: "warning"
       })
     );
+  });
+
+  it("scopes source file detail lookup by project and source file id", async () => {
+    const db = createTestDb();
+    const firstProject = await createProjectDirectly(db);
+    const secondProject = await createProjectDirectly(db);
+    await mkdir(path.join(firstProject.repoPath, "src"), { recursive: true });
+    await mkdir(path.join(secondProject.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(firstProject.repoPath, "src", "alpha.ts"), "export const alpha = 1;\n");
+    await writeFile(path.join(firstProject.repoPath, "src", "gamma.ts"), "export const gamma = 3;\n");
+    await writeFile(path.join(secondProject.repoPath, "src", "beta.ts"), "export const beta = 2;\n");
+
+    const sourceScanService = createSourceScanService(db);
+    await sourceScanService.scanAndPersistProject({
+      projectId: firstProject.id,
+      repoPath: firstProject.repoPath,
+      indexRunId: firstProject.id
+    });
+    await sourceScanService.scanAndPersistProject({
+      projectId: secondProject.id,
+      repoPath: secondProject.repoPath,
+      indexRunId: secondProject.id
+    });
+
+    const firstFiles = await sourceScanService.listSourceFiles(firstProject.id, {
+      limit: 50,
+      offset: 0
+    });
+    const secondFiles = await sourceScanService.listSourceFiles(secondProject.id, {
+      limit: 50,
+      offset: 0
+    });
+    const alphaFile = firstFiles.find((file) => file.path === "src/alpha.ts");
+    const betaFile = secondFiles.find((file) => file.path === "src/beta.ts");
+
+    expect(firstFiles).toHaveLength(2);
+    expect(alphaFile).toBeDefined();
+    expect(betaFile).toBeDefined();
+
+    await expect(
+      sourceScanService.getSourceFileDetail(firstProject.id, betaFile!.id)
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Source file not found"
+    });
+    await expect(
+      sourceScanService.getSourceFileDetail(firstProject.id, alphaFile!.id)
+    ).resolves.toMatchObject({
+      projectId: firstProject.id,
+      path: "src/alpha.ts"
+    });
   });
 
   it("previews an agent task with one-hop context", async () => {

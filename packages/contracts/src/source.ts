@@ -18,7 +18,9 @@ export const sourceLanguageSchema = z.enum([
 export const sourceFileListQuerySchema = z.object({
   language: sourceLanguageSchema.optional(),
   kind: sourceFileKindSchema.optional(),
-  q: z.string().optional()
+  q: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0)
 });
 
 export const sourceFileSummarySchema = z.object({
