@@ -5,5 +5,12 @@
     "rootDir": "src",
     "composite": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/markdown" },
+    { "path": "../../packages/graph" }
+  ]
 }
