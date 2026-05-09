@@ -1,10 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  doublePrecision,
   index,
   integer,
   jsonb,
-  numeric,
   pgTable,
   text,
   timestamp,
@@ -113,7 +113,7 @@ export const specLinks = pgTable(
     toEntityId: text("to_entity_id").notNull(),
     linkType: text("link_type").notNull(),
     source: text("source").notNull(),
-    confidence: numeric("confidence", { precision: 5, scale: 4 }).notNull(),
+    confidence: doublePrecision("confidence"),
     createdAt: createdAt(),
   },
   (table) => ({
@@ -183,7 +183,7 @@ export const aiProposals = pgTable(
     title: text("title").notNull(),
     payloadJson: jsonb("payload_json").notNull().default(sql`'{}'::jsonb`),
     evidenceJson: jsonb("evidence_json").notNull().default(sql`'{}'::jsonb`),
-    confidence: numeric("confidence", { precision: 5, scale: 4 }).notNull(),
+    confidence: doublePrecision("confidence"),
     status: text("status").notNull(),
     createdAt: createdAt(),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),

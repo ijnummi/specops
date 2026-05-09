@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS spec_links (
   to_entity_id text NOT NULL,
   link_type text NOT NULL,
   source text NOT NULL,
-  confidence numeric(5, 4) NOT NULL,
+  confidence double precision,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT spec_links_project_from_to_type_source_unique UNIQUE (
     project_id,
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS ai_proposals (
   title text NOT NULL,
   payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
   evidence_json jsonb NOT NULL DEFAULT '{}'::jsonb,
-  confidence numeric(5, 4) NOT NULL,
+  confidence double precision,
   status text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   reviewed_at timestamptz
