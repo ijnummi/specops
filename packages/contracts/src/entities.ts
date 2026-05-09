@@ -1,0 +1,46 @@
+import { z } from "zod";
+
+export const specEntitySchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  entityId: z.string(),
+  type: z.string(),
+  title: z.string(),
+  status: z.string(),
+  filePath: z.string(),
+  frontmatter: z.record(z.unknown()),
+  bodyMarkdown: z.string(),
+  bodyText: z.string(),
+  contentHash: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const specLinkSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  fromEntityId: z.string(),
+  toEntityId: z.string(),
+  linkType: z.string(),
+  source: z.string(),
+  confidence: z.number().nullable(),
+  createdAt: z.string()
+});
+
+export const createEntityRequestSchema = z.object({
+  entityId: z.string().min(1),
+  type: z.string().min(1),
+  title: z.string().min(1),
+  status: z.string().default("draft")
+});
+
+export const updateEntityMarkdownRequestSchema = z.object({
+  markdown: z.string()
+});
+
+export type SpecEntityDto = z.infer<typeof specEntitySchema>;
+export type SpecLinkDto = z.infer<typeof specLinkSchema>;
+export type CreateEntityRequest = z.infer<typeof createEntityRequestSchema>;
+export type UpdateEntityMarkdownRequest = z.infer<
+  typeof updateEntityMarkdownRequestSchema
+>;
