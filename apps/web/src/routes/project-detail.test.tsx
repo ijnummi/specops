@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   mutationStates: [] as Array<{ isPending: boolean; error: Error | null }>,
   navigate: vi.fn(),
   invalidateQueries: vi.fn(),
+  debouncedValueOverride: null as string | null,
   overviewQueryOptions: [] as Array<{ enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }>,
   searchQuery: vi.fn((projectId: string, input: { q: string; limit: number }) => ({
     queryKey: ["projects", projectId, "search", input],
@@ -191,6 +192,10 @@ vi.mock("../components/validation-panel.js", () => ({
   ValidationPanel: () => null
 }));
 
+vi.mock("../lib/use-debounced-value.js", () => ({
+  useDebouncedValue: (value: string) => mocks.debouncedValueOverride ?? value
+}));
+
 import { ProjectDetailPage } from "./project-detail.js";
 
 describe("ProjectDetailPage actions", () => {
@@ -199,6 +204,7 @@ describe("ProjectDetailPage actions", () => {
     mocks.searchQuery.mockClear();
     mocks.projectActionsProps = null;
     mocks.invalidateQueries.mockReset();
+    mocks.debouncedValueOverride = null;
     mocks.overviewQueryOptions = [];
     mocks.searchQueryOptions = [];
     mocks.searchState = {
@@ -284,6 +290,23 @@ describe("ProjectDetailPage actions", () => {
       expect.objectContaining({
         enabled: true,
         queryKey: ["projects", "project-1", "search", { q: "customer", limit: 25 }]
+      })
+    ]);
+  });
+
+  it("keeps server search disabled while an active query is waiting for debounce", () => {
+    mocks.debouncedValueOverride = "";
+
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="customer" />
+    );
+
+    expect(html).toContain("Searching");
+    expect(html).not.toContain("expanded search results:");
+    expect(mocks.searchQueryOptions).toEqual([
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "search", { q: "", limit: 25 }]
       })
     ]);
   });

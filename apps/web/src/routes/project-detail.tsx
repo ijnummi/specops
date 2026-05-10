@@ -57,7 +57,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   });
   const searchResults = useQuery({
     ...searchOptions,
-    enabled: hasActiveQuery
+    enabled: hasDebouncedQuery
   });
   const [entities, validation, indexRuns] = useQueries({
     queries: [
