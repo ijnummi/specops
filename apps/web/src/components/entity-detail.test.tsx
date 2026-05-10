@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SpecEntityDto } from "@specops/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   entity: {
@@ -25,15 +25,23 @@ const mocks = vi.hoisted(() => ({
     contentHash: "hash-1",
     createdAt: "2026-05-09T12:00:00.000Z",
     updatedAt: "2026-05-09T12:00:00.000Z"
-  } satisfies SpecEntityDto
+  } satisfies SpecEntityDto,
+  invalidateQueries: vi.fn(),
+  mutationOptions: [] as Array<{
+    onSuccess?: (data: unknown, variables: unknown) => unknown;
+  }>
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useMutation: () => ({
-    error: null,
-    isPending: false,
-    mutate: vi.fn()
-  }),
+  useMutation: (options: { onSuccess?: (data: unknown, variables: unknown) => unknown }) => {
+    mocks.mutationOptions.push(options);
+
+    return {
+      error: null,
+      isPending: false,
+      mutate: vi.fn()
+    };
+  },
   useQueries: () => [
     { data: [], error: null },
     { data: [], error: null }
@@ -46,7 +54,7 @@ vi.mock("@tanstack/react-query", () => ({
     return { data: [], error: null, isLoading: false };
   },
   useQueryClient: () => ({
-    invalidateQueries: vi.fn()
+    invalidateQueries: mocks.invalidateQueries
   })
 }));
 
@@ -88,6 +96,7 @@ vi.mock("../api/queries.js", () => ({
     indexRuns: (projectId: string) => ["index-runs", projectId],
     outgoingLinks: (projectId: string, entityId: string) => ["outgoing-links", projectId, entityId],
     project: (projectId: string) => ["project", projectId],
+    projectOverview: (projectId: string) => ["project-overview", projectId],
     sourceLinks: (projectId: string, entityId: string) => ["source-links", projectId, entityId],
     validation: (projectId: string) => ["validation", projectId]
   },
@@ -115,6 +124,11 @@ vi.mock("./source-link-tabs.js", () => ({
 import { EntityDetail } from "./entity-detail.js";
 
 describe("EntityDetail", () => {
+  beforeEach(() => {
+    mocks.invalidateQueries.mockReset();
+    mocks.mutationOptions = [];
+  });
+
   it("links the loaded entity to the impact views", () => {
     const html = renderToStaticMarkup(
       <EntityDetail
@@ -135,7 +149,55 @@ describe("EntityDetail", () => {
       "/projects/project-1/change-impact/domain.decision?depth=1&direction=both&includeSource=true"
     );
   });
+
+  it("invalidates the project overview after saving entity markdown", async () => {
+    renderEntityDetail();
+
+    await mocks.mutationOptions[0]?.onSuccess?.(
+      { ...mocks.entity, contentHash: "hash-2" },
+      "# Decision\n\nUpdated body"
+    );
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["project-overview", "project-1"]
+    });
+  });
+
+  it("invalidates the project overview after saving a generated task", async () => {
+    renderEntityDetail();
+
+    await mocks.mutationOptions[2]?.onSuccess?.(savedTaskResponse(), {
+      projectId: "project-1",
+      sourceEntityId: "domain.decision",
+      preview: {
+        contextSpecIds: ["domain.outcome"],
+        filePath: "tasks/domain-decision.md",
+        markdown: "# Task",
+        sourceSpecIds: ["domain.decision"],
+        taskId: "task.domain-decision",
+        title: "Task",
+        warnings: []
+      }
+    });
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["project-overview", "project-1"]
+    });
+  });
 });
+
+function renderEntityDetail() {
+  return renderToStaticMarkup(
+    <EntityDetail
+      projectId="project-1"
+      entityId="domain.decision"
+      draft={null}
+      onDraftChange={vi.fn()}
+      onFetchedMarkdown={vi.fn()}
+      onSaveDraft={vi.fn()}
+    />
+  );
+}
 
 function linkHref(container: HTMLElement, label: string) {
   const link = Array.from(container.querySelectorAll("a")).find((element) =>
@@ -143,4 +205,15 @@ function linkHref(container: HTMLElement, label: string) {
   );
 
   return link?.getAttribute("href");
+}
+
+function savedTaskResponse(): SpecEntityDto {
+  return {
+    ...mocks.entity,
+    id: "entity-task-1",
+    entityId: "task.domain-decision",
+    type: "agent_task",
+    title: "Task",
+    filePath: "tasks/domain-decision.md"
+  };
 }

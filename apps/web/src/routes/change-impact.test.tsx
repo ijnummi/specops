@@ -135,6 +135,9 @@ describe("ChangeImpactPage", () => {
         { depth: "1", direction: "both", includeSource: true }
       ]
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "overview"]
+    });
   });
 
   it("ignores stale generated task previews after the route entity changes", async () => {

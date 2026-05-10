@@ -42,7 +42,10 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const queryClient = useQueryClient();
   const entityDrafts = useEntityDrafts();
   const project = useQuery(projectQuery(projectId));
-  const overview = useQuery(projectOverviewQuery(projectId));
+  const overview = useQuery({
+    ...projectOverviewQuery(projectId),
+    enabled: entityId === null
+  });
   const [entities, validation, indexRuns] = useQueries({
     queries: [
       entitiesQuery(projectId),

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   mutationStates: [] as Array<{ isPending: boolean; error: Error | null }>,
   navigate: vi.fn(),
   invalidateQueries: vi.fn(),
+  overviewQueryOptions: [] as Array<{ enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }>,
   projectActionsProps: null as ProjectActionsProps | null,
   overviewState: {
     data: { project: { id: "project-1", name: "SpecOps" } },
@@ -84,21 +85,25 @@ vi.mock("@tanstack/react-query", () => ({
     { data: [], error: null },
     { data: [], error: null }
   ],
-  useQuery: (options: { queryType?: string }) =>
-    options.queryType === "overview"
-      ? mocks.overviewState
-      : {
-          data: {
-            entityCount: 0,
-            linkCount: 0,
-            name: "SpecOps",
-            repoPath: "/repo",
-            specopsPath: "specops",
-            validationErrorCount: 0,
-            validationWarningCount: 0
-          },
-          error: null
-        },
+  useQuery: (options: { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }) => {
+    if (options.queryType === "overview") {
+      mocks.overviewQueryOptions.push(options);
+      return mocks.overviewState;
+    }
+
+    return {
+      data: {
+        entityCount: 0,
+        linkCount: 0,
+        name: "SpecOps",
+        repoPath: "/repo",
+        specopsPath: "specops",
+        validationErrorCount: 0,
+        validationWarningCount: 0
+      },
+      error: null
+    };
+  },
   useQueryClient: () => ({
     invalidateQueries: mocks.invalidateQueries
   })
@@ -153,6 +158,7 @@ describe("ProjectDetailPage actions", () => {
     mocks.bootstrapFromSource.mockReset();
     mocks.projectActionsProps = null;
     mocks.invalidateQueries.mockReset();
+    mocks.overviewQueryOptions = [];
     mocks.overviewState = {
       data: { project: { id: "project-1", name: "SpecOps" } },
       error: null,
@@ -189,6 +195,17 @@ describe("ProjectDetailPage actions", () => {
 
     expect(html).toContain("Entity editor: entity-1");
     expect(html).not.toContain("Project overview dashboard:");
+  });
+
+  it("disables the project overview query when an entity is selected", () => {
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId="entity-1" query="" />);
+
+    expect(mocks.overviewQueryOptions).toContainEqual(
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "overview"]
+      })
+    );
   });
 
   it("wires the bootstrap action to bootstrap the current project from source", () => {

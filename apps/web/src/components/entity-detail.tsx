@@ -127,7 +127,8 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.sourceLinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) })
       ]);
     }
   });
@@ -194,6 +195,7 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.validation(request.projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(request.projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.project(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(request.projectId) }),
         queryClient.invalidateQueries({
           queryKey: queryKeys.outgoingLinks(request.projectId, request.sourceEntityId)
         }),
