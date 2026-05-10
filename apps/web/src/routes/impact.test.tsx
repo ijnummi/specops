@@ -12,14 +12,20 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({
     children,
     params,
-    search
+    search,
+    to
   }: {
     children: React.ReactNode;
     params?: Record<string, string>;
     search?: Record<string, string | undefined>;
+    to: string;
   }) => {
     const suffix = search?.depth ? `?depth=${search.depth}` : "";
-    return <a href={`/projects/${params?.projectId}/entities/${params?.entityId}${suffix}`}>{children}</a>;
+    const href = to
+      .replace("$projectId", params?.projectId ?? "")
+      .replace("$entityId", params?.entityId ?? "");
+
+    return <a href={`${href}${suffix}`}>{children}</a>;
   },
   useNavigate: () => vi.fn()
 }));
@@ -61,8 +67,16 @@ describe("ImpactPage", () => {
     expect(container.textContent).toContain("Source evidence");
     expect(container.textContent).toContain("Upstream");
     expect(container.textContent).toContain("Downstream");
+    expect(container.textContent).toContain("Trace Details");
+    expect(container.textContent).toContain("Impact Brief");
+    expect(container.textContent).toContain("Upstream 1 / Downstream 1 / Source 1");
+    expect(definitionValue(container, "Upstream")).toBe("1");
+    expect(definitionValue(container, "Downstream")).toBe("1");
+    expect(definitionValue(container, "Source evidence")).toBe("1");
     expect(container.textContent).toContain("src/domain.ts");
-    expect(container.innerHTML).toContain("/projects/project-1/entities/domain.decision");
+    expect(linkHref(container, "Open Editor")).toBe(
+      "/projects/project-1/entities/domain.decision"
+    );
   });
 });
 
@@ -101,6 +115,22 @@ function waitForQueryResult() {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
+}
+
+function definitionValue(container: HTMLElement, label: string) {
+  const item = Array.from(container.querySelectorAll("dl > div")).find(
+    (element) => element.querySelector("dt")?.textContent === label
+  );
+
+  return item?.querySelector("dd")?.textContent;
+}
+
+function linkHref(container: HTMLElement, label: string) {
+  const link = Array.from(container.querySelectorAll("a")).find((element) =>
+    element.textContent?.includes(label)
+  );
+
+  return link?.getAttribute("href");
 }
 
 function impactResponse(): EntityImpactResponseDto {
@@ -147,8 +177,48 @@ function impactResponse(): EntityImpactResponseDto {
         symbolName: "Decision"
       }
     ],
-    upstreamPaths: [],
-    downstreamPaths: [],
+    upstreamPaths: [
+      {
+        direction: "upstream",
+        entityIds: ["domain.policy", "domain.decision"],
+        steps: [
+          {
+            entityId: "domain.policy",
+            title: "Policy",
+            type: "domain_entity",
+            status: "draft"
+          },
+          {
+            entityId: "domain.decision",
+            title: "Decision",
+            type: "domain_entity",
+            status: "draft"
+          }
+        ],
+        linkTypes: ["relates_to"]
+      }
+    ],
+    downstreamPaths: [
+      {
+        direction: "downstream",
+        entityIds: ["domain.decision", "domain.outcome"],
+        steps: [
+          {
+            entityId: "domain.decision",
+            title: "Decision",
+            type: "domain_entity",
+            status: "draft"
+          },
+          {
+            entityId: "domain.outcome",
+            title: "Outcome",
+            type: "domain_entity",
+            status: "draft"
+          }
+        ],
+        linkTypes: ["depends_on"]
+      }
+    ],
     sourceEvidence: [
       {
         entityId: "domain.decision",
