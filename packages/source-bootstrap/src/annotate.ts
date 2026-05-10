@@ -79,24 +79,52 @@ export function applySourceSpecAnnotations(
 }
 
 function findLeadingJsdoc(lines: string[], declarationIndex: number): LeadingJsdoc | null {
-  const candidateEnd = declarationIndex - 1;
-  if (candidateEnd < 0 || !lines[candidateEnd]?.includes("*/")) {
+  let candidateEnd = declarationIndex - 1;
+  while (candidateEnd >= 0 && isBlankLine(lines[candidateEnd] ?? "")) {
+    candidateEnd -= 1;
+  }
+
+  if (isSingleLineJsdoc(lines[candidateEnd] ?? "")) {
+    return { start: candidateEnd, end: candidateEnd };
+  }
+
+  if (candidateEnd < 0 || !isBlockCommentCloseLine(lines[candidateEnd] ?? "")) {
     return null;
   }
 
   for (let index = candidateEnd; index >= 0; index -= 1) {
     const line = lines[index] ?? "";
 
-    if (/^\s*\/\*/.test(line)) {
-      if (/^\s*\/\*\*/.test(line)) {
-        return { start: index, end: candidateEnd };
-      }
+    if (isJsdocOpenLine(line)) {
+      return { start: index, end: candidateEnd };
+    }
 
+    if (!isBlockCommentBodyLine(line)) {
       return null;
     }
   }
 
   return null;
+}
+
+function isBlankLine(line: string): boolean {
+  return /^\s*$/.test(line);
+}
+
+function isBlockCommentCloseLine(line: string): boolean {
+  return /^\s*(?:\*.*)?\*\/\s*$/.test(line);
+}
+
+function isJsdocOpenLine(line: string): boolean {
+  return /^\s*\/\*\*/.test(line);
+}
+
+function isSingleLineJsdoc(line: string): boolean {
+  return isJsdocOpenLine(line) && /\*\/\s*$/.test(line);
+}
+
+function isBlockCommentBodyLine(line: string): boolean {
+  return /^\s*\*/.test(line);
 }
 
 function assertUniqueAnnotationLines(

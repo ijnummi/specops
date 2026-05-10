@@ -54,6 +54,22 @@ describe("applySourceSpecAnnotations", () => {
     );
   });
 
+  it("does not treat code containing a block close token as leading JSDoc", () => {
+    const result = applySourceSpecAnnotations({
+      content: '/** File overview. */\nconst marker = "*/";\nexport interface Decision {}\n',
+      annotations: [{ entityId: "domain.decision", symbolName: "Decision", symbolLine: 3 }]
+    });
+
+    expect(result.content).toBe(
+      "/** File overview. */\n" +
+        'const marker = "*/";\n' +
+        "/**\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision {}\n"
+    );
+  });
+
   it("refuses conflicting specops tags on the target declaration", () => {
     expect(() =>
       applySourceSpecAnnotations({
