@@ -137,7 +137,7 @@ export function buildEntityImpact(input: BuildEntityImpactInput): EntityImpactRe
     }));
 
   const sourceEdges = sourceEvidence.map((evidence) => ({
-    id: `source-evidence:${evidence.filePath}:${evidence.symbolName}:${evidence.entityId}`,
+    id: `source-evidence:${sourceEvidenceIdentity(evidence)}`,
     from: specNodeId(evidence.entityId),
     to: sourceNodeId(evidence),
     kind: "source_evidence" as const,
@@ -175,8 +175,13 @@ function traverseDirection(input: {
   includedLinkKeys: Set<string>;
 }): { paths: EntityImpactResponseDto["upstreamPaths"]; truncatedReason: string | null } {
   const maxDepth = input.depth === "all" ? Number.POSITIVE_INFINITY : Number(input.depth);
-  const queue = [{ entityId: input.rootEntityId, pathEntityIds: [input.rootEntityId], linkTypes: [] as string[] }];
-  const visited = new Set<string>([`${input.direction}:${input.rootEntityId}:0`]);
+  const queue = [
+    {
+      entityId: input.rootEntityId,
+      pathEntityIds: [input.rootEntityId],
+      linkTypes: [] as string[]
+    }
+  ];
   const paths: EntityImpactResponseDto["upstreamPaths"] = [];
   let truncatedReason: string | null = null;
 
@@ -204,19 +209,28 @@ function traverseDirection(input: {
         continue;
       }
 
-      if (!input.includedEntityIds.has(nextEntityId)) {
+      const needsEntityAdmission = !input.includedEntityIds.has(nextEntityId);
+      const needsLinkAdmission = !input.includedLinkKeys.has(linkKey(link));
+
+      if (needsEntityAdmission) {
         if (input.includedEntityIds.size >= input.limits.maxSpecNodes) {
           truncatedReason = "spec_node_limit";
           continue;
         }
-        input.includedEntityIds.add(nextEntityId);
       }
 
-      if (!input.includedLinkKeys.has(linkKey(link))) {
+      if (needsLinkAdmission) {
         if (input.includedLinkKeys.size >= input.limits.maxSpecEdges) {
           truncatedReason ??= "spec_edge_limit";
           continue;
         }
+      }
+
+      if (needsEntityAdmission) {
+        input.includedEntityIds.add(nextEntityId);
+      }
+
+      if (needsLinkAdmission) {
         input.includedLinkKeys.add(linkKey(link));
       }
 
@@ -245,18 +259,14 @@ function traverseDirection(input: {
       });
 
       if (!current.pathEntityIds.includes(nextEntityId)) {
-        const visitKey = `${input.direction}:${nextEntityId}:${currentDepth + 1}`;
-        if (!visited.has(visitKey)) {
-          visited.add(visitKey);
-          queue.push({
-            entityId: nextEntityId,
-            pathEntityIds:
-              input.direction === "downstream"
-                ? [...current.pathEntityIds, nextEntityId]
-                : [nextEntityId, ...current.pathEntityIds],
-            linkTypes: nextLinkTypes
-          });
-        }
+        queue.push({
+          entityId: nextEntityId,
+          pathEntityIds:
+            input.direction === "downstream"
+              ? [...current.pathEntityIds, nextEntityId]
+              : [nextEntityId, ...current.pathEntityIds],
+          linkTypes: nextLinkTypes
+        });
       }
     }
   }
@@ -269,7 +279,18 @@ function specNodeId(entityId: string) {
 }
 
 function sourceNodeId(evidence: ImpactSourceEvidenceDto) {
-  return `source:${evidence.filePath}:${evidence.symbolName}:${evidence.entityId}`;
+  return `source:${sourceEvidenceIdentity(evidence)}`;
+}
+
+function sourceEvidenceIdentity(evidence: ImpactSourceEvidenceDto) {
+  return [
+    evidence.filePath,
+    evidence.sourceFileId,
+    evidence.symbolName,
+    evidence.symbolLine ?? "null",
+    evidence.annotationLine ?? "null",
+    evidence.entityId
+  ].join(":");
 }
 
 function linkKey(link: Pick<ImpactLinkInput, "id">) {

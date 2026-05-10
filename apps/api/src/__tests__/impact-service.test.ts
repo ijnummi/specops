@@ -30,7 +30,7 @@ describe("buildEntityImpact", () => {
       "spec:domain.decision",
       "spec:interface.decision-service",
       "spec:uc.create-decision",
-      "source:src/domain.ts:Decision:domain.decision"
+      "source:src/domain.ts:src/domain.ts-id:Decision:3:2:domain.decision"
     ]);
     expect(impact.downstreamPaths.map((path) => path.entityIds)).toEqual([
       ["domain.decision", "interface.decision-service"]
@@ -92,6 +92,99 @@ describe("buildEntityImpact", () => {
       nodeCount: 2
     });
   });
+
+  it("does not include target nodes or source evidence when the spec edge cap rejects the edge", () => {
+    const impact = buildEntityImpact({
+      rootEntityId: "a",
+      depth: "1",
+      direction: "downstream",
+      includeSource: true,
+      limits: { maxSpecNodes: 3, maxSpecEdges: 0, maxSourceEvidence: 300 },
+      entities: [entity("a", "A"), entity("b", "B")],
+      links: [link("a", "b", "uses")],
+      sourceEvidence: [evidence("b", "src/b.ts", "B")]
+    });
+
+    expect(impact.nodes.map((node) => node.id)).toEqual(["spec:a"]);
+    expect(impact.edges).toEqual([]);
+    expect(impact.downstreamPaths).toEqual([]);
+    expect(impact.sourceEvidence).toEqual([]);
+    expect(impact.truncated).toMatchObject({
+      isTruncated: true,
+      reason: "spec_edge_limit",
+      nodeCount: 1,
+      edgeCount: 0,
+      sourceEvidenceCount: 0
+    });
+  });
+
+  it("generates unique node and edge ids for distinct source evidence rows", () => {
+    const impact = buildEntityImpact({
+      rootEntityId: "domain.decision",
+      depth: "1",
+      direction: "both",
+      includeSource: true,
+      entities: [entity("domain.decision", "Decision", "domain_entity")],
+      links: [],
+      sourceEvidence: [
+        evidence("domain.decision", "src/domain.ts", "Decision", {
+          sourceFileId: "source-file-1",
+          symbolLine: 3,
+          annotationLine: 2
+        }),
+        evidence("domain.decision", "src/domain.ts", "Decision", {
+          sourceFileId: "source-file-2",
+          symbolLine: 8,
+          annotationLine: 7
+        })
+      ]
+    });
+
+    const sourceNodeIds = impact.nodes
+      .filter((node) => node.kind === "source")
+      .map((node) => node.id);
+    const sourceEdgeIds = impact.edges
+      .filter((edge) => edge.kind === "source_evidence")
+      .map((edge) => edge.id);
+
+    expect(sourceNodeIds).toHaveLength(2);
+    expect(new Set(sourceNodeIds).size).toBe(2);
+    expect(sourceEdgeIds).toHaveLength(2);
+    expect(new Set(sourceEdgeIds).size).toBe(2);
+  });
+
+  it("continues traversal after converging downstream paths", () => {
+    const impact = buildEntityImpact({
+      rootEntityId: "root",
+      depth: "all",
+      direction: "downstream",
+      includeSource: false,
+      entities: [
+        entity("root", "Root"),
+        entity("a", "A"),
+        entity("b", "B"),
+        entity("c", "C"),
+        entity("d", "D")
+      ],
+      links: [
+        link("root", "a", "uses"),
+        link("root", "b", "uses"),
+        link("a", "c", "uses"),
+        link("b", "c", "uses"),
+        link("c", "d", "uses")
+      ],
+      sourceEvidence: []
+    });
+
+    expect(impact.downstreamPaths.map((path) => path.entityIds)).toEqual([
+      ["root", "a"],
+      ["root", "b"],
+      ["root", "a", "c"],
+      ["root", "b", "c"],
+      ["root", "a", "c", "d"],
+      ["root", "b", "c", "d"]
+    ]);
+  });
 });
 
 function entity(entityId: string, title: string, type = "domain_entity") {
@@ -114,7 +207,17 @@ function link(fromEntityId: string, toEntityId: string, linkType: string) {
   };
 }
 
-function evidence(entityId: string, filePath: string, symbolName: string) {
+function evidence(
+  entityId: string,
+  filePath: string,
+  symbolName: string,
+  overrides: Partial<{
+    sourceFileId: string;
+    symbolKind: string;
+    symbolLine: number | null;
+    annotationLine: number | null;
+  }> = {}
+) {
   return {
     entityId,
     filePath,
@@ -122,6 +225,7 @@ function evidence(entityId: string, filePath: string, symbolName: string) {
     symbolName,
     symbolKind: "interface",
     symbolLine: 3,
-    annotationLine: 2
+    annotationLine: 2,
+    ...overrides
   };
 }
