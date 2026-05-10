@@ -70,6 +70,22 @@ describe("applySourceSpecAnnotations", () => {
     );
   });
 
+  it("does not treat blank-line-separated JSDoc as attached to the declaration", () => {
+    const result = applySourceSpecAnnotations({
+      content: "/** File overview. */\n\nexport interface Decision {}\n",
+      annotations: [{ entityId: "domain.decision", symbolName: "Decision", symbolLine: 3 }]
+    });
+
+    expect(result.content).toBe(
+      "/** File overview. */\n" +
+        "\n" +
+        "/**\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision {}\n"
+    );
+  });
+
   it("refuses conflicting specops tags on the target declaration", () => {
     expect(() =>
       applySourceSpecAnnotations({

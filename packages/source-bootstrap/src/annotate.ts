@@ -79,10 +79,7 @@ export function applySourceSpecAnnotations(
 }
 
 function findLeadingJsdoc(lines: string[], declarationIndex: number): LeadingJsdoc | null {
-  let candidateEnd = declarationIndex - 1;
-  while (candidateEnd >= 0 && isBlankLine(lines[candidateEnd] ?? "")) {
-    candidateEnd -= 1;
-  }
+  const candidateEnd = declarationIndex - 1;
 
   if (isSingleLineJsdoc(lines[candidateEnd] ?? "")) {
     return { start: candidateEnd, end: candidateEnd };
@@ -105,10 +102,6 @@ function findLeadingJsdoc(lines: string[], declarationIndex: number): LeadingJsd
   }
 
   return null;
-}
-
-function isBlankLine(line: string): boolean {
-  return /^\s*$/.test(line);
 }
 
 function isBlockCommentCloseLine(line: string): boolean {
