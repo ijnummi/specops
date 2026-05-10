@@ -30,7 +30,13 @@ export function createEntitySearchService(db: Pick<Db, "execute">) {
     const result = await db.execute<EntitySearchRow>(sql`
       with search_query as (
         select
-          websearch_to_tsquery('simple', ${query.q}) as tsquery,
+          (
+            websearch_to_tsquery('simple', ${query.q}) ||
+            websearch_to_tsquery(
+              'simple',
+              regexp_replace(${query.q}, '[^[:alnum:]]+', ' ', 'g')
+            )
+          ) as tsquery,
           ${pattern}::text as pattern
       ),
       ranked_entities as (
