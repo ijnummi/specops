@@ -9,7 +9,7 @@ import type {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import { specEntities, specLinks, validationMessages } from "@specops/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 
 import { createImpactService } from "./impact-service.js";
 
@@ -43,17 +43,37 @@ export function createChangeImpactPreviewService(db: Db) {
         includeSource: input.query.includeSource
       });
       const impactedEntityIds = specEntityIds(impact);
+      const sourceFilePaths = uniqueSorted(
+        impact.sourceEvidence.map((evidence) => evidence.filePath)
+      );
 
-      const validationRows = await db
-        .select()
-        .from(validationMessages)
-        .where(eq(validationMessages.projectId, input.projectId))
-        .orderBy(
-          asc(validationMessages.level),
-          asc(validationMessages.entityId),
-          asc(validationMessages.filePath),
-          asc(validationMessages.message)
-        );
+      const validationPredicates = [
+        impactedEntityIds.length > 0
+          ? inArray(validationMessages.entityId, impactedEntityIds)
+          : undefined,
+        sourceFilePaths.length > 0
+          ? inArray(validationMessages.filePath, sourceFilePaths)
+          : undefined
+      ].filter((predicate) => predicate !== undefined);
+
+      const validationRows =
+        validationPredicates.length === 0
+          ? []
+          : await db
+              .select()
+              .from(validationMessages)
+              .where(
+                and(
+                  eq(validationMessages.projectId, input.projectId),
+                  or(...validationPredicates)
+                )
+              )
+              .orderBy(
+                asc(validationMessages.level),
+                asc(validationMessages.entityId),
+                asc(validationMessages.filePath),
+                asc(validationMessages.message)
+              );
 
       const relatedTaskLinks =
         impactedEntityIds.length === 0
