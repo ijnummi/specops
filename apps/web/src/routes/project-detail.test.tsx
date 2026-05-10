@@ -149,7 +149,7 @@ vi.mock("../components/entity-detail.js", () => ({
 }));
 
 vi.mock("../components/entity-list.js", () => ({
-  EntityList: () => null
+  EntityList: () => <div>Entity list</div>
 }));
 
 vi.mock("../components/entity-search-results.js", () => ({
@@ -307,6 +307,42 @@ describe("ProjectDetailPage actions", () => {
       expect.objectContaining({
         enabled: false,
         queryKey: ["projects", "project-1", "search", { q: "", limit: 25 }]
+      })
+    ]);
+  });
+
+  it("shows searching instead of stale results while a changed query is waiting for debounce", () => {
+    mocks.debouncedValueOverride = "customer";
+
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="portal" />
+    );
+
+    expect(html).toContain("Searching");
+    expect(html).not.toContain("expanded search results: customer");
+    expect(mocks.searchQueryOptions).toEqual([
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "search", { q: "customer", limit: 25 }]
+      })
+    ]);
+  });
+
+  it("keeps empty query behavior when a cleared query has a stale debounced value", () => {
+    mocks.debouncedValueOverride = "customer";
+
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="" />
+    );
+
+    expect(html).toContain("Entity list");
+    expect(html).toContain("Project overview dashboard: project-1");
+    expect(html).not.toContain("Searching");
+    expect(html).not.toContain("expanded search results:");
+    expect(mocks.searchQueryOptions).toEqual([
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "search", { q: "customer", limit: 25 }]
       })
     ]);
   });

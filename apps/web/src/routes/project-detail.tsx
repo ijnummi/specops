@@ -48,6 +48,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const hasActiveQuery = normalizedQuery.length > 0;
   const debouncedQuery = useDebouncedValue(query.trim(), 200);
   const hasDebouncedQuery = debouncedQuery.length > 0;
+  const isSearchDebouncing = query.trim() !== debouncedQuery;
   const searchInput = { q: debouncedQuery, limit: 25 };
   const searchOptions = searchQuery(projectId, searchInput);
   const project = useQuery(projectQuery(projectId));
@@ -57,7 +58,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   });
   const searchResults = useQuery({
     ...searchOptions,
-    enabled: hasDebouncedQuery
+    enabled: hasActiveQuery && hasDebouncedQuery && !isSearchDebouncing
   });
   const [entities, validation, indexRuns] = useQueries({
     queries: [
@@ -207,7 +208,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           {hasActiveQuery ? (
             searchResults.error ? (
               <div className="p-3 text-sm text-red-700">{searchResults.error.message}</div>
-            ) : searchResults.isLoading || !hasDebouncedQuery ? (
+            ) : isSearchDebouncing || searchResults.isLoading || !hasDebouncedQuery ? (
               <p className="p-3 text-sm text-slate-500">Searching</p>
             ) : (
               <EntitySearchResults
@@ -272,7 +273,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">
             {searchResults.error.message}
           </div>
-        ) : searchResults.isLoading || !hasDebouncedQuery ? (
+        ) : isSearchDebouncing || searchResults.isLoading || !hasDebouncedQuery ? (
           <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
             Searching
           </div>
