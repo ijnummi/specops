@@ -71,6 +71,15 @@ CREATE INDEX IF NOT EXISTS spec_entities_project_id_idx ON spec_entities(project
 CREATE INDEX IF NOT EXISTS spec_entities_project_entity_id_idx ON spec_entities(project_id, entity_id);
 CREATE INDEX IF NOT EXISTS spec_entities_project_type_idx ON spec_entities(project_id, type);
 CREATE INDEX IF NOT EXISTS spec_entities_project_status_idx ON spec_entities(project_id, status);
+CREATE INDEX IF NOT EXISTS spec_entities_search_vector_idx ON spec_entities USING gin (
+  (
+    setweight(to_tsvector('simple', coalesce(entity_id, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(type, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(status, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(body_text, '')), 'C')
+  )
+);
 
 CREATE TABLE IF NOT EXISTS spec_links (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
