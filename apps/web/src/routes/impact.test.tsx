@@ -76,9 +76,11 @@ describe("ImpactPage", () => {
       expect(container.querySelector('[data-testid="impact-graph"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="impact-brief"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="impact-trace-panel"]')).not.toBeNull();
-      expect(definitionValue(container, "Upstream")).toBe("2");
+      expect(definitionValue(container, "Upstream")).toBe("1");
       expect(definitionValue(container, "Downstream")).toBe("1");
       expect(definitionValue(container, "Source evidence")).toBe("2");
+      expect(container.textContent).toContain("Selection");
+      expect(container.textContent).not.toContain("Select a graph node for details.");
       expect(container.textContent).toContain("src/domain.ts");
       expect(linkHref(container, "Open Editor")).toBe(
         "/projects/project-1/entities/domain.decision"

@@ -61,8 +61,11 @@ export function ImpactPage({
   const impact = useQuery(entityImpactQuery(projectId, entityId, queryInput));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = useMemo<ImpactNodeDto | null>(
-    () => impact.data?.nodes.find((node) => node.id === selectedNodeId) ?? null,
-    [impact.data?.nodes, selectedNodeId]
+    () =>
+      impact.data?.nodes.find((node) => node.id === selectedNodeId) ??
+      impact.data?.nodes.find((node) => node.id === `spec:${impact.data.rootEntity.entityId}`) ??
+      null,
+    [impact.data?.nodes, impact.data?.rootEntity.entityId, selectedNodeId]
   );
 
   function updateSearch(

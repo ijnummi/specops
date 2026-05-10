@@ -12,13 +12,13 @@ type ImpactGraphProps = {
 export function ImpactGraph({ impact, selectedNodeId, onSelectNode }: ImpactGraphProps) {
   const nodes = useMemo<Node[]>(
     () =>
-      impact.nodes.map((node, index) => ({
+      impact.nodes.map((node) => ({
         id: node.id,
-        position: layoutPosition(index, node.kind),
+        position: layoutPosition(node, impact),
         data: { label: node.label },
-        className: nodeClassName(node, selectedNodeId)
+        className: nodeClassName(node, selectedNodeId, impact.rootEntity.entityId)
       })),
-    [impact.nodes, selectedNodeId]
+    [impact, selectedNodeId]
   );
 
   const edges = useMemo<Edge[]>(
@@ -64,16 +64,66 @@ export function ImpactGraph({ impact, selectedNodeId, onSelectNode }: ImpactGrap
   );
 }
 
-function layoutPosition(index: number, kind: ImpactNodeDto["kind"]) {
-  const column = kind === "source" ? 2 : index % 2;
-  const row = Math.floor(index / 2);
-  return { x: column * 280, y: row * 120 };
+function layoutPosition(node: ImpactNodeDto, impact: EntityImpactResponseDto) {
+  if (node.kind === "source") {
+    return sourceNodePosition(node, impact);
+  }
+
+  if (node.entityId === impact.rootEntity.entityId) {
+    return { x: 0, y: 0 };
+  }
+
+  const upstreamEntityIds = uniqueEntityIds(impact.upstreamPaths, impact.rootEntity.entityId);
+  const downstreamEntityIds = uniqueEntityIds(impact.downstreamPaths, impact.rootEntity.entityId);
+
+  if (upstreamEntityIds.includes(node.entityId)) {
+    return { x: -320, y: upstreamEntityIds.indexOf(node.entityId) * 120 };
+  }
+
+  if (downstreamEntityIds.includes(node.entityId)) {
+    return { x: 320, y: downstreamEntityIds.indexOf(node.entityId) * 120 };
+  }
+
+  return { x: 0, y: 140 };
 }
 
-function nodeClassName(node: ImpactNodeDto, selectedNodeId: string | null) {
+function sourceNodePosition(node: ImpactNodeDto, impact: EntityImpactResponseDto) {
+  const sourceNodes = impact.nodes.filter(
+    (candidate): candidate is Extract<ImpactNodeDto, { kind: "source" }> =>
+      candidate.kind === "source"
+  );
+  const index = sourceNodes.findIndex((candidate) => candidate.id === node.id);
+  const y = 180 + Math.max(index, 0) * 120;
+  return { x: node.entityId === impact.rootEntity.entityId ? 0 : 640, y };
+}
+
+function uniqueEntityIds(
+  paths: EntityImpactResponseDto["upstreamPaths"],
+  rootEntityId: string
+) {
+  const entityIds = new Set<string>();
+  for (const path of paths) {
+    for (const entityId of path.entityIds) {
+      if (entityId !== rootEntityId) {
+        entityIds.add(entityId);
+      }
+    }
+  }
+
+  return [...entityIds].sort((left, right) => left.localeCompare(right));
+}
+
+function nodeClassName(
+  node: ImpactNodeDto,
+  selectedNodeId: string | null,
+  rootEntityId: string
+) {
   const base =
     node.kind === "source"
       ? "rounded border border-teal-300 bg-teal-50 px-3 py-2 text-xs text-teal-950"
       : "rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-950";
-  return node.id === selectedNodeId ? `${base} ring-2 ring-slate-900` : base;
+  const isFocused =
+    node.id === selectedNodeId ||
+    (!selectedNodeId && node.kind === "spec" && node.entityId === rootEntityId);
+  return isFocused ? `${base} ring-2 ring-slate-900` : base;
 }

@@ -181,12 +181,25 @@ describe("buildEntityImpact", () => {
       ["root", "b"],
       ["root", "a", "c"],
       ["root", "b", "c"],
-      ["root", "a", "c", "d"],
-      ["root", "b", "c", "d"]
+      ["root", "a", "c", "d"]
+    ]);
+    expect(impact.nodes.map((node) => node.id)).toEqual([
+      "spec:a",
+      "spec:b",
+      "spec:c",
+      "spec:d",
+      "spec:root"
+    ]);
+    expect(impact.edges.map((edge) => edge.id)).toEqual([
+      "spec-link:a-c-uses",
+      "spec-link:b-c-uses",
+      "spec-link:c-d-uses",
+      "spec-link:root-a-uses",
+      "spec-link:root-b-uses"
     ]);
   });
 
-  it("truncates traversal when the path cap is reached", () => {
+  it("keeps graph traversal complete when the path cap is reached", () => {
     const impact = buildEntityImpact({
       rootEntityId: "root",
       depth: "all",
@@ -221,9 +234,13 @@ describe("buildEntityImpact", () => {
     expect(impact.nodes.map((node) => node.id)).toEqual([
       "spec:a",
       "spec:b",
+      "spec:c",
+      "spec:d",
       "spec:root"
     ]);
     expect(impact.edges.map((edge) => edge.id)).toEqual([
+      "spec-link:a-c-uses",
+      "spec-link:b-d-uses",
       "spec-link:root-a-uses",
       "spec-link:root-b-uses"
     ]);

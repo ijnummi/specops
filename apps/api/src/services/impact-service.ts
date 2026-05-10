@@ -278,6 +278,7 @@ function traverseDirection(input: {
       linkTypes: [] as string[]
     }
   ];
+  const visitedDepthByEntityId = new Map<string, number>([[input.rootEntityId, 0]]);
   const paths: EntityImpactResponseDto["upstreamPaths"] = [];
   let truncatedReason: TruncationReason | null = null;
 
@@ -302,11 +303,6 @@ function traverseDirection(input: {
         input.direction === "downstream" ? link.toEntityId : link.fromEntityId;
       const nextEntity = input.entityById.get(nextEntityId);
       if (!nextEntity) {
-        continue;
-      }
-
-      if (paths.length >= input.limits.maxPaths) {
-        truncatedReason = chooseTruncationReason(truncatedReason, "path_limit");
         continue;
       }
 
@@ -343,23 +339,33 @@ function traverseDirection(input: {
         input.direction === "downstream"
           ? [...current.linkTypes, link.linkType]
           : [link.linkType, ...current.linkTypes];
+      const createsCycle = current.pathEntityIds.includes(nextEntityId);
 
-      paths.push({
-        direction: input.direction,
-        entityIds: nextPathEntityIds,
-        steps: nextPathEntityIds.map((entityId) => {
-          const entity = input.entityById.get(entityId)!;
-          return {
-            entityId: entity.entityId,
-            title: entity.title,
-            type: entity.type,
-            status: entity.status
-          };
-        }),
-        linkTypes: nextLinkTypes
-      });
+      if (!createsCycle) {
+        if (paths.length < input.limits.maxPaths) {
+          paths.push({
+            direction: input.direction,
+            entityIds: nextPathEntityIds,
+            steps: nextPathEntityIds.map((entityId) => {
+              const entity = input.entityById.get(entityId)!;
+              return {
+                entityId: entity.entityId,
+                title: entity.title,
+                type: entity.type,
+                status: entity.status
+              };
+            }),
+            linkTypes: nextLinkTypes
+          });
+        } else {
+          truncatedReason = chooseTruncationReason(truncatedReason, "path_limit");
+        }
+      }
 
-      if (!current.pathEntityIds.includes(nextEntityId)) {
+      const nextDepth = currentDepth + 1;
+      const visitedDepth = visitedDepthByEntityId.get(nextEntityId);
+      if (!createsCycle && (visitedDepth === undefined || nextDepth < visitedDepth)) {
+        visitedDepthByEntityId.set(nextEntityId, nextDepth);
         queue.push({
           entityId: nextEntityId,
           pathEntityIds:
