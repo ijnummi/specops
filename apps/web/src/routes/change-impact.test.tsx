@@ -159,6 +159,64 @@ describe("ChangeImpactPage", () => {
 
     expect(container.querySelector('[data-testid="agent-task-preview"]')).toBeNull();
   });
+
+  it("clears an already-rendered task preview when the route entity changes", async () => {
+    mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
+    const { container, rerender } = await renderChangeImpactPage();
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    expect(container.querySelector('[data-testid="agent-task-preview"]')).not.toBeNull();
+
+    await act(async () => {
+      rerender({ projectId: "project-2", entityId: "domain.other" });
+      await waitForQueryResult();
+    });
+
+    expect(container.querySelector('[data-testid="agent-task-preview"]')).toBeNull();
+  });
+
+  it("invalidates the original change impact preview when save completes after route change", async () => {
+    const deferredSave = deferred<ReturnType<typeof savedTaskResponse>>();
+    mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
+    mocks.saveAgentTask.mockReturnValue(deferredSave.promise);
+    const { container, queryClient, rerender } = await renderChangeImpactPage();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      clickButton(container, "Save Task");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      rerender({ projectId: "project-2", entityId: "domain.other" });
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      deferredSave.resolve(savedTaskResponse());
+      await waitForQueryResult();
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "projects",
+        "project-1",
+        "entities",
+        "domain.decision",
+        "change-impact-preview",
+        { depth: "1", direction: "both", includeSource: true }
+      ]
+    });
+  });
 });
 
 async function renderChangeImpactPage(

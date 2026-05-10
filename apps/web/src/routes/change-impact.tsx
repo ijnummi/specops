@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type {
@@ -99,6 +99,14 @@ export function ChangeImpactPage({
   currentProjectIdRef.current = projectId;
   currentEntityIdRef.current = entityId;
 
+  useEffect(() => {
+    setSelectedNodeId(null);
+    setTaskPreview(null);
+    setTaskPreviewOriginalMarkdown("");
+    setTaskPreviewError(null);
+    setTaskSaveError(null);
+  }, [entityId, projectId]);
+
   const previewTaskMutation = useMutation({
     mutationFn: ({ projectId: requestedProjectId, taskSeed }: PreviewTaskMutationInput) =>
       previewAgentTask(requestedProjectId, taskSeed),
@@ -138,17 +146,6 @@ export function ChangeImpactPage({
         filePath: generatedPreview.filePath
       }),
     onSuccess: async (savedTask, request) => {
-      if (
-        request.projectId !== currentProjectIdRef.current ||
-        request.entityId !== currentEntityIdRef.current
-      ) {
-        return;
-      }
-
-      setTaskPreview(null);
-      setTaskPreviewOriginalMarkdown("");
-      setTaskSaveError(null);
-
       const contextBacklinkInvalidations = request.preview.contextSpecIds.map((contextSpecId) =>
         queryClient.invalidateQueries({
           queryKey: queryKeys.backlinks(request.projectId, contextSpecId)
@@ -178,6 +175,17 @@ export function ChangeImpactPage({
         }),
         ...contextBacklinkInvalidations
       ]);
+
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.entityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
+      setTaskPreview(null);
+      setTaskPreviewOriginalMarkdown("");
+      setTaskSaveError(null);
     },
     onError: (error, request) => {
       if (
