@@ -115,7 +115,7 @@ vi.mock("./source-link-tabs.js", () => ({
 import { EntityDetail } from "./entity-detail.js";
 
 describe("EntityDetail", () => {
-  it("links the loaded entity to the impact view", () => {
+  it("links the loaded entity to the impact views", () => {
     const html = renderToStaticMarkup(
       <EntityDetail
         projectId="project-1"
@@ -131,5 +131,16 @@ describe("EntityDetail", () => {
 
     expect(container.innerHTML).toContain("/projects/project-1/impact/domain.decision");
     expect(container.textContent).toContain("Impact");
+    expect(linkHref(container, "Preview Change Impact")).toBe(
+      "/projects/project-1/change-impact/domain.decision?depth=1&direction=both&includeSource=true"
+    );
   });
 });
+
+function linkHref(container: HTMLElement, label: string) {
+  const link = Array.from(container.querySelectorAll("a")).find((element) =>
+    element.textContent?.includes(label)
+  );
+
+  return link?.getAttribute("href");
+}
