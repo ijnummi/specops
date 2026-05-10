@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   createEntityRequestSchema,
+  entityImpactQuerySchema,
   type ProjectDto,
   updateEntityMarkdownRequestSchema,
   type SpecEntityDto,
@@ -24,6 +25,7 @@ import {
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
+import { createImpactService } from "../services/impact-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
 import { createSourceScanService } from "../services/source-scan-service.js";
@@ -57,6 +59,7 @@ const typeDirectories: Record<string, string> = {
 
 export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app, { db }) => {
   const projectService = createProjectService(db);
+  const impactService = createImpactService(db);
   const indexerService = createIndexerService(db);
   const sourceScanService = createSourceScanService(db);
 
@@ -94,6 +97,19 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
       projectId,
       repoPath: project.repoPath,
       entityId
+    });
+  });
+
+  app.get("/projects/:projectId/entities/:entityId/impact", async (request) => {
+    const { projectId, entityId } = entityParamsSchema.parse(request.params);
+    const query = entityImpactQuerySchema.parse(request.query);
+
+    return impactService.getEntityImpact({
+      projectId,
+      entityId,
+      depth: query.depth,
+      direction: query.direction,
+      includeSource: query.includeSource
     });
   });
 

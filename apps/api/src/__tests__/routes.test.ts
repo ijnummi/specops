@@ -479,6 +479,97 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("returns entity impact with spec links and source evidence", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.specopsPath, "interfaces"), { recursive: true });
+    await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\n" +
+        "id: domain.decision\n" +
+        "type: domain_entity\n" +
+        "title: Decision\n" +
+        "status: draft\n" +
+        "links:\n" +
+        "  interfaces:\n" +
+        "    - interface.decision-service\n" +
+        "---\n\n" +
+        "# Decision\n"
+    );
+    await writeFile(
+      path.join(project.specopsPath, "interfaces", "decision-service.md"),
+      "---\n" +
+        "id: interface.decision-service\n" +
+        "type: interface\n" +
+        "title: Decision Service\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Decision Service\n"
+    );
+    await writeFile(
+      path.join(project.specopsPath, "use-cases", "create-decision.md"),
+      "---\n" +
+        "id: uc.create-decision\n" +
+        "type: use_case\n" +
+        "title: Create Decision\n" +
+        "status: draft\n" +
+        "links:\n" +
+        "  domain:\n" +
+        "    - domain.decision\n" +
+        "---\n\n" +
+        "# Create Decision\n"
+    );
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "/**\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision {}\n"
+    );
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/impact?depth=1&direction=both&includeSource=true`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      rootEntity: {
+        entityId: "domain.decision",
+        title: "Decision"
+      },
+      truncated: {
+        isTruncated: false
+      }
+    });
+    expect(response.json().nodes).toContainEqual(
+      expect.objectContaining({ id: "spec:domain.decision", kind: "spec" })
+    );
+    expect(response.json().nodes).toContainEqual(
+      expect.objectContaining({
+        kind: "source",
+        entityId: "domain.decision",
+        filePath: "src/decision.ts",
+        symbolName: "Decision"
+      })
+    );
+    expect(
+      response.json().upstreamPaths.map((path: { entityIds: string[] }) => path.entityIds)
+    ).toEqual([["uc.create-decision", "domain.decision"]]);
+    expect(
+      response.json().downstreamPaths.map((path: { entityIds: string[] }) => path.entityIds)
+    ).toEqual([["domain.decision", "interface.decision-service"]]);
+  });
+
   it("refuses source bootstrap when non-template specs already exist", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

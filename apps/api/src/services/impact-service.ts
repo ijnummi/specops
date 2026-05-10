@@ -4,6 +4,12 @@ import type {
   ImpactDirection,
   ImpactSourceEvidenceDto
 } from "@specops/contracts";
+import type { Db } from "@specops/db";
+import { sourceSpecLinks, specEntities, specLinks } from "@specops/db";
+import { asc, eq } from "drizzle-orm";
+
+import { NotFoundError } from "../lib/http-errors.js";
+import { createProjectService } from "./project-service.js";
 
 export type ImpactEntityInput = {
   entityId: string;
@@ -49,7 +55,94 @@ const defaultLimits: ResolvedImpactLimits = {
 };
 
 type Direction = "upstream" | "downstream";
-type TruncationReason = "path_limit" | "source_evidence_limit" | "spec_edge_limit" | "spec_node_limit";
+type TruncationReason =
+  | "path_limit"
+  | "source_evidence_limit"
+  | "spec_edge_limit"
+  | "spec_node_limit";
+
+export function createImpactService(db: Db) {
+  const projectService = createProjectService(db);
+
+  return {
+    async getEntityImpact(input: {
+      projectId: string;
+      entityId: string;
+      depth: ImpactDepth;
+      direction: ImpactDirection;
+      includeSource: boolean;
+    }): Promise<EntityImpactResponseDto> {
+      await projectService.getProject(input.projectId);
+
+      const entityRows = await db
+        .select()
+        .from(specEntities)
+        .where(eq(specEntities.projectId, input.projectId))
+        .orderBy(asc(specEntities.entityId));
+
+      const root = entityRows.find((entity) => entity.entityId === input.entityId);
+      if (!root) {
+        throw new NotFoundError("Entity not found", {
+          projectId: input.projectId,
+          entityId: input.entityId
+        });
+      }
+
+      const linkRows = await db
+        .select()
+        .from(specLinks)
+        .where(eq(specLinks.projectId, input.projectId))
+        .orderBy(
+          asc(specLinks.fromEntityId),
+          asc(specLinks.toEntityId),
+          asc(specLinks.linkType),
+          asc(specLinks.source)
+        );
+
+      const sourceRows = input.includeSource
+        ? await db
+            .select()
+            .from(sourceSpecLinks)
+            .where(eq(sourceSpecLinks.projectId, input.projectId))
+            .orderBy(
+              asc(sourceSpecLinks.entityId),
+              asc(sourceSpecLinks.filePath),
+              asc(sourceSpecLinks.symbolName)
+            )
+        : [];
+
+      return buildEntityImpact({
+        rootEntityId: input.entityId,
+        depth: input.depth,
+        direction: input.direction,
+        includeSource: input.includeSource,
+        entities: entityRows.map((entity) => ({
+          entityId: entity.entityId,
+          type: entity.type,
+          title: entity.title,
+          status: entity.status,
+          filePath: entity.filePath
+        })),
+        links: linkRows.map((link) => ({
+          id: link.id,
+          fromEntityId: link.fromEntityId,
+          toEntityId: link.toEntityId,
+          linkType: link.linkType,
+          source: link.source
+        })),
+        sourceEvidence: sourceRows.map((link) => ({
+          entityId: link.entityId,
+          filePath: link.filePath,
+          sourceFileId: link.sourceFileId,
+          symbolName: link.symbolName,
+          symbolKind: link.symbolKind,
+          symbolLine: link.symbolLine,
+          annotationLine: link.annotationLine
+        }))
+      });
+    }
+  };
+}
 
 export function buildEntityImpact(input: BuildEntityImpactInput): EntityImpactResponseDto {
   const limits = { ...defaultLimits, ...input.limits };
