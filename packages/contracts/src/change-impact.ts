@@ -68,6 +68,9 @@ export const changeImpactPreviewResponseSchema = z.object({
 
 export const changeImpactPreviewQuerySchema = entityImpactQuerySchema;
 
+export type ChangeImpactDirection = z.infer<
+  typeof changeImpactDirectionSchema
+>;
 export type ChangeImpactPreviewQuery = z.infer<
   typeof changeImpactPreviewQuerySchema
 >;
@@ -82,6 +85,12 @@ export type ChangeImpactSourceGroupDto = z.infer<
 >;
 export type ChangeImpactRelatedTaskDto = z.infer<
   typeof changeImpactRelatedTaskSchema
+>;
+export type ChangeImpactSectionWarningDto = z.infer<
+  typeof changeImpactSectionWarningSchema
+>;
+export type ChangeImpactOverviewDto = z.infer<
+  typeof changeImpactOverviewSchema
 >;
 export type ChangeImpactPreviewResponseDto = z.infer<
   typeof changeImpactPreviewResponseSchema
