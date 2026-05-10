@@ -29,6 +29,7 @@ import {
 } from "../lib/path-safety.js";
 
 const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
+const SOURCE_EXCERPT_CONCURRENCY = 4;
 
 type SourceScanTransactionDb = Pick<Db, "delete" | "execute" | "insert" | "select">;
 type SourceScanDb = SourceScanTransactionDb & {
@@ -287,9 +288,17 @@ async function listSourceSpecLinksForEntity(
     .from(sourceSpecLinks)
     .where(and(eq(sourceSpecLinks.projectId, input.projectId), eq(sourceSpecLinks.entityId, input.entityId)))
     .orderBy(asc(sourceSpecLinks.filePath), asc(sourceSpecLinks.symbolName), asc(sourceSpecLinks.id));
+  const excerptCache = new Map<string, Promise<SourceSpecLinkDto["excerpt"]>>();
 
-  return Promise.all(
-    rows.map(async (row) => ({
+  return mapWithConcurrency(rows, SOURCE_EXCERPT_CONCURRENCY, async (row) => {
+    const excerptKey = sourceExcerptCacheKey(row);
+    let excerpt = excerptCache.get(excerptKey);
+    if (!excerpt) {
+      excerpt = readSourceExcerpt(input.repoPath, row);
+      excerptCache.set(excerptKey, excerpt);
+    }
+
+    return {
       id: row.id,
       projectId: row.projectId,
       sourceFileId: row.sourceFileId,
@@ -300,10 +309,41 @@ async function listSourceSpecLinksForEntity(
       symbolLine: row.symbolLine,
       annotationLine: row.annotationLine,
       contentHash: row.contentHash,
-      excerpt: await readSourceExcerpt(input.repoPath, row),
+      excerpt: await excerpt,
       createdAt: row.createdAt.toISOString()
-    }))
+    };
+  });
+}
+
+async function mapWithConcurrency<T, U>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>
+): Promise<U[]> {
+  const results = new Array<U>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+
+        if (index >= items.length) {
+          return;
+        }
+
+        results[index] = await mapper(items[index]);
+      }
+    })
   );
+
+  return results;
+}
+
+function sourceExcerptCacheKey(link: typeof sourceSpecLinks.$inferSelect): string {
+  return [link.filePath, link.contentHash, link.annotationLine ?? "", link.symbolLine ?? ""].join("|");
 }
 
 async function readSourceExcerpt(
@@ -318,7 +358,7 @@ async function readSourceExcerpt(
     if (fileStats.size > MAX_SOURCE_EXCERPT_FILE_BYTES) {
       return {
         status: "unavailable",
-        message: `Source file is too large to excerpt.`
+        message: "Source file is too large to excerpt."
       };
     }
 
@@ -348,7 +388,7 @@ async function readSourceExcerpt(
 
     return {
       status: "unavailable",
-      message: error instanceof Error ? error.message : "Source excerpt unavailable."
+      message: "Source excerpt unavailable."
     };
   }
 }

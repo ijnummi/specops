@@ -821,10 +821,102 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()[0]).toMatchObject({
       excerpt: {
-        status: "unavailable"
+        status: "unavailable",
+        message: "Source excerpt unavailable."
       }
     });
-    expect(response.json()[0].excerpt.message).toContain("Path must be inside");
+    expect(response.json()[0].excerpt.message).not.toContain(project.repoPath);
+  });
+
+  it("marks source excerpts missing when the indexed source file is gone", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    const sourcePath = path.join(project.repoPath, "src", "decision.ts");
+    await writeFile(sourcePath, "/** @specops domain.decision */\nexport interface Decision {}\n");
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+    await unlink(sourcePath);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      excerpt: {
+        status: "missing",
+        message: "Source file is missing."
+      }
+    });
+  });
+
+  it("marks source excerpts unavailable when a source symlink escapes the repo", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    const sourcePath = path.join(project.repoPath, "src", "decision.ts");
+    await writeFile(sourcePath, "/** @specops domain.decision */\nexport interface Decision {}\n");
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
+    tempRoots.push(outsideRoot);
+    const outsidePath = path.join(outsideRoot, "outside.ts");
+    await writeFile(outsidePath, "/** @specops domain.decision */\nexport interface Outside {}\n");
+    await unlink(sourcePath);
+    await symlink(outsidePath, sourcePath);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      excerpt: {
+        status: "unavailable",
+        message: "Source excerpt unavailable."
+      }
+    });
+    expect(response.json()[0].excerpt.message).not.toContain(outsidePath);
+  });
+
+  it("marks source excerpts unavailable when the source file is too large", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    const sourcePath = path.join(project.repoPath, "src", "decision.ts");
+    await writeFile(sourcePath, "/** @specops domain.decision */\nexport interface Decision {}\n");
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+    await writeFile(sourcePath, `${"a".repeat(256 * 1024 + 1)}\n`);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      excerpt: {
+        status: "unavailable",
+        message: "Source file is too large to excerpt."
+      }
+    });
   });
 
   it("warns when a source spec annotation references a missing entity", async () => {
