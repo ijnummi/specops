@@ -368,15 +368,13 @@ async function readSourceExcerpt(
       return { status: "changed", message: "Source file changed since the last index run." };
     }
 
-    const lines = content.replace(/\r?\n$/, "").split(/\r?\n/);
-    const centerLine = link.annotationLine ?? link.symbolLine ?? 1;
-    const startLine = Math.max(1, centerLine - 3);
-    const endLine = Math.min(lines.length, centerLine + 4);
+    const text = content.replace(/\r?\n$/, "");
+    const lines = text.length > 0 ? text.split(/\r?\n/) : [""];
     return {
       status: "available",
-      startLine,
-      endLine,
-      text: lines.slice(startLine - 1, endLine).join("\n")
+      startLine: 1,
+      endLine: lines.length,
+      text
     };
   } catch (error) {
     if (isNotFoundError(error)) {

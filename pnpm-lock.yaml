@@ -75,6 +75,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@codemirror/lang-javascript':
+        specifier: ^6.2.5
+        version: 6.2.5
       '@codemirror/lang-markdown':
         specifier: ^6.5.0
         version: 6.5.0

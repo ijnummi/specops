@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { SourceSpecLinkDto } from "@specops/contracts";
 
+import { SourceCodeViewer } from "./source-code-viewer.js";
+
 const DEFAULT_EXCERPT_MESSAGE = "Source excerpt unavailable.";
 
 type SourceLinkTabsProps = {
@@ -91,12 +93,14 @@ function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
         {sourceLink.symbolLine ? <div>Symbol line {sourceLink.symbolLine}</div> : null}
         {sourceLink.annotationLine ? <div>Annotation line {sourceLink.annotationLine}</div> : null}
       </div>
-      <Excerpt excerpt={sourceLink.excerpt} />
+      <Excerpt sourceLink={sourceLink} />
     </section>
   );
 }
 
-function Excerpt({ excerpt }: { excerpt: SourceSpecLinkDto["excerpt"] }) {
+function Excerpt({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
+  const excerpt = sourceLink.excerpt;
+
   if (!excerpt || excerpt.status !== "available") {
     return (
       <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -105,21 +109,14 @@ function Excerpt({ excerpt }: { excerpt: SourceSpecLinkDto["excerpt"] }) {
     );
   }
 
-  const lines = excerpt.text.split(/\r?\n/);
-
   return (
-    <pre className="overflow-auto rounded border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-      <code>
-        {lines.map((line, index) => (
-          <span key={`${excerpt.startLine + index}-${line}`} className="block whitespace-pre">
-            <span className="mr-4 inline-block w-8 select-none text-right text-slate-500">
-              {excerpt.startLine + index}
-            </span>
-            {line}
-          </span>
-        ))}
-      </code>
-    </pre>
+    <div className="h-full min-h-80 overflow-hidden rounded border border-slate-200">
+      <SourceCodeViewer
+        filePath={sourceLink.filePath}
+        value={excerpt.text}
+        focusLine={sourceLink.annotationLine ?? sourceLink.symbolLine}
+      />
+    </div>
   );
 }
 

@@ -824,7 +824,7 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
-  it("returns bounded source excerpts for entity source links", async () => {
+  it("returns full source file content for entity source links", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
     await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
@@ -835,12 +835,15 @@ describeWithDb("database-backed routes", () => {
     await mkdir(path.join(project.repoPath, "src"), { recursive: true });
     await writeFile(
       path.join(project.repoPath, "src", "decision.ts"),
-      "const before = true;\n" +
+      "const first = true;\n" +
+        "const second = true;\n" +
+        "const third = true;\n" +
         "/**\n" +
         " * @specops domain.decision\n" +
         " */\n" +
         "export interface Decision { id: string }\n" +
-        "const after = true;\n"
+        "const after = true;\n" +
+        "const last = true;\n"
     );
     await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
 
@@ -854,10 +857,12 @@ describeWithDb("database-backed routes", () => {
       excerpt: {
         status: "available",
         startLine: 1,
-        endLine: 6
+        endLine: 9
       }
     });
+    expect(response.json()[0].excerpt.text).toContain("const first = true;");
     expect(response.json()[0].excerpt.text).toContain("@specops domain.decision");
+    expect(response.json()[0].excerpt.text).toContain("const last = true;");
   });
 
   it("marks source excerpts changed when file content hash differs", async () => {
