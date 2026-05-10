@@ -10,6 +10,7 @@ import type {
   SaveAgentTaskResponse,
   SpecEntityDto,
   SpecLinkDto,
+  SourceSpecLinkDto,
   ValidationMessageDto
 } from "@specops/contracts";
 
@@ -33,6 +34,8 @@ export const queryKeys = {
     ["projects", projectId, "entities", entityId, "outgoing-links"] as const,
   backlinks: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId, "backlinks"] as const,
+  sourceLinks: (projectId: string, entityId: string) =>
+    ["projects", projectId, "entities", entityId, "source-links"] as const,
   agentTaskPreview: (projectId: string, input: AgentTaskPreviewRequest) =>
     ["projects", projectId, "agent-tasks", "preview", input] as const,
   validation: (projectId: string) => ["projects", projectId, "validation-messages"] as const,
@@ -91,6 +94,18 @@ export function backlinksQuery(projectId: string, entityId: string) {
         `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
           entityId
         )}/backlinks`
+      )
+  });
+}
+
+export function entitySourceLinksQuery(projectId: string, entityId: string) {
+  return queryOptions({
+    queryKey: queryKeys.sourceLinks(projectId, entityId),
+    queryFn: () =>
+      apiGet<SourceSpecLinkDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
+          entityId
+        )}/source-links`
       )
   });
 }

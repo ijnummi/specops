@@ -6,6 +6,7 @@ import { Bot, Save } from "lucide-react";
 import {
   backlinksQuery,
   entityQuery,
+  entitySourceLinksQuery,
   outgoingLinksQuery,
   previewAgentTask,
   queryKeys,
@@ -21,6 +22,7 @@ import { entityMarkdownForEditing } from "./entity-editor-markdown.js";
 import { validateEntityMarkdownIdentity } from "./entity-markdown.js";
 import { LinkPanels } from "./link-panels.js";
 import { MarkdownEditor } from "./markdown-editor.js";
+import { SourceLinkTabs } from "./source-link-tabs.js";
 
 type EntityDetailProps = {
   projectId: string;
@@ -58,6 +60,10 @@ export function EntityDetail({
   const currentEntityIdRef = useRef(entityId);
   const currentProjectIdRef = useRef(projectId);
   const entity = useQuery(entityQuery(projectId, entityId));
+  const sourceLinks = useQuery({
+    ...entitySourceLinksQuery(projectId, entityId),
+    enabled: Boolean(entityId)
+  });
   const [outgoing, backlinks] = useQueries({
     queries: [outgoingLinksQuery(projectId, entityId), backlinksQuery(projectId, entityId)]
   });
@@ -323,20 +329,29 @@ export function EntityDetail({
             ) : null}
           </div>
         </div>
-        <MarkdownEditor
-          value={editorMarkdown}
-          height="100%"
-          minHeight="0px"
-          className="min-h-0 flex-1"
-          onChange={(value) => {
-            setSaveError(null);
-            onDraftChange(value);
-          }}
+        <SourceLinkTabs
+          specTitle={entity.data.title}
+          sourceLinks={sourceLinks.data ?? []}
+          specPanel={
+            <MarkdownEditor
+              value={editorMarkdown}
+              height="100%"
+              minHeight="0px"
+              className="min-h-0 flex-1"
+              onChange={(value) => {
+                setSaveError(null);
+                onDraftChange(value);
+              }}
+            />
+          }
         />
       </section>
 
       {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
       {mutation.error ? <p className="text-sm text-red-700">{mutation.error.message}</p> : null}
+      {sourceLinks.error ? (
+        <p className="text-sm text-red-700">{sourceLinks.error.message}</p>
+      ) : null}
       {taskPreviewError ? <p className="text-sm text-red-700">{taskPreviewError}</p> : null}
 
       {taskPreview ? (
