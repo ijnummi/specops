@@ -5,7 +5,11 @@ import type { IndexRunDto } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import { discoverMarkdownFiles, parseSpecMarkdown } from "@specops/markdown";
 import { scanRepository } from "@specops/repo-scanner";
-import { generateBootstrapSpecFiles } from "@specops/source-bootstrap";
+import {
+  applySourceSpecAnnotations,
+  generateBootstrapSpecFiles,
+  type BootstrapGeneratedSpecFile
+} from "@specops/source-bootstrap";
 import { parse, stringify } from "yaml";
 
 import { BadRequestError, ConflictError } from "../lib/http-errors.js";
@@ -27,6 +31,7 @@ export function createSourceBootstrapService(db: Db) {
       const repoPath = assertAbsolutePath("repoPath", project.repoPath);
       const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
       const writtenPaths: string[] = [];
+      const sourceSnapshots: Array<{ path: string; original: string }> = [];
 
       assertInsideDirectory(repoPath, specopsPath);
       await assertRealPathInsideDirectory(repoPath, repoPath);
@@ -54,6 +59,21 @@ export function createSourceBootstrapService(db: Db) {
       }
 
       try {
+        for (const [sourceFile, annotations] of groupAnnotationsBySourceFile(generatedFiles)) {
+          const sourcePath = assertInsideDirectory(repoPath, path.join(repoPath, sourceFile));
+          const targetPath = await assertRealPathInsideDirectory(repoPath, sourcePath);
+          const original = await readFile(targetPath, "utf8");
+          const result = applySourceSpecAnnotations({
+            content: original,
+            annotations
+          });
+
+          if (!result.changed) continue;
+
+          sourceSnapshots.push({ path: targetPath, original });
+          await writeFile(targetPath, result.content, { flag: "w" });
+        }
+
         for (const file of generatedFiles) {
           const targetPath = assertInsideDirectory(
             realSpecopsPath,
@@ -66,28 +86,55 @@ export function createSourceBootstrapService(db: Db) {
           await writeFile(targetPath, file.content, { flag: "wx" });
           writtenPaths.push(targetPath);
         }
+
+        const result = await createIndexerService(db).indexProject(projectId);
+        await assertSafeProjectYamlPath(realSpecopsPath, projectYamlPath);
+        await writeProjectYaml(projectYamlPath, {
+          ...projectYaml,
+          source_bootstrap: {
+            completed_at: new Date().toISOString(),
+            scanner: "typescript",
+            generated_entity_count: generatedFiles.length
+          }
+        });
+
+        return result;
       } catch (error) {
-        await Promise.all(writtenPaths.map((writtenPath) => rm(writtenPath, { force: true })));
+        await Promise.all([
+          ...sourceSnapshots.map((snapshot) => writeFile(snapshot.path, snapshot.original)),
+          ...writtenPaths.map((writtenPath) => rm(writtenPath, { force: true }))
+        ]);
+        if (isSourceAnnotationConflict(error)) {
+          throw new ConflictError(error.message);
+        }
         if (isFileExistsError(error)) {
           throw new ConflictError("Generated bootstrap file already exists");
         }
         throw error;
       }
-
-      const result = await createIndexerService(db).indexProject(projectId);
-      await assertSafeProjectYamlPath(realSpecopsPath, projectYamlPath);
-      await writeProjectYaml(projectYamlPath, {
-        ...projectYaml,
-        source_bootstrap: {
-          completed_at: new Date().toISOString(),
-          scanner: "typescript",
-          generated_entity_count: generatedFiles.length
-        }
-      });
-
-      return result;
     }
   };
+}
+
+function groupAnnotationsBySourceFile(generatedFiles: BootstrapGeneratedSpecFile[]) {
+  const byFile = new Map<
+    string,
+    Array<{ entityId: string; symbolName: string; symbolLine: number | null }>
+  >();
+
+  for (const file of generatedFiles) {
+    for (const evidence of file.evidence) {
+      const current = byFile.get(evidence.sourceFile) ?? [];
+      current.push({
+        entityId: file.entityId,
+        symbolName: evidence.symbolName,
+        symbolLine: evidence.line
+      });
+      byFile.set(evidence.sourceFile, current);
+    }
+  }
+
+  return byFile;
 }
 
 async function assertSafeProjectYamlPath(specopsPath: string, projectYamlPath: string) {
@@ -152,4 +199,11 @@ function isNotFoundError(error: unknown): boolean {
 
 function isFileExistsError(error: unknown): boolean {
   return isRecord(error) && error.code === "EEXIST";
+}
+
+function isSourceAnnotationConflict(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    error.message.includes("already has a different @specops annotation")
+  );
 }

@@ -446,6 +446,12 @@ describeWithDb("database-backed routes", () => {
     await expect(readFile(path.join(project.specopsPath, "project.yaml"), "utf8")).resolves.toContain(
       "source_bootstrap:"
     );
+    await expect(readFile(path.join(project.repoPath, "src", "domain.ts"), "utf8")).resolves.toContain(
+      "@specops domain.decision"
+    );
+    await expect(readFile(path.join(project.repoPath, "src", "service.ts"), "utf8")).resolves.toContain(
+      "@specops interface.decision-service"
+    );
 
     const entitiesResponse = await app.inject({
       method: "GET",
@@ -458,6 +464,18 @@ describeWithDb("database-backed routes", () => {
         "domain.workspace",
         "interface.decision-service"
       ])
+    );
+
+    const sourceLinksResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+    expect(sourceLinksResponse.statusCode).toBe(200);
+    expect(sourceLinksResponse.json()).toContainEqual(
+      expect.objectContaining({
+        entityId: "domain.decision",
+        symbolName: "Decision"
+      })
     );
   });
 
@@ -540,12 +558,37 @@ describeWithDb("database-backed routes", () => {
     expect(response.json().error.message).toBe("No eligible exported source symbols found");
   });
 
+  it("refuses source bootstrap when a candidate symbol has a conflicting specops annotation", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "/** @specops domain.other */\n" +
+        "export interface Decision { id: string }\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(409);
+    await expect(fileExists(path.join(project.specopsPath, "domain", "decision.md"))).resolves.toBe(
+      false
+    );
+  });
+
   it("rejects source bootstrap when the generated file parent symlink escapes specops", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);
     const outside = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
     tempRoots.push(outside);
     await writeSampleSourceProject(project.repoPath);
+    const domainSourcePath = path.join(project.repoPath, "src", "domain.ts");
+    const serviceSourcePath = path.join(project.repoPath, "src", "service.ts");
+    const originalDomainSource = await readFile(domainSourcePath, "utf8");
+    const originalServiceSource = await readFile(serviceSourcePath, "utf8");
     await mkdir(project.specopsPath, { recursive: true });
     await symlink(outside, path.join(project.specopsPath, "domain"), "dir");
 
@@ -554,6 +597,8 @@ describeWithDb("database-backed routes", () => {
     );
     await expect(fileExists(path.join(outside, "decision.md"))).resolves.toBe(false);
     await expect(fileExists(path.join(outside, "workspace.md"))).resolves.toBe(false);
+    await expect(readFile(domainSourcePath, "utf8")).resolves.toBe(originalDomainSource);
+    await expect(readFile(serviceSourcePath, "utf8")).resolves.toBe(originalServiceSource);
   });
 
   it("rejects source bootstrap when project.yaml symlink escapes specops without modifying it", async () => {
@@ -1316,8 +1361,8 @@ describeWithDb("database-backed routes", () => {
         "export type DecisionLink = { fromId: string; toId: string };\n"
     );
     await writeFile(
-      path.join(repoPath, "src", "services", "decision-service.ts"),
-      "import type { Decision, Workspace } from '../domain';\n" +
+      path.join(repoPath, "src", "service.ts"),
+      "import type { Decision, Workspace } from './domain';\n" +
         "export class DecisionService {\n" +
         "  list(_workspace: Workspace): Decision[] { return []; }\n" +
         "}\n"
