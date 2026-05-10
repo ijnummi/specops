@@ -17,6 +17,24 @@ export const specEntitySchema = z.object({
   updatedAt: z.string()
 });
 
+export const entitySearchQuerySchema = z.object({
+  q: z.string().trim().min(1),
+  type: z.string().trim().min(1).optional(),
+  status: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(25)
+});
+
+export const entitySearchResultSchema = z.object({
+  entityId: z.string(),
+  title: z.string(),
+  type: z.string(),
+  status: z.string(),
+  filePath: z.string(),
+  rank: z.number(),
+  snippet: z.string(),
+  matchedFields: z.array(z.enum(["entityId", "title", "type", "status", "bodyText"]))
+});
+
 export const specLinkSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -46,3 +64,5 @@ export type CreateEntityRequest = z.infer<typeof createEntityRequestSchema>;
 export type UpdateEntityMarkdownRequest = z.infer<
   typeof updateEntityMarkdownRequestSchema
 >;
+export type EntitySearchQuery = z.infer<typeof entitySearchQuerySchema>;
+export type EntitySearchResultDto = z.infer<typeof entitySearchResultSchema>;
