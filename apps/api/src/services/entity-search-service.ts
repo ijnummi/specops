@@ -26,7 +26,6 @@ export function createEntitySearchService(db: Pick<Db, "execute">) {
   ): Promise<EntitySearchResultDto[]> {
     const type = query.type ?? null;
     const status = query.status ?? null;
-    const pattern = `%${escapeIlikePattern(query.q)}%`;
     const result = await db.execute<EntitySearchRow>(sql`
       with search_query as (
         select
@@ -34,12 +33,11 @@ export function createEntitySearchService(db: Pick<Db, "execute">) {
             websearch_to_tsquery('simple', ${query.q}) ||
             websearch_to_tsquery(
               'simple',
-              regexp_replace(${query.q}, '[^[:alnum:]]+', ' ', 'g')
+                regexp_replace(${query.q}, '[^[:alnum:]]+', ' ', 'g')
             )
-          ) as tsquery,
-          ${pattern}::text as pattern
+          ) as tsquery
       ),
-      ranked_entities as (
+      entity_vectors as (
         select
           se.entity_id as "entityId",
           se.title,
@@ -47,28 +45,34 @@ export function createEntitySearchService(db: Pick<Db, "execute">) {
           se.status,
           se.file_path as "filePath",
           se.body_text,
-          (
-            setweight(
-              to_tsvector(
-                'simple',
-                coalesce(se.entity_id, '') || ' ' ||
-                  regexp_replace(coalesce(se.entity_id, ''), '[^[:alnum:]]+', ' ', 'g')
-              ),
-              'A'
-            ) ||
-            setweight(to_tsvector('simple', coalesce(se.title, '')), 'A') ||
-            setweight(to_tsvector('simple', coalesce(se.type, '')), 'B') ||
-            setweight(to_tsvector('simple', coalesce(se.status, '')), 'B') ||
-            setweight(to_tsvector('simple', coalesce(se.body_text, '')), 'C')
-          ) as search_vector,
-          search_query.tsquery,
-          search_query.pattern
+          to_tsvector(
+            'simple',
+            coalesce(se.entity_id, '') || ' ' ||
+              regexp_replace(coalesce(se.entity_id, ''), '[^[:alnum:]]+', ' ', 'g')
+          ) as entity_id_vector,
+          to_tsvector('simple', coalesce(se.title, '')) as title_vector,
+          to_tsvector('simple', coalesce(se.type, '')) as type_vector,
+          to_tsvector('simple', coalesce(se.status, '')) as status_vector,
+          to_tsvector('simple', coalesce(se.body_text, '')) as body_text_vector
         from spec_entities se
-        cross join search_query
         where
           se.project_id = ${projectId}
           and (${type}::text is null or se.type = ${type})
           and (${status}::text is null or se.status = ${status})
+      ),
+      ranked_entities as (
+        select
+          entity_vectors.*,
+          (
+            setweight(entity_id_vector, 'A') ||
+            setweight(title_vector, 'A') ||
+            setweight(type_vector, 'B') ||
+            setweight(status_vector, 'B') ||
+            setweight(body_text_vector, 'C')
+          ) as search_vector,
+          search_query.tsquery
+        from entity_vectors
+        cross join search_query
       )
       select
         "entityId",
@@ -83,11 +87,11 @@ export function createEntitySearchService(db: Pick<Db, "execute">) {
           tsquery,
           'StartSel=<mark>, StopSel=</mark>, MaxWords=20, MinWords=5'
         ) as snippet,
-        "entityId" ilike pattern escape ${"\\"} as "entityIdMatched",
-        title ilike pattern escape ${"\\"} as "titleMatched",
-        type ilike pattern escape ${"\\"} as "typeMatched",
-        status ilike pattern escape ${"\\"} as "statusMatched",
-        body_text ilike pattern escape ${"\\"} as "bodyTextMatched"
+        entity_id_vector @@ tsquery as "entityIdMatched",
+        title_vector @@ tsquery as "titleMatched",
+        type_vector @@ tsquery as "typeMatched",
+        status_vector @@ tsquery as "statusMatched",
+        body_text_vector @@ tsquery as "bodyTextMatched"
       from ranked_entities
       where search_vector @@ tsquery
       order by rank desc, "entityId" asc
@@ -123,8 +127,4 @@ function getMatchedFields(row: EntitySearchRow): MatchedField[] {
   ];
 
   return fields.filter(([, matched]) => matched).map(([field]) => field);
-}
-
-function escapeIlikePattern(value: string) {
-  return value.replace(/[\\%_]/g, "\\$&");
 }
