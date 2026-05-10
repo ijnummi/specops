@@ -12,7 +12,8 @@ export const agentTaskPreviewRequestSchema = z.object({
   sourceEntityId: z.string().min(1),
   targetAgent: z.string().min(1).default("codex"),
   taskId: z.string().min(1).optional(),
-  title: z.string().min(1).optional()
+  title: z.string().min(1).optional(),
+  impactedContextEntityIds: z.array(z.string().min(1)).default([])
 });
 
 export const agentTaskPreviewResponseSchema = z.object({
