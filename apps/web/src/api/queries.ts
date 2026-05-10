@@ -6,6 +6,8 @@ import type {
   ChangeImpactPreviewResponseDto,
   CreateEntityRequest,
   CreateProjectRequest,
+  EntitySearchQuery,
+  EntitySearchResultDto,
   EntityImpactQuery,
   EntityImpactResponseDto,
   IndexRunDto,
@@ -53,7 +55,8 @@ export const queryKeys = {
     ["projects", projectId, "agent-tasks", "preview", input] as const,
   validation: (projectId: string) => ["projects", projectId, "validation-messages"] as const,
   indexRuns: (projectId: string) => ["projects", projectId, "index-runs"] as const,
-  search: (projectId: string, query: string) => ["projects", projectId, "search", query] as const
+  search: (projectId: string, input: EntitySearchQuery) =>
+    ["projects", projectId, "search", input] as const
 };
 
 export function projectsQuery() {
@@ -193,12 +196,24 @@ export function indexRunsQuery(projectId: string) {
   });
 }
 
-export function searchQuery(projectId: string, query: string) {
+export function searchQuery(projectId: string, input: EntitySearchQuery) {
+  const search = new URLSearchParams({
+    q: input.q,
+    limit: String(input.limit)
+  });
+
+  if (input.type) {
+    search.set("type", input.type);
+  }
+  if (input.status) {
+    search.set("status", input.status);
+  }
+
   return queryOptions({
-    queryKey: queryKeys.search(projectId, query),
+    queryKey: queryKeys.search(projectId, input),
     queryFn: () =>
-      apiGet<SpecEntityDto[]>(
-        `/api/projects/${encodeURIComponent(projectId)}/search?q=${encodeURIComponent(query)}`
+      apiGet<EntitySearchResultDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/search?${search.toString()}`
       )
   });
 }
