@@ -30,80 +30,57 @@ export function SourceLinkTabs({ specTitle, sourceLinks, specPanel }: SourceLink
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 pt-2"
-        role="tablist"
         aria-label="Entity source panels"
       >
         <button
           type="button"
-          role="tab"
-          aria-selected={isSpecSelected}
-          aria-controls="source-link-panel-spec"
-          id="source-link-tab-spec"
-          className={tabClassName(isSpecSelected)}
+          aria-pressed={isSpecSelected}
+          className={panelButtonClassName(isSpecSelected)}
           onClick={() => setActiveTab({ type: "spec" })}
         >
           Spec: {specTitle}
         </button>
         {visibleSourceLinks.map((sourceLink, index) => {
           const isSelected = activeSourceLink?.id === sourceLink.id;
-          const tabId = sourceTabId(sourceLink, index);
-          const panelId = sourcePanelId(sourceLink, index);
 
           return (
             <button
               key={sourceLink.id}
               type="button"
-              role="tab"
-              aria-selected={isSelected}
-              aria-controls={panelId}
-              id={tabId}
-              className={tabClassName(isSelected)}
+              aria-label={`${sourceLink.filePath} ${sourceLink.symbolName}`}
+              aria-pressed={isSelected}
+              className={panelButtonClassName(isSelected)}
               onClick={() => setActiveTab({ type: "source", id: sourceLink.id })}
             >
-              {basename(sourceLink.filePath)}
+              {sourceButtonLabel(sourceLink)}
             </button>
           );
         })}
         {sourceLinks.length > MAX_SOURCE_TABS ? (
-          <span className="shrink-0 px-2 pb-2 text-xs font-medium text-slate-500">
+          <span
+            className="shrink-0 px-2 pb-2 text-xs font-medium text-slate-500"
+            title={overflowLabel(sourceLinks.length - MAX_SOURCE_TABS)}
+            aria-label={overflowLabel(sourceLinks.length - MAX_SOURCE_TABS)}
+          >
             +{sourceLinks.length - MAX_SOURCE_TABS}
           </span>
         ) : null}
       </div>
 
       {isSpecSelected ? (
-        <div
-          className="min-h-0 flex-1 overflow-hidden"
-          role="tabpanel"
-          id="source-link-panel-spec"
-          aria-labelledby="source-link-tab-spec"
-        >
+        <div className="min-h-0 flex-1 overflow-hidden">
           {specPanel}
         </div>
       ) : (
-        <SourceLinkPanel
-          sourceLink={activeSourceLink}
-          tabIndex={visibleSourceLinks.indexOf(activeSourceLink)}
-        />
+        <SourceLinkPanel sourceLink={activeSourceLink} />
       )}
     </div>
   );
 }
 
-function SourceLinkPanel({
-  sourceLink,
-  tabIndex
-}: {
-  sourceLink: SourceSpecLinkDto;
-  tabIndex: number;
-}) {
+function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
   return (
-    <section
-      className="min-h-0 flex-1 overflow-auto bg-white p-3"
-      role="tabpanel"
-      id={sourcePanelId(sourceLink, tabIndex)}
-      aria-labelledby={sourceTabId(sourceLink, tabIndex)}
-    >
+    <section className="min-h-0 flex-1 overflow-auto bg-white p-3">
       <div className="mb-3 grid gap-1 text-xs text-slate-600">
         <div className="font-mono text-slate-900">{sourceLink.filePath}</div>
         <div>
@@ -145,7 +122,7 @@ function Excerpt({ excerpt }: { excerpt: SourceSpecLinkDto["excerpt"] }) {
   );
 }
 
-function tabClassName(isSelected: boolean) {
+function panelButtonClassName(isSelected: boolean) {
   return [
     "max-w-48 shrink-0 truncate rounded-t border border-b-0 px-3 py-2 text-xs font-medium",
     isSelected
@@ -158,10 +135,10 @@ function basename(filePath: string) {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
-function sourceTabId(sourceLink: SourceSpecLinkDto, index: number) {
-  return `source-link-tab-${index}-${sourceLink.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+function sourceButtonLabel(sourceLink: SourceSpecLinkDto) {
+  return `${basename(sourceLink.filePath)} · ${sourceLink.symbolName}`;
 }
 
-function sourcePanelId(sourceLink: SourceSpecLinkDto, index: number) {
-  return `source-link-panel-${index}-${sourceLink.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+function overflowLabel(count: number) {
+  return `${count} additional source ${count === 1 ? "link" : "links"} not shown`;
 }

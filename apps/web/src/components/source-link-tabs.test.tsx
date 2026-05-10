@@ -48,11 +48,13 @@ describe("SourceLinkTabs", () => {
       specPanel: <div data-testid="spec-panel">Spec editor panel</div>
     });
 
-    const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
-    expect(tabs[0]?.textContent).toContain("Spec: Decision Model");
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    expect(container.querySelector('[role="tab"]')).toBeNull();
+    const buttons = Array.from(container.querySelectorAll("button"));
+    expect(buttons[0]?.textContent).toContain("Spec: Decision Model");
     expect(container.textContent).toContain("Spec editor panel");
 
-    await clickTab(container, "decision-model.ts");
+    await clickButton(container, "decision-model.ts");
 
     expect(container.textContent).toContain("src/domain/decision-model.ts");
     expect(container.textContent).toContain("function");
@@ -90,13 +92,13 @@ describe("SourceLinkTabs", () => {
       specPanel: <div>Spec editor panel</div>
     });
 
-    await clickTab(container, "missing.ts");
+    await clickButton(container, "missing.ts");
     expect(container.textContent).toContain("Source excerpt unavailable.");
 
-    await clickTab(container, "changed.ts");
+    await clickButton(container, "changed.ts");
     expect(container.textContent).toContain("Source changed since this evidence was indexed.");
 
-    await clickTab(container, "unavailable.ts");
+    await clickButton(container, "unavailable.ts");
     expect(container.textContent).toContain("Source file could not be read.");
   });
 
@@ -113,8 +115,40 @@ describe("SourceLinkTabs", () => {
     });
 
     expect(container.textContent).toContain("+2");
+    expect(container.querySelector("[title]")?.getAttribute("title")).toBe(
+      "2 additional source links not shown"
+    );
     expect(container.textContent).toContain("source-4.ts");
     expect(container.textContent).not.toContain("source-5.ts");
+  });
+
+  it("distinguishes source buttons with duplicate file basenames", async () => {
+    const { container } = await renderTabs({
+      specTitle: "Decision Model",
+      sourceLinks: [
+        sourceLink({
+          id: "domain-source",
+          filePath: "src/domain/decision-model.ts",
+          symbolName: "createDecisionModel"
+        }),
+        sourceLink({
+          id: "app-source",
+          filePath: "src/app/decision-model.ts",
+          symbolName: "renderDecisionModel"
+        })
+      ],
+      specPanel: <div>Spec editor panel</div>
+    });
+
+    const sourceButtons = Array.from(container.querySelectorAll("button")).slice(1);
+    expect(sourceButtons.map((button) => button.textContent)).toEqual([
+      "decision-model.ts · createDecisionModel",
+      "decision-model.ts · renderDecisionModel"
+    ]);
+    expect(sourceButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "src/domain/decision-model.ts createDecisionModel",
+      "src/app/decision-model.ts renderDecisionModel"
+    ]);
   });
 
   it("returns to the spec tab when the spec title changes", async () => {
@@ -124,7 +158,7 @@ describe("SourceLinkTabs", () => {
       specPanel: <div>Decision spec panel</div>
     });
 
-    await clickTab(container, "decision-model.ts");
+    await clickButton(container, "decision-model.ts");
     expect(container.textContent).toContain("src/domain/decision-model.ts");
 
     await act(async () => {
@@ -166,15 +200,15 @@ async function renderTabs(props: {
   return { container, root };
 }
 
-async function clickTab(container: HTMLElement, label: string) {
-  const tab = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+async function clickButton(container: HTMLElement, label: string) {
+  const button = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
     (button) => button.textContent?.includes(label)
   );
 
-  expect(tab).toBeDefined();
+  expect(button).toBeDefined();
 
   await act(async () => {
-    tab?.click();
+    button?.click();
   });
 }
 
