@@ -11,6 +11,7 @@ import {
   projectQuery,
   queryKeys,
   reindexProject,
+  searchQuery,
   validationMessagesQuery
 } from "../api/queries.js";
 import {
@@ -26,10 +27,12 @@ import {
 import { EntityCreateForm } from "../components/entity-create-form.js";
 import { EntityDetail } from "../components/entity-detail.js";
 import { EntityList } from "../components/entity-list.js";
+import { EntitySearchResults } from "../components/entity-search-results.js";
 import { ProjectActions } from "../components/project-actions.js";
 import { ProjectOverviewDashboard } from "../components/project-overview-dashboard.js";
 import { ValidationPanel } from "../components/validation-panel.js";
 import { WorkbenchLayout } from "../components/workbench-layout.js";
+import { useDebouncedValue } from "../lib/use-debounced-value.js";
 
 type ProjectDetailPageProps = {
   projectId: string;
@@ -41,10 +44,20 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const entityDrafts = useEntityDrafts();
+  const normalizedQuery = query.trim().toLowerCase();
+  const hasActiveQuery = normalizedQuery.length > 0;
+  const debouncedQuery = useDebouncedValue(query.trim(), 200);
+  const hasDebouncedQuery = debouncedQuery.length > 0;
+  const searchInput = { q: debouncedQuery, limit: 25 };
+  const searchOptions = searchQuery(projectId, searchInput);
   const project = useQuery(projectQuery(projectId));
   const overview = useQuery({
     ...projectOverviewQuery(projectId),
-    enabled: entityId === null
+    enabled: entityId === null && !hasActiveQuery
+  });
+  const searchResults = useQuery({
+    ...searchOptions,
+    enabled: hasActiveQuery
   });
   const [entities, validation, indexRuns] = useQueries({
     queries: [
@@ -54,7 +67,6 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     ]
   });
 
-  const normalizedQuery = query.trim().toLowerCase();
   const filteredEntities = useMemo(() => {
     const all = entities.data ?? [];
     if (!normalizedQuery) {
@@ -192,13 +204,30 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
             />
           </div>
           <EntityCreateForm projectId={projectId} />
-          <EntityList
-            projectId={projectId}
-            entities={filteredEntities}
-            selectedEntityId={selectedEntityId}
-            query={query}
-            onBeforeSelect={confirmEntitySwitch}
-          />
+          {hasActiveQuery ? (
+            searchResults.error ? (
+              <div className="p-3 text-sm text-red-700">{searchResults.error.message}</div>
+            ) : searchResults.isLoading || !hasDebouncedQuery ? (
+              <p className="p-3 text-sm text-slate-500">Searching</p>
+            ) : (
+              <EntitySearchResults
+                projectId={projectId}
+                query={debouncedQuery}
+                results={searchResults.data ?? []}
+                selectedEntityId={selectedEntityId}
+                variant="compact"
+                onBeforeSelect={confirmEntitySwitch}
+              />
+            )
+          ) : (
+            <EntityList
+              projectId={projectId}
+              entities={filteredEntities}
+              selectedEntityId={selectedEntityId}
+              query={query}
+              onBeforeSelect={confirmEntitySwitch}
+            />
+          )}
         </>
       }
       inspector={
@@ -238,6 +267,25 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           onSaveDraft={saveSelectedDraft}
           onBeforeSelect={confirmEntitySwitch}
         />
+      ) : hasActiveQuery ? (
+        searchResults.error ? (
+          <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            {searchResults.error.message}
+          </div>
+        ) : searchResults.isLoading || !hasDebouncedQuery ? (
+          <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
+            Searching
+          </div>
+        ) : (
+          <EntitySearchResults
+            projectId={projectId}
+            query={debouncedQuery}
+            results={searchResults.data ?? []}
+            selectedEntityId={selectedEntityId}
+            variant="expanded"
+            onBeforeSelect={confirmEntitySwitch}
+          />
+        )
       ) : overview.error ? (
         <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">
           {overview.error.message}

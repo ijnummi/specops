@@ -8,6 +8,24 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   invalidateQueries: vi.fn(),
   overviewQueryOptions: [] as Array<{ enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }>,
+  searchQuery: vi.fn((projectId: string, input: { q: string; limit: number }) => ({
+    queryKey: ["projects", projectId, "search", input],
+    queryType: "search"
+  })),
+  searchQueryOptions: [] as Array<{ enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }>,
+  searchState: {
+    data: [
+      {
+        entityId: "entity-2",
+        title: "Customer Portal",
+        type: "feature",
+        status: "draft",
+        snippet: "Customer-facing workflow"
+      }
+    ],
+    error: null,
+    isLoading: false
+  } as { data: unknown[]; error: Error | null; isLoading: boolean },
   projectActionsProps: null as ProjectActionsProps | null,
   overviewState: {
     data: { project: { id: "project-1", name: "SpecOps" } },
@@ -40,9 +58,16 @@ vi.mock("../api/queries.js", () => ({
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
     project: (projectId: string) => ["projects", projectId],
     projectOverview: (projectId: string) => ["projects", projectId, "overview"],
+    search: (projectId: string, input: { q: string; limit: number }) => [
+      "projects",
+      projectId,
+      "search",
+      input
+    ],
     validation: (projectId: string) => ["projects", projectId, "validation-messages"]
   },
   reindexProject: vi.fn(),
+  searchQuery: mocks.searchQuery,
   validationMessagesQuery: vi.fn((projectId: string) => ({
     queryKey: ["projects", projectId, "validation-messages"],
     queryType: "validation"
@@ -91,6 +116,11 @@ vi.mock("@tanstack/react-query", () => ({
       return mocks.overviewState;
     }
 
+    if (options.queryType === "search") {
+      mocks.searchQueryOptions.push(options);
+      return mocks.searchState;
+    }
+
     return {
       data: {
         entityCount: 0,
@@ -119,6 +149,16 @@ vi.mock("../components/entity-detail.js", () => ({
 
 vi.mock("../components/entity-list.js", () => ({
   EntityList: () => null
+}));
+
+vi.mock("../components/entity-search-results.js", () => ({
+  EntitySearchResults: ({
+    query,
+    variant
+  }: {
+    query: string;
+    variant: "compact" | "expanded";
+  }) => <div>{variant} search results: {query}</div>
 }));
 
 vi.mock("../components/project-actions.js", () => ({
@@ -156,9 +196,24 @@ import { ProjectDetailPage } from "./project-detail.js";
 describe("ProjectDetailPage actions", () => {
   beforeEach(() => {
     mocks.bootstrapFromSource.mockReset();
+    mocks.searchQuery.mockClear();
     mocks.projectActionsProps = null;
     mocks.invalidateQueries.mockReset();
     mocks.overviewQueryOptions = [];
+    mocks.searchQueryOptions = [];
+    mocks.searchState = {
+      data: [
+        {
+          entityId: "entity-2",
+          title: "Customer Portal",
+          type: "feature",
+          status: "draft",
+          snippet: "Customer-facing workflow"
+        }
+      ],
+      error: null,
+      isLoading: false
+    };
     mocks.overviewState = {
       data: { project: { id: "project-1", name: "SpecOps" } },
       error: null,
@@ -195,6 +250,42 @@ describe("ProjectDetailPage actions", () => {
 
     expect(html).toContain("Entity editor: entity-1");
     expect(html).not.toContain("Project overview dashboard:");
+  });
+
+  it("renders expanded search results instead of the overview for an active query with no selected entity", () => {
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="customer" />
+    );
+
+    expect(html).toContain("expanded search results: customer");
+    expect(html).not.toContain("Project overview dashboard:");
+  });
+
+  it("keeps the entity editor visible for an active query with a selected entity", () => {
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId="entity-1" query="customer" />
+    );
+
+    expect(html).toContain("Entity editor: entity-1");
+    expect(html).not.toContain("expanded search results:");
+  });
+
+  it("enables server search only for non-empty queries with the project search query key", () => {
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
+    renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query=" customer " />
+    );
+
+    expect(mocks.searchQueryOptions).toEqual([
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "search", { q: "", limit: 25 }]
+      }),
+      expect.objectContaining({
+        enabled: true,
+        queryKey: ["projects", "project-1", "search", { q: "customer", limit: 25 }]
+      })
+    ]);
   });
 
   it("disables the project overview query when an entity is selected", () => {
