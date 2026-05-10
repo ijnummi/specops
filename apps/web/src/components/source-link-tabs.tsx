@@ -89,15 +89,19 @@ function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
     >
       <aside
         data-testid="source-link-metadata"
-        className="grid shrink-0 gap-1 overflow-hidden border-b border-slate-200 p-3 text-xs text-slate-600"
+        className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 overflow-hidden border-b border-slate-200 px-3 py-2 text-xs text-slate-600"
       >
-        <div className="break-words font-mono text-slate-900">{sourceLink.filePath}</div>
-        <div>
+        <div className="min-w-0 flex-1 truncate font-mono text-slate-900">{sourceLink.filePath}</div>
+        <div className="shrink-0">
           <span className="font-medium text-slate-700">{sourceLink.symbolKind}</span>{" "}
           <span>{sourceLink.symbolName}</span>
         </div>
-        {sourceLink.symbolLine ? <div>Symbol line {sourceLink.symbolLine}</div> : null}
-        {sourceLink.annotationLine ? <div>Annotation line {sourceLink.annotationLine}</div> : null}
+        {sourceLink.symbolLine ? (
+          <div className="shrink-0">Symbol line {sourceLink.symbolLine}</div>
+        ) : null}
+        {sourceLink.annotationLine ? (
+          <div className="shrink-0">Annotation line {sourceLink.annotationLine}</div>
+        ) : null}
       </aside>
       <div className="min-h-0 flex-1 p-3">
         <Excerpt sourceLink={sourceLink} />

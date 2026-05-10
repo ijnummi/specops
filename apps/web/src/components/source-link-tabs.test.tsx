@@ -150,6 +150,8 @@ describe("SourceLinkTabs", () => {
     expect(panel?.className).toContain("overflow-hidden");
     expect(panel?.className).not.toContain("overflow-auto");
     expect(panel?.className).not.toContain("md:flex-row");
+    expect(metadata?.className).toContain("flex");
+    expect(metadata?.className).toContain("items-center");
     expect(metadata?.className).toContain("border-b");
     expect(metadata?.className).not.toContain("md:w-64");
     expect(codeFrame?.className).toContain("min-h-0");
