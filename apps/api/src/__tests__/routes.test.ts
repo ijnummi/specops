@@ -579,6 +579,33 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("does not write any source annotations before all bootstrap source edits are valid", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    const accountSourcePath = path.join(project.repoPath, "src", "account.ts");
+    const accountSource = "export interface Account { id: string }\n";
+    await writeFile(accountSourcePath, accountSource);
+    await writeFile(
+      path.join(project.repoPath, "src", "workspace.ts"),
+      "/** @specops domain.other */\n" +
+        "export interface Workspace { id: string }\n"
+    );
+    const before = await stat(accountSourcePath);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    await expect(createSourceBootstrapService(db).bootstrapProject(project.id)).rejects.toThrow(
+      /already has a different @specops annotation/
+    );
+
+    const after = await stat(accountSourcePath);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    await expect(readFile(accountSourcePath, "utf8")).resolves.toBe(accountSource);
+    await expect(fileExists(path.join(project.specopsPath, "domain", "account.md"))).resolves.toBe(
+      false
+    );
+  });
+
   it("refuses source bootstrap when multiple annotations target the same source line", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

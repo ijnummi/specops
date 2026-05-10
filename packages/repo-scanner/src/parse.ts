@@ -51,6 +51,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
       const isDefaultExport = hasDefaultModifier(statement);
       const isExported = isDefaultExport || hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, componentOr("function", statement.name.text), isExported));
+      warnings.push(...detachedSpecopsWarnings(sourceFile, statement));
       if (isDefaultExport) exports.push(defaultExport());
       else if (hasExportModifier(statement)) exports.push(namedExport(statement.name.text));
       continue;
@@ -66,6 +67,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
       const isDefaultExport = hasDefaultModifier(statement);
       const isExported = isDefaultExport || hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "class", isExported));
+      warnings.push(...detachedSpecopsWarnings(sourceFile, statement));
       if (isDefaultExport) exports.push(defaultExport());
       else if (hasExportModifier(statement)) exports.push(namedExport(statement.name.text));
       continue;
@@ -80,6 +82,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     if (ts.isInterfaceDeclaration(statement)) {
       const isExported = hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "interface", isExported));
+      warnings.push(...detachedSpecopsWarnings(sourceFile, statement));
       if (hasExportModifier(statement)) exports.push({ exportedName: statement.name.text, exportKind: "type", sourceSpecifier: null });
       continue;
     }
@@ -87,6 +90,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     if (ts.isTypeAliasDeclaration(statement)) {
       const isExported = hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "type_alias", isExported));
+      warnings.push(...detachedSpecopsWarnings(sourceFile, statement));
       if (hasExportModifier(statement)) exports.push({ exportedName: statement.name.text, exportKind: "type", sourceSpecifier: null });
       continue;
     }
@@ -94,6 +98,7 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
     if (ts.isEnumDeclaration(statement)) {
       const isExported = hasExportModifier(statement) || localExportedNames.has(statement.name.text);
       symbols.push(symbolFact(sourceFile, statement, statement.name.text, "enum", isExported));
+      warnings.push(...detachedSpecopsWarnings(sourceFile, statement));
       if (hasExportModifier(statement)) exports.push(namedExport(statement.name.text));
       continue;
     }
@@ -109,7 +114,8 @@ export function parseSourceFacts(input: ParseSourceFactsInput): ParseSourceFacts
         symbols.push(symbolFact(sourceFile, declaration, name, variableSymbolKind(name, declaration), isExported, annotationNode));
         if (hasExportModifier(statement)) exports.push(namedExport(name));
       }
-      if (declarationCount !== 1 || identifierDeclarations.length !== 1) warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
+      if (annotationNode) warnings.push(...detachedSpecopsWarnings(sourceFile, annotationNode));
+      else warnings.push(...unresolvedSpecopsWarnings(sourceFile, statement));
       continue;
     }
 
@@ -277,7 +283,15 @@ function readSpecopsAnnotations(
   node: ts.Node
 ): SourceSymbolFact["specopsAnnotations"] {
   const fullText = sourceFile.getFullText();
-  const ranges = jsDocCommentRanges(node, fullText);
+  const ranges = attachedJsDocCommentRanges(sourceFile, node, fullText);
+  return specopsAnnotationsFromRanges(sourceFile, fullText, ranges);
+}
+
+function specopsAnnotationsFromRanges(
+  sourceFile: ts.SourceFile,
+  fullText: string,
+  ranges: ts.CommentRange[]
+): SourceSymbolFact["specopsAnnotations"] {
   const annotations: SourceSymbolFact["specopsAnnotations"] = [];
 
   for (const range of ranges) {
@@ -298,18 +312,62 @@ function readSpecopsAnnotations(
   return annotations;
 }
 
-function jsDocCommentRanges(node: ts.Node, fullText: string): ts.CommentRange[] {
+function allJsDocCommentRanges(node: ts.Node, fullText: string): ts.CommentRange[] {
   return (ts.getLeadingCommentRanges(fullText, node.pos) ?? []).filter((range) =>
     fullText.startsWith("/**", range.pos)
   );
 }
 
+function attachedJsDocCommentRanges(
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  fullText: string
+): ts.CommentRange[] {
+  return allJsDocCommentRanges(node, fullText).filter((range) =>
+    isAttachedJsDocRange(sourceFile, node, fullText, range)
+  );
+}
+
+function isAttachedJsDocRange(
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+  fullText: string,
+  range: ts.CommentRange
+): boolean {
+  const between = fullText.slice(range.end, node.getStart(sourceFile));
+  return /^\s*$/.test(between) && !/\r?\n\s*\r?\n/.test(between);
+}
+
+function detachedSpecopsWarnings(sourceFile: ts.SourceFile, node: ts.Node): SourceScanWarning[] {
+  const fullText = sourceFile.getFullText();
+  const attachedRanges = new Set(
+    attachedJsDocCommentRanges(sourceFile, node, fullText).map((range) => `${range.pos}:${range.end}`)
+  );
+  const detachedRanges = allJsDocCommentRanges(node, fullText).filter(
+    (range) => !attachedRanges.has(`${range.pos}:${range.end}`)
+  );
+
+  return specopsAnnotationsFromRanges(sourceFile, fullText, detachedRanges).map((annotation) =>
+    sourceSpecUnresolvedWarning(sourceFile, annotation)
+  );
+}
+
 function unresolvedSpecopsWarnings(sourceFile: ts.SourceFile, node: ts.Node): SourceScanWarning[] {
-  return readSpecopsAnnotations(sourceFile, node).map((annotation) => ({
+  const fullText = sourceFile.getFullText();
+  return specopsAnnotationsFromRanges(sourceFile, fullText, allJsDocCommentRanges(node, fullText)).map((annotation) =>
+    sourceSpecUnresolvedWarning(sourceFile, annotation)
+  );
+}
+
+function sourceSpecUnresolvedWarning(
+  sourceFile: ts.SourceFile,
+  annotation: SourceSymbolFact["specopsAnnotations"][number]
+): SourceScanWarning {
+  return {
     code: "source_spec_unresolved_symbol",
     filePath: sourceFile.fileName,
     message: `Source annotation "${annotation.entityId || "@specops"}" is not attached to a supported top-level symbol.`
-  }));
+  };
 }
 
 function variableSymbolKind(name: string, declaration: ts.VariableDeclaration): string {

@@ -32,6 +32,7 @@ export function createSourceBootstrapService(db: Db) {
       const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
       const writtenPaths: string[] = [];
       const sourceSnapshots: Array<{ path: string; original: string }> = [];
+      const sourceEdits: Array<{ path: string; original: string; content: string }> = [];
 
       assertInsideDirectory(repoPath, specopsPath);
       await assertRealPathInsideDirectory(repoPath, repoPath);
@@ -70,8 +71,12 @@ export function createSourceBootstrapService(db: Db) {
 
           if (!result.changed) continue;
 
-          sourceSnapshots.push({ path: targetPath, original });
-          await writeFile(targetPath, result.content, { flag: "w" });
+          sourceEdits.push({ path: targetPath, original, content: result.content });
+        }
+
+        for (const edit of sourceEdits) {
+          sourceSnapshots.push({ path: edit.path, original: edit.original });
+          await writeFile(edit.path, edit.content, { flag: "w" });
         }
 
         for (const file of generatedFiles) {

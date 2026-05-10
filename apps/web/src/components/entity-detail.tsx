@@ -123,6 +123,7 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.outgoingLinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.backlinks(projectId, entityId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sourceLinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) })
@@ -332,6 +333,7 @@ export function EntityDetail({
         <SourceLinkTabs
           specTitle={entity.data.title}
           sourceLinks={sourceLinks.data ?? []}
+          sourceLinksError={sourceLinks.error?.message ?? null}
           specPanel={
             <MarkdownEditor
               value={editorMarkdown}
@@ -349,9 +351,6 @@ export function EntityDetail({
 
       {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
       {mutation.error ? <p className="text-sm text-red-700">{mutation.error.message}</p> : null}
-      {sourceLinks.error ? (
-        <p className="text-sm text-red-700">{sourceLinks.error.message}</p>
-      ) : null}
       {taskPreviewError ? <p className="text-sm text-red-700">{taskPreviewError}</p> : null}
 
       {taskPreview ? (

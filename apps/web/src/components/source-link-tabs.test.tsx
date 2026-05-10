@@ -102,7 +102,7 @@ describe("SourceLinkTabs", () => {
     expect(container.textContent).toContain("Source file could not be read.");
   });
 
-  it("shows an overflow count when more than four source links are provided", async () => {
+  it("keeps every source link reachable when more than four source links are provided", async () => {
     const { container } = await renderTabs({
       specTitle: "Decision Model",
       sourceLinks: Array.from({ length: 6 }, (_, index) =>
@@ -114,12 +114,24 @@ describe("SourceLinkTabs", () => {
       specPanel: <div>Spec editor panel</div>
     });
 
-    expect(container.textContent).toContain("+2");
-    expect(container.querySelector("[title]")?.getAttribute("title")).toBe(
-      "2 additional source links not shown"
-    );
     expect(container.textContent).toContain("source-4.ts");
-    expect(container.textContent).not.toContain("source-5.ts");
+    expect(container.textContent).toContain("source-5.ts");
+    expect(container.textContent).toContain("source-6.ts");
+
+    await clickButton(container, "source-6.ts");
+
+    expect(container.textContent).toContain("src/source-6.ts");
+  });
+
+  it("shows source-link load errors inside the source tab controls", async () => {
+    const { container } = await renderTabs({
+      specTitle: "Decision Model",
+      sourceLinks: [],
+      sourceLinksError: "Failed to load source links",
+      specPanel: <div>Spec editor panel</div>
+    });
+
+    expect(container.textContent).toContain("Failed to load source links");
   });
 
   it("distinguishes source buttons with duplicate file basenames", async () => {
@@ -185,6 +197,7 @@ describe("SourceLinkTabs", () => {
 async function renderTabs(props: {
   specTitle: string;
   sourceLinks: SourceSpecLinkDto[];
+  sourceLinksError?: string | null;
   specPanel: React.ReactNode;
 }) {
   const container = document.createElement("div");

@@ -2,19 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { SourceSpecLinkDto } from "@specops/contracts";
 
-const MAX_SOURCE_TABS = 4;
 const DEFAULT_EXCERPT_MESSAGE = "Source excerpt unavailable.";
 
 type SourceLinkTabsProps = {
   specTitle: string;
   sourceLinks: SourceSpecLinkDto[];
+  sourceLinksError?: string | null;
   specPanel: ReactNode;
 };
 
 type ActiveTab = { type: "spec" } | { type: "source"; id: string };
 
-export function SourceLinkTabs({ specTitle, sourceLinks, specPanel }: SourceLinkTabsProps) {
-  const visibleSourceLinks = useMemo(() => sourceLinks.slice(0, MAX_SOURCE_TABS), [sourceLinks]);
+export function SourceLinkTabs({
+  specTitle,
+  sourceLinks,
+  sourceLinksError,
+  specPanel
+}: SourceLinkTabsProps) {
+  const visibleSourceLinks = useMemo(() => sourceLinks, [sourceLinks]);
   const [activeTab, setActiveTab] = useState<ActiveTab>({ type: "spec" });
   const activeSourceLink =
     activeTab.type === "source"
@@ -56,13 +61,9 @@ export function SourceLinkTabs({ specTitle, sourceLinks, specPanel }: SourceLink
             </button>
           );
         })}
-        {sourceLinks.length > MAX_SOURCE_TABS ? (
-          <span
-            className="shrink-0 px-2 pb-2 text-xs font-medium text-slate-500"
-            title={overflowLabel(sourceLinks.length - MAX_SOURCE_TABS)}
-            aria-label={overflowLabel(sourceLinks.length - MAX_SOURCE_TABS)}
-          >
-            +{sourceLinks.length - MAX_SOURCE_TABS}
+        {sourceLinksError ? (
+          <span className="shrink-0 px-2 pb-2 text-xs font-medium text-red-700">
+            {sourceLinksError}
           </span>
         ) : null}
       </div>
@@ -137,8 +138,4 @@ function basename(filePath: string) {
 
 function sourceButtonLabel(sourceLink: SourceSpecLinkDto) {
   return `${basename(sourceLink.filePath)} · ${sourceLink.symbolName}`;
-}
-
-function overflowLabel(count: number) {
-  return `${count} additional source ${count === 1 ? "link" : "links"} not shown`;
 }

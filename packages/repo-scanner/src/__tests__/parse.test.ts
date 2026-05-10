@@ -309,6 +309,28 @@ describe("parseSourceFacts", () => {
     expect(result.symbols.find((symbol) => symbol.name === "Workspace")).toMatchObject({ specopsAnnotations: [] });
   });
 
+  it("does not attach blank-line-separated JSDoc annotations to declarations", () => {
+    const result = parseSourceFacts({
+      path: "src/detached.ts",
+      content:
+        "/**\n" +
+        " * @specops domain.detached\n" +
+        " */\n" +
+        "\n" +
+        "export interface Decision {}\n"
+    });
+
+    expect(result.symbols.find((symbol) => symbol.name === "Decision")).toMatchObject({
+      specopsAnnotations: []
+    });
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_unresolved_symbol",
+        filePath: "src/detached.ts"
+      })
+    );
+  });
+
   it("ignores prose mentions of specops tags in JSDoc", () => {
     const result = parseSourceFacts({
       path: "src/prose.ts",
