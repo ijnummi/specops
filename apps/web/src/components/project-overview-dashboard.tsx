@@ -32,6 +32,7 @@ export function ProjectOverviewDashboard({ projectId, overview }: ProjectOvervie
               tone="warning"
             />
           </div>
+          <ValidationSamples projectId={projectId} samples={overview.validationSummary.samples} />
         </Panel>
 
         <Panel title="Latest index" icon={<Database className="h-4 w-4" aria-hidden="true" />}>
@@ -225,6 +226,71 @@ function GroupedCounts({
         </Link>
       ))}
     </div>
+  );
+}
+
+function ValidationSamples({
+  projectId,
+  samples
+}: {
+  projectId: string;
+  samples: ProjectOverviewDto["validationSummary"]["samples"];
+}) {
+  if (samples.length === 0) {
+    return (
+      <div className="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-500">
+        No validation samples.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 border-t border-slate-200 pt-3">
+      <h3 className="mb-1.5 text-xs font-semibold uppercase text-slate-500">
+        Validation Samples
+      </h3>
+      <ul className="divide-y divide-slate-200">
+        {samples.map((sample, index) => (
+          <li
+            key={`${sample.code}-${sample.entityId ?? sample.filePath ?? index}`}
+            className="py-2"
+          >
+            {sample.entityId ? (
+              <Link
+                to="/projects/$projectId/entities/$entityId"
+                params={{ projectId, entityId: sample.entityId }}
+                search={{ q: undefined }}
+                className="block min-w-0 text-xs text-slate-700 underline-offset-2 hover:text-slate-950 hover:underline"
+              >
+                <ValidationSampleContent sample={sample} />
+              </Link>
+            ) : (
+              <div className="min-w-0 text-xs text-slate-700">
+                <ValidationSampleContent sample={sample} />
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ValidationSampleContent({
+  sample
+}: {
+  sample: ProjectOverviewDto["validationSummary"]["samples"][number];
+}) {
+  return (
+    <>
+      <span className="block truncate font-medium">
+        {sample.level} / {sample.code}
+      </span>
+      <span className="mt-0.5 block truncate text-slate-500">{sample.message}</span>
+      <span className="mt-0.5 block truncate font-mono text-slate-400">
+        {sample.entityId ?? sample.filePath ?? "Project"}
+      </span>
+    </>
   );
 }
 

@@ -43,6 +43,7 @@ describe("ProjectOverviewDashboard", () => {
     expect(html).toContain("Needs Attention");
     expect(html).toContain("domain_entity");
     expect(html).toContain("1 without evidence");
+    expect(html).toContain("Validation sample needs routing");
     expect(html).toContain("Update Customer");
     expect(html).toContain("Broken link");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.customer:");
@@ -118,7 +119,7 @@ const overview: ProjectOverviewDto = {
       {
         level: "error",
         code: "broken_link",
-        message: "Broken link",
+        message: "Validation sample needs routing",
         entityId: "domain.customer",
         filePath: "domain/customer.md"
       }
