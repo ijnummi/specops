@@ -8,6 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChangeImpactPage } from "./change-impact.js";
 
+const mocks = vi.hoisted(() => ({
+  previewAgentTask: vi.fn(),
+  saveAgentTask: vi.fn()
+}));
+
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     children,
@@ -38,10 +43,27 @@ vi.mock("../api/queries.js", async () => {
       queryKey: ["change-impact-test"],
       queryFn: async () => changeImpactPreviewResponse()
     }),
-    previewAgentTask: vi.fn(),
-    saveAgentTask: vi.fn()
+    previewAgentTask: mocks.previewAgentTask,
+    saveAgentTask: mocks.saveAgentTask
   };
 });
+
+vi.mock("../components/agent-task-preview.js", () => ({
+  AgentTaskPreview: ({
+    onSave,
+    preview
+  }: {
+    onSave: () => void;
+    preview: { markdown: string };
+  }) => (
+    <section data-testid="agent-task-preview">
+      <div>{preview.markdown}</div>
+      <button type="button" onClick={onSave}>
+        Save Task
+      </button>
+    </section>
+  )
+}));
 
 const roots: Root[] = [];
 const containers: HTMLElement[] = [];
@@ -50,6 +72,7 @@ const containers: HTMLElement[] = [];
 
 describe("ChangeImpactPage", () => {
   afterEach(() => {
+    vi.clearAllMocks();
     for (const root of roots.splice(0)) {
       act(() => {
         root.unmount();
@@ -69,9 +92,78 @@ describe("ChangeImpactPage", () => {
     expect(container.querySelector('[data-testid="change-impact-preview-panel"]')).not.toBeNull();
     expect(linkHref(container, "Open spec")).toBe("/projects/project-1/entities/domain.decision");
   });
+
+  it("generates a task from the backend-provided impact task seed", async () => {
+    mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
+    const { container } = await renderChangeImpactPage();
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    expect(mocks.previewAgentTask).toHaveBeenCalledWith("project-1", {
+      sourceEntityId: "domain.decision",
+      targetAgent: "codex",
+      impactedContextEntityIds: ["domain.outcome"]
+    });
+  });
+
+  it("invalidates the active change impact preview after saving a generated task", async () => {
+    mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
+    mocks.saveAgentTask.mockResolvedValue(savedTaskResponse());
+    const { container, queryClient } = await renderChangeImpactPage();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      clickButton(container, "Save Task");
+      await waitForQueryResult();
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "projects",
+        "project-1",
+        "entities",
+        "domain.decision",
+        "change-impact-preview",
+        { depth: "1", direction: "both", includeSource: true }
+      ]
+    });
+  });
+
+  it("ignores stale generated task previews after the route entity changes", async () => {
+    const deferredPreview = deferred<ReturnType<typeof agentTaskPreviewResponse>>();
+    mocks.previewAgentTask.mockReturnValue(deferredPreview.promise);
+    const { container, rerender } = await renderChangeImpactPage();
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      rerender({ projectId: "project-2", entityId: "domain.other" });
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      deferredPreview.resolve(agentTaskPreviewResponse());
+      await waitForQueryResult();
+    });
+
+    expect(container.querySelector('[data-testid="agent-task-preview"]')).toBeNull();
+  });
 });
 
-async function renderChangeImpactPage() {
+async function renderChangeImpactPage(
+  props: Partial<React.ComponentProps<typeof ChangeImpactPage>> = {}
+) {
   const container = document.createElement("div");
   document.body.append(container);
   containers.push(container);
@@ -80,26 +172,32 @@ async function renderChangeImpactPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   });
-
-  await act(async () => {
+  const renderProps = (nextProps: Partial<React.ComponentProps<typeof ChangeImpactPage>> = {}) => ({
+    projectId: "project-1",
+    entityId: "domain.decision",
+    depth: 1 as const,
+    direction: "both" as const,
+    includeSource: true,
+    ...props,
+    ...nextProps
+  });
+  const renderPage = (nextProps: Partial<React.ComponentProps<typeof ChangeImpactPage>> = {}) => {
     root.render(
       <QueryClientProvider client={queryClient}>
-        <ChangeImpactPage
-          projectId="project-1"
-          entityId="domain.decision"
-          depth={1}
-          direction="both"
-          includeSource={true}
-        />
+        <ChangeImpactPage {...renderProps(nextProps)} />
       </QueryClientProvider>
     );
+  };
+
+  await act(async () => {
+    renderPage();
   });
 
   await act(async () => {
     await waitForQueryResult();
   });
 
-  return { container, root };
+  return { container, queryClient, rerender: renderPage, root };
 }
 
 function waitForQueryResult() {
@@ -114,6 +212,64 @@ function linkHref(container: HTMLElement, label: string) {
   );
 
   return link?.getAttribute("href");
+}
+
+function clickButton(container: HTMLElement, label: string) {
+  const button = Array.from(container.querySelectorAll("button")).find((element) =>
+    element.textContent?.includes(label)
+  );
+
+  if (!button) {
+    throw new Error(`Button not found: ${label}`);
+  }
+
+  button.click();
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, reject, resolve };
+}
+
+function agentTaskPreviewResponse() {
+  return {
+    markdown: "# Task\n\nGenerated from impact.",
+    taskId: "task.domain-decision-impact",
+    title: "Change decision",
+    filePath: "tasks/domain-decision-impact.md",
+    sourceSpecIds: ["domain.decision"],
+    contextSpecIds: ["domain.outcome"],
+    warnings: []
+  };
+}
+
+function savedTaskResponse() {
+  return {
+    id: "entity-task-1",
+    projectId: "project-1",
+    entityId: "task.domain-decision-impact",
+    type: "task",
+    title: "Change decision",
+    status: "todo",
+    filePath: "tasks/domain-decision-impact.md",
+    frontmatter: {
+      id: "task.domain-decision-impact",
+      type: "task",
+      title: "Change decision",
+      status: "todo"
+    },
+    bodyMarkdown: "Generated from impact.",
+    bodyText: "Generated from impact.",
+    contentHash: "hash-task-1",
+    createdAt: "2026-05-10T12:00:00.000Z",
+    updatedAt: "2026-05-10T12:00:00.000Z"
+  };
 }
 
 function changeImpactPreviewResponse(): ChangeImpactPreviewResponseDto {

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type {
+  AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
   ChangeImpactPreviewQuery,
   ImpactDepth,
@@ -27,6 +28,19 @@ type ChangeImpactPageProps = {
   depth: ImpactSearchDepth;
   direction: ImpactDirection;
   includeSource: boolean;
+};
+
+type PreviewTaskMutationInput = {
+  projectId: string;
+  entityId: string;
+  taskSeed: AgentTaskPreviewRequest;
+};
+
+type SaveTaskMutationInput = {
+  projectId: string;
+  entityId: string;
+  queryInput: ChangeImpactPreviewQuery;
+  preview: AgentTaskPreviewResponse;
 };
 
 function impactDepthForApi(depth: ImpactSearchDepth): ImpactDepth {
@@ -62,6 +76,8 @@ export function ChangeImpactPage({
 }: ChangeImpactPageProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const currentProjectIdRef = useRef(projectId);
+  const currentEntityIdRef = useRef(entityId);
   const apiDepth = impactDepthForApi(depth);
   const queryInput: ChangeImpactPreviewQuery = { depth: apiDepth, direction, includeSource };
   const preview = useQuery(changeImpactPreviewQuery(projectId, entityId, queryInput));
@@ -80,60 +96,97 @@ export function ChangeImpactPage({
     [preview.data?.impact.nodes, preview.data?.rootEntity.entityId, selectedNodeId]
   );
 
-  const previewTaskMutation = useMutation({
-    mutationFn: () => {
-      if (!preview.data) {
-        throw new Error("Change impact preview is not loaded");
-      }
+  currentProjectIdRef.current = projectId;
+  currentEntityIdRef.current = entityId;
 
-      return previewAgentTask(projectId, preview.data.taskSeed);
-    },
+  const previewTaskMutation = useMutation({
+    mutationFn: ({ projectId: requestedProjectId, taskSeed }: PreviewTaskMutationInput) =>
+      previewAgentTask(requestedProjectId, taskSeed),
     onMutate: () => {
       setTaskPreviewError(null);
     },
-    onSuccess: (generatedPreview) => {
+    onSuccess: (generatedPreview, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.entityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
       setTaskPreview(generatedPreview);
       setTaskPreviewOriginalMarkdown(generatedPreview.markdown);
       setTaskSaveError(null);
       setTaskPreviewError(null);
     },
-    onError: (error) => {
+    onError: (error, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.entityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
       setTaskPreviewError(error instanceof Error ? error.message : "Failed to preview agent task");
     }
   });
 
   const saveTaskMutation = useMutation({
-    mutationFn: (generatedPreview: AgentTaskPreviewResponse) =>
-      saveAgentTask(projectId, {
+    mutationFn: ({ projectId: requestedProjectId, preview: generatedPreview }: SaveTaskMutationInput) =>
+      saveAgentTask(requestedProjectId, {
         markdown: generatedPreview.markdown,
         taskId: generatedPreview.taskId,
         filePath: generatedPreview.filePath
       }),
-    onSuccess: async (savedTask, generatedPreview) => {
+    onSuccess: async (savedTask, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.entityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
       setTaskPreview(null);
       setTaskPreviewOriginalMarkdown("");
       setTaskSaveError(null);
 
-      const contextBacklinkInvalidations = generatedPreview.contextSpecIds.map((contextSpecId) =>
+      const contextBacklinkInvalidations = request.preview.contextSpecIds.map((contextSpecId) =>
         queryClient.invalidateQueries({
-          queryKey: queryKeys.backlinks(projectId, contextSpecId)
+          queryKey: queryKeys.backlinks(request.projectId, contextSpecId)
         })
       );
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.outgoingLinks(projectId, entityId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.backlinks(projectId, entityId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.validation(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(request.projectId) }),
         queryClient.invalidateQueries({
-          queryKey: queryKeys.entity(projectId, savedTask.entityId)
+          queryKey: queryKeys.changeImpactPreview(
+            request.projectId,
+            request.entityId,
+            request.queryInput
+          )
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.outgoingLinks(request.projectId, request.entityId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.backlinks(request.projectId, request.entityId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.entity(request.projectId, savedTask.entityId)
         }),
         ...contextBacklinkInvalidations
       ]);
     },
-    onError: (error) => {
+    onError: (error, request) => {
+      if (
+        request.projectId !== currentProjectIdRef.current ||
+        request.entityId !== currentEntityIdRef.current
+      ) {
+        return;
+      }
+
       setTaskSaveError(error instanceof Error ? error.message : "Failed to save agent task");
     }
   });
@@ -247,7 +300,13 @@ export function ChangeImpactPage({
             <ChangeImpactPreviewPanel
               preview={preview.data}
               selectedNodeId={effectiveSelectedNodeId}
-              onGenerateTask={() => previewTaskMutation.mutate()}
+              onGenerateTask={() =>
+                previewTaskMutation.mutate({
+                  projectId,
+                  entityId,
+                  taskSeed: preview.data.taskSeed
+                })
+              }
               isGeneratingTask={previewTaskMutation.isPending}
             />
           </div>
@@ -264,7 +323,14 @@ export function ChangeImpactPage({
                 setTaskSaveError(null);
                 setTaskPreview((current) => (current ? { ...current, markdown } : current));
               }}
-              onSave={() => saveTaskMutation.mutate(taskPreview)}
+              onSave={() =>
+                saveTaskMutation.mutate({
+                  projectId,
+                  entityId,
+                  queryInput,
+                  preview: taskPreview
+                })
+              }
               onClose={() => {
                 setTaskPreview(null);
                 setTaskPreviewOriginalMarkdown("");
