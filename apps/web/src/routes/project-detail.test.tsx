@@ -7,23 +7,45 @@ const mocks = vi.hoisted(() => ({
   mutationStates: [] as Array<{ isPending: boolean; error: Error | null }>,
   navigate: vi.fn(),
   invalidateQueries: vi.fn(),
-  projectActionsProps: null as ProjectActionsProps | null
+  projectActionsProps: null as ProjectActionsProps | null,
+  overviewState: {
+    data: { project: { id: "project-1", name: "SpecOps" } },
+    error: null,
+    isLoading: false
+  } as { data: unknown; error: Error | null; isLoading: boolean }
 }));
 
 vi.mock("../api/queries.js", () => ({
   bootstrapFromSource: mocks.bootstrapFromSource,
-  entitiesQuery: vi.fn(),
-  indexRunsQuery: vi.fn(),
+  entitiesQuery: vi.fn((projectId: string) => ({
+    queryKey: ["projects", projectId, "entities"],
+    queryType: "entities"
+  })),
+  indexRunsQuery: vi.fn((projectId: string) => ({
+    queryKey: ["projects", projectId, "index-runs"],
+    queryType: "indexRuns"
+  })),
   initializeSpecops: vi.fn(),
-  projectQuery: vi.fn(),
+  projectOverviewQuery: vi.fn((projectId: string) => ({
+    queryKey: ["projects", projectId, "overview"],
+    queryType: "overview"
+  })),
+  projectQuery: vi.fn((projectId: string) => ({
+    queryKey: ["projects", projectId],
+    queryType: "project"
+  })),
   queryKeys: {
     entities: (projectId: string) => ["projects", projectId, "entities"],
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
     project: (projectId: string) => ["projects", projectId],
+    projectOverview: (projectId: string) => ["projects", projectId, "overview"],
     validation: (projectId: string) => ["projects", projectId, "validation-messages"]
   },
   reindexProject: vi.fn(),
-  validationMessagesQuery: vi.fn()
+  validationMessagesQuery: vi.fn((projectId: string) => ({
+    queryKey: ["projects", projectId, "validation-messages"],
+    queryType: "validation"
+  }))
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -32,31 +54,51 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
-  useMutation: (options: { mutationFn: () => unknown }) => {
+  useMutation: (options: { mutationFn: () => unknown; onSuccess?: () => unknown }) => {
     const state = mocks.mutationStates.shift() ?? { isPending: false, error: null };
 
     return {
       ...state,
-      mutate: () => options.mutationFn()
+      mutate: () => {
+        const result = options.mutationFn();
+        void options.onSuccess?.();
+        return result;
+      }
     };
   },
   useQueries: () => [
-    { data: [], error: null, isLoading: false },
+    {
+      data: [
+        {
+          entityId: "entity-1",
+          title: "Entity One",
+          type: "feature",
+          status: "draft",
+          bodyText: "Body",
+          filePath: "specops/entity-one.md"
+        }
+      ],
+      error: null,
+      isLoading: false
+    },
     { data: [], error: null },
     { data: [], error: null }
   ],
-  useQuery: () => ({
-    data: {
-      entityCount: 0,
-      linkCount: 0,
-      name: "SpecOps",
-      repoPath: "/repo",
-      specopsPath: "specops",
-      validationErrorCount: 0,
-      validationWarningCount: 0
-    },
-    error: null
-  }),
+  useQuery: (options: { queryType?: string }) =>
+    options.queryType === "overview"
+      ? mocks.overviewState
+      : {
+          data: {
+            entityCount: 0,
+            linkCount: 0,
+            name: "SpecOps",
+            repoPath: "/repo",
+            specopsPath: "specops",
+            validationErrorCount: 0,
+            validationWarningCount: 0
+          },
+          error: null
+        },
   useQueryClient: () => ({
     invalidateQueries: mocks.invalidateQueries
   })
@@ -67,7 +109,7 @@ vi.mock("../components/entity-create-form.js", () => ({
 }));
 
 vi.mock("../components/entity-detail.js", () => ({
-  EntityDetail: () => null
+  EntityDetail: ({ entityId }: { entityId: string }) => <div>Entity editor: {entityId}</div>
 }));
 
 vi.mock("../components/entity-list.js", () => ({
@@ -94,6 +136,12 @@ vi.mock("../components/project-actions.js", () => ({
   }
 }));
 
+vi.mock("../components/project-overview-dashboard.js", () => ({
+  ProjectOverviewDashboard: ({ projectId }: { projectId: string }) => (
+    <div>Project overview dashboard: {projectId}</div>
+  )
+}));
+
 vi.mock("../components/validation-panel.js", () => ({
   ValidationPanel: () => null
 }));
@@ -104,6 +152,12 @@ describe("ProjectDetailPage actions", () => {
   beforeEach(() => {
     mocks.bootstrapFromSource.mockReset();
     mocks.projectActionsProps = null;
+    mocks.invalidateQueries.mockReset();
+    mocks.overviewState = {
+      data: { project: { id: "project-1", name: "SpecOps" } },
+      error: null,
+      isLoading: false
+    };
     mocks.mutationStates = [
       { isPending: false, error: null },
       { isPending: false, error: null },
@@ -119,12 +173,40 @@ describe("ProjectDetailPage actions", () => {
     expect(html).toContain("Bootstrap from source");
   });
 
+  it("renders the project overview dashboard when no entity is selected", () => {
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="" />
+    );
+
+    expect(html).toContain("Project overview dashboard: project-1");
+    expect(html).not.toContain("Entity editor:");
+  });
+
+  it("renders the entity editor and not the overview dashboard when an entity is selected", () => {
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId="entity-1" query="" />
+    );
+
+    expect(html).toContain("Entity editor: entity-1");
+    expect(html).not.toContain("Project overview dashboard:");
+  });
+
   it("wires the bootstrap action to bootstrap the current project from source", () => {
     renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
 
     mocks.projectActionsProps?.onBootstrap();
 
     expect(mocks.bootstrapFromSource).toHaveBeenCalledWith("project-1");
+  });
+
+  it("invalidates project overview after project actions succeed", () => {
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
+
+    mocks.projectActionsProps?.onBootstrap();
+
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "overview"]
+    });
   });
 
   it("disables all project actions while bootstrap is pending", () => {

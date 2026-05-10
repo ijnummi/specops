@@ -7,6 +7,7 @@ import {
   entitiesQuery,
   indexRunsQuery,
   initializeSpecops,
+  projectOverviewQuery,
   projectQuery,
   queryKeys,
   reindexProject,
@@ -26,6 +27,7 @@ import { EntityCreateForm } from "../components/entity-create-form.js";
 import { EntityDetail } from "../components/entity-detail.js";
 import { EntityList } from "../components/entity-list.js";
 import { ProjectActions } from "../components/project-actions.js";
+import { ProjectOverviewDashboard } from "../components/project-overview-dashboard.js";
 import { ValidationPanel } from "../components/validation-panel.js";
 import { WorkbenchLayout } from "../components/workbench-layout.js";
 
@@ -40,6 +42,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const queryClient = useQueryClient();
   const entityDrafts = useEntityDrafts();
   const project = useQuery(projectQuery(projectId));
+  const overview = useQuery(projectOverviewQuery(projectId));
   const [entities, validation, indexRuns] = useQueries({
     queries: [
       entitiesQuery(projectId),
@@ -63,7 +66,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     );
   }, [entities.data, normalizedQuery]);
 
-  const selectedEntityId = entityId ?? filteredEntities[0]?.entityId ?? null;
+  const selectedEntityId = entityId;
   const selectedDraftKey = selectedEntityId ? entityDraftKey(projectId, selectedEntityId) : null;
   const selectedDraft = selectedDraftKey ? getDraft(entityDrafts, selectedDraftKey) : null;
   const isEditorDirty = isDraftDirty(selectedDraft);
@@ -118,6 +121,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const invalidateProject = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) })
@@ -231,13 +235,19 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           onSaveDraft={saveSelectedDraft}
           onBeforeSelect={confirmEntitySwitch}
         />
-      ) : entities.isLoading ? (
-        <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
-          Loading entities...
+      ) : overview.error ? (
+        <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          {overview.error.message}
         </div>
+      ) : overview.isLoading ? (
+        <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
+          Loading project overview...
+        </div>
+      ) : overview.data ? (
+        <ProjectOverviewDashboard projectId={projectId} overview={overview.data} />
       ) : (
         <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
-          No entity selected.
+          Project overview is unavailable.
         </div>
       )}
 
