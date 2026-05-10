@@ -2,6 +2,8 @@ import { queryOptions } from "@tanstack/react-query";
 import type {
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
+  ChangeImpactPreviewQuery,
+  ChangeImpactPreviewResponseDto,
   CreateEntityRequest,
   CreateProjectRequest,
   EntityImpactQuery,
@@ -40,6 +42,11 @@ export const queryKeys = {
     ["projects", projectId, "entities", entityId, "source-links"] as const,
   entityImpact: (projectId: string, entityId: string, input: EntityImpactQuery) =>
     ["projects", projectId, "entities", entityId, "impact", input] as const,
+  changeImpactPreview: (
+    projectId: string,
+    entityId: string,
+    input: ChangeImpactPreviewQuery
+  ) => ["projects", projectId, "entities", entityId, "change-impact-preview", input] as const,
   agentTaskPreview: (projectId: string, input: AgentTaskPreviewRequest) =>
     ["projects", projectId, "agent-tasks", "preview", input] as const,
   validation: (projectId: string) => ["projects", projectId, "validation-messages"] as const,
@@ -132,6 +139,28 @@ export function entityImpactQuery(
         `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
           entityId
         )}/impact?${search.toString()}`
+      )
+  });
+}
+
+export function changeImpactPreviewQuery(
+  projectId: string,
+  entityId: string,
+  input: ChangeImpactPreviewQuery
+) {
+  const search = new URLSearchParams({
+    depth: input.depth,
+    direction: input.direction,
+    includeSource: String(input.includeSource)
+  });
+
+  return queryOptions({
+    queryKey: queryKeys.changeImpactPreview(projectId, entityId, input),
+    queryFn: () =>
+      apiGet<ChangeImpactPreviewResponseDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
+          entityId
+        )}/change-impact-preview?${search.toString()}`
       )
   });
 }

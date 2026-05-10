@@ -1290,7 +1290,8 @@ describeWithDb("database-backed routes", () => {
 
     const preview = await createAgentTaskService(db).previewAgentTask(project.id, {
       sourceEntityId: "uc.generate-agent-task",
-      targetAgent: "codex"
+      targetAgent: "codex",
+      impactedContextEntityIds: []
     });
 
     expect(preview).toMatchObject({
@@ -1302,6 +1303,118 @@ describeWithDb("database-backed routes", () => {
     });
     expect(preview.markdown).toContain("source_entity: uc.generate-agent-task");
     expect(preview.markdown).toContain("domain.spec-entity");
+  });
+
+  it("includes explicit impacted context when previewing an agent task", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      [
+        "---",
+        "id: domain.decision",
+        "type: domain_entity",
+        "title: Decision",
+        "status: draft",
+        "links:",
+        "  uses:",
+        "    - domain.policy",
+        "---",
+        "",
+        "# Decision",
+        "",
+        "## Definition",
+        "",
+        "A decision made in a workspace.",
+        ""
+      ].join("\n")
+    );
+    await writeFile(
+      path.join(project.specopsPath, "domain", "policy.md"),
+      "---\nid: domain.policy\ntype: domain_entity\ntitle: Policy\nstatus: draft\nlinks: {}\n---\n\n# Policy\n"
+    );
+    await writeFile(
+      path.join(project.specopsPath, "domain", "outcome.md"),
+      "---\nid: domain.outcome\ntype: domain_entity\ntitle: Outcome\nstatus: draft\nlinks: {}\n---\n\n# Outcome\n"
+    );
+    await createIndexerService(createTestDb()).indexProject(project.id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/agent-tasks/preview`,
+      payload: {
+        sourceEntityId: "domain.decision",
+        targetAgent: "codex",
+        impactedContextEntityIds: ["domain.policy", "domain.outcome"]
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sourceSpecIds: ["domain.decision"],
+      contextSpecIds: expect.arrayContaining(["domain.policy", "domain.outcome"])
+    });
+  });
+
+  it("returns change impact preview data for an indexed entity", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "domain.ts"),
+      "/**\n * @specops domain.decision\n */\nexport interface Decision { id: string; }\n"
+    );
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\n" +
+        "id: domain.decision\n" +
+        "type: domain_entity\n" +
+        "title: Decision\n" +
+        "status: draft\n" +
+        "links:\n" +
+        "  uses:\n" +
+        "    - domain.policy\n" +
+        "---\n\n" +
+        "# Decision\n"
+    );
+    await writeFile(
+      path.join(project.specopsPath, "domain", "policy.md"),
+      "---\n" +
+        "id: domain.policy\n" +
+        "type: domain_entity\n" +
+        "title: Policy\n" +
+        "status: draft\n" +
+        "links: {}\n" +
+        "---\n\n" +
+        "# Policy\n"
+    );
+    await createIndexerService(createTestDb()).indexProject(project.id);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/change-impact-preview?depth=1&direction=both&includeSource=true`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      rootEntity: { entityId: "domain.decision" },
+      overview: expect.objectContaining({
+        impactedSpecCount: 2,
+        sourceFileCount: 1
+      }),
+      sourceGroups: [
+        expect.objectContaining({
+          filePath: "src/domain.ts"
+        })
+      ],
+      taskSeed: {
+        sourceEntityId: "domain.decision",
+        targetAgent: "codex",
+        impactedContextEntityIds: ["domain.policy"]
+      }
+    });
   });
 
   it("saves an edited agent task and rejects duplicate saves", async () => {
@@ -1322,7 +1435,8 @@ describeWithDb("database-backed routes", () => {
     const service = createAgentTaskService(db);
     const preview = await service.previewAgentTask(project.id, {
       sourceEntityId: "uc.generate-agent-task",
-      targetAgent: "codex"
+      targetAgent: "codex",
+      impactedContextEntityIds: []
     });
 
     const saved = await service.saveAgentTask(project.id, preview);
@@ -1360,7 +1474,8 @@ describeWithDb("database-backed routes", () => {
     const service = createAgentTaskService(db);
     const preview = await service.previewAgentTask(project.id, {
       sourceEntityId: "uc.generate-agent-task",
-      targetAgent: "codex"
+      targetAgent: "codex",
+      impactedContextEntityIds: []
     });
 
     await expect(
@@ -1396,7 +1511,8 @@ describeWithDb("database-backed routes", () => {
     const service = createAgentTaskService(db);
     const preview = await service.previewAgentTask(project.id, {
       sourceEntityId: "uc.generate-agent-task",
-      targetAgent: "codex"
+      targetAgent: "codex",
+      impactedContextEntityIds: []
     });
 
     const save = service.saveAgentTask(project.id, {
@@ -1433,7 +1549,8 @@ describeWithDb("database-backed routes", () => {
     const service = createAgentTaskService(db);
     const preview = await service.previewAgentTask(project.id, {
       sourceEntityId: "uc.generate-agent-task",
-      targetAgent: "codex"
+      targetAgent: "codex",
+      impactedContextEntityIds: []
     });
 
     await expect(

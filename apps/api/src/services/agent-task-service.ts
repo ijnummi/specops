@@ -40,9 +40,12 @@ export function createAgentTaskService(db: Db) {
     const project = await projectService.getProject(projectId);
     const source = await getEntity(projectId, input.sourceEntityId);
     const links = await getOneHopLinks(projectId, source.entityId);
-    const contextIds = [...new Set(links.flatMap((link) => [link.fromEntityId, link.toEntityId]))].filter(
-      (entityId) => entityId !== source.entityId
-    );
+    const oneHopContextIds = [
+      ...new Set(links.flatMap((link) => [link.fromEntityId, link.toEntityId]))
+    ].filter((entityId) => entityId !== source.entityId);
+    const contextIds = [...new Set([...oneHopContextIds, ...input.impactedContextEntityIds])]
+      .filter((entityId) => entityId !== source.entityId)
+      .sort((left, right) => left.localeCompare(right));
     const context = contextIds.length > 0 ? await getEntities(projectId, contextIds) : [];
     const validationCommands = await readValidationCommands(project);
 

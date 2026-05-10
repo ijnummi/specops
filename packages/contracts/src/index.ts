@@ -1,4 +1,5 @@
 export * from "./agent-tasks.js";
+export * from "./change-impact.js";
 export * from "./entities.js";
 export * from "./impact.js";
 export * from "./indexing.js";

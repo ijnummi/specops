@@ -13,8 +13,27 @@ describe("agent task contracts", () => {
       })
     ).toEqual({
       sourceEntityId: "uc.generate-agent-task",
-      targetAgent: "codex"
+      targetAgent: "codex",
+      impactedContextEntityIds: []
     });
+  });
+
+  it("validates impacted preview context entity IDs", () => {
+    expect(
+      agentTaskPreviewRequestSchema.parse({
+        sourceEntityId: "uc.generate-agent-task",
+        impactedContextEntityIds: ["req.source-context", "uc.related-context"]
+      })
+    ).toMatchObject({
+      impactedContextEntityIds: ["req.source-context", "uc.related-context"]
+    });
+
+    expect(() =>
+      agentTaskPreviewRequestSchema.parse({
+        sourceEntityId: "uc.generate-agent-task",
+        impactedContextEntityIds: [""]
+      })
+    ).toThrow();
   });
 
   it("accepts an edited task save request", () => {

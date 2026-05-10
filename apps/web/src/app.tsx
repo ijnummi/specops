@@ -6,6 +6,7 @@ import {
   RouterProvider
 } from "@tanstack/react-router";
 
+import { ChangeImpactPage } from "./routes/change-impact.js";
 import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
@@ -91,7 +92,32 @@ const impactRoute = createRoute({
   }
 });
 
-const routeTree = rootRoute.addChildren([projectsRoute, projectRoute, entityRoute, impactRoute]);
+const changeImpactRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/change-impact/$entityId",
+  validateSearch: parseImpactSearch,
+  component: () => {
+    const { projectId, entityId } = changeImpactRoute.useParams();
+    const { depth, direction, includeSource } = changeImpactRoute.useSearch();
+    return (
+      <ChangeImpactPage
+        projectId={projectId}
+        entityId={entityId}
+        depth={depth}
+        direction={direction}
+        includeSource={includeSource}
+      />
+    );
+  }
+});
+
+const routeTree = rootRoute.addChildren([
+  projectsRoute,
+  projectRoute,
+  entityRoute,
+  impactRoute,
+  changeImpactRoute
+]);
 const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {
