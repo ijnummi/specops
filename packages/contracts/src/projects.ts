@@ -26,7 +26,7 @@ export const createProjectRequestSchema = z.object({
   slug: z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   description: z.string().optional(),
   repoPath: z.string().min(1),
-  specopsPath: z.string().optional()
+  specopsPath: z.string().min(1)
 });
 
 export const updateProjectRequestSchema = createProjectRequestSchema.partial();
