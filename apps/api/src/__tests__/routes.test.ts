@@ -431,7 +431,7 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("creates an entity markdown file, indexes it, and returns searchable entities", async () => {
+  it("creates an entity markdown file, indexes it, and returns ranked entity search results", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
 
@@ -459,12 +459,135 @@ describeWithDb("database-backed routes", () => {
       method: "GET",
       url: `/api/projects/${project.id}/search?q=customer`
     });
-    const searchBody = searchResponse.json() as Array<{ entityId: string; title: string }>;
+    const searchBody = searchResponse.json() as Array<{
+      entityId: string;
+      title: string;
+      type: string;
+      status: string;
+      filePath: string;
+      rank: number;
+      snippet: string;
+      matchedFields: string[];
+    }>;
 
     expect(searchResponse.statusCode).toBe(200);
-    expect(searchBody).toContainEqual(
-      expect.objectContaining({ entityId: "domain.customer", title: "Customer" })
-    );
+    expect(searchBody).toHaveLength(1);
+    expect(searchBody[0]).toMatchObject({
+      entityId: "domain.customer",
+      title: "Customer",
+      type: "domain_entity",
+      status: "draft",
+      filePath: "domain/domain.customer.md"
+    });
+    expect(searchBody[0].rank).toBeGreaterThan(0);
+    expect(searchBody[0].snippet).toContain("Customer");
+    expect(searchBody[0].matchedFields).toContain("title");
+  });
+
+  it("ranks title and entity id matches ahead of body-only matches", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer",
+      title: "Customer",
+      bodyText: "Primary account record."
+    });
+    await insertSearchEntity(project.id, {
+      entityId: "domain.billing",
+      title: "Billing",
+      bodyText: "Invoices for each customer account."
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/search?q=customer`
+    });
+    const body = response.json() as Array<{ entityId: string; rank: number }>;
+
+    expect(response.statusCode).toBe(200);
+    expect(body.map((result) => result.entityId)).toEqual(["domain.customer", "domain.billing"]);
+    expect(body[0].rank).toBeGreaterThanOrEqual(body[1].rank);
+  });
+
+  it("filters entity search results by type and status", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer",
+      type: "domain_entity",
+      title: "Customer",
+      status: "draft"
+    });
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer-profile",
+      type: "domain_entity",
+      title: "Customer Profile",
+      status: "ready"
+    });
+    await insertSearchEntity(project.id, {
+      entityId: "interface.customer-api",
+      type: "interface",
+      title: "Customer API",
+      status: "ready"
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/search?q=customer&type=domain_entity&status=ready`
+    });
+    const body = response.json() as Array<{ entityId: string }>;
+
+    expect(response.statusCode).toBe(200);
+    expect(body.map((result) => result.entityId)).toEqual(["domain.customer-profile"]);
+  });
+
+  it("keeps entity search scoped to the project and enforces limit", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const otherProject = await createProjectViaApi();
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer-a",
+      title: "Customer A"
+    });
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer-b",
+      title: "Customer B"
+    });
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer-c",
+      title: "Customer C"
+    });
+    await insertSearchEntity(otherProject.id, {
+      entityId: "domain.customer-other",
+      title: "Customer Other"
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/search?q=customer&limit=2`
+    });
+    const body = response.json() as Array<{ entityId: string }>;
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toHaveLength(2);
+    expect(body.map((result) => result.entityId)).not.toContain("domain.customer-other");
+  });
+
+  it("rejects invalid entity search query parameters", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const emptyQueryResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/search?q=%20%20`
+    });
+    const tooLargeLimitResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/search?q=customer&limit=51`
+    });
+
+    expect(emptyQueryResponse.statusCode).toBe(400);
+    expect(tooLargeLimitResponse.statusCode).toBe(400);
   });
 
   it("creates and indexes entities with YAML punctuation in titles", async () => {
@@ -1886,6 +2009,32 @@ describeWithDb("database-backed routes", () => {
     projectIds.push(body.id);
 
     return body;
+  }
+
+  async function insertSearchEntity(
+    projectId: string,
+    entity: {
+      entityId: string;
+      type?: string;
+      title: string;
+      status?: string;
+      bodyText?: string;
+    }
+  ) {
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, body_markdown, body_text, content_hash) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+      [
+        projectId,
+        entity.entityId,
+        entity.type ?? "domain_entity",
+        entity.title,
+        entity.status ?? "draft",
+        `${entity.entityId.replace(".", "/")}.md`,
+        `# ${entity.title}\n\n${entity.bodyText ?? entity.title}`,
+        entity.bodyText ?? entity.title,
+        sha256(`${projectId}:${entity.entityId}`)
+      ]
+    );
   }
 
   async function writeSampleSourceProject(repoPath: string) {
