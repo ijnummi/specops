@@ -10,6 +10,7 @@ import type {
   EntityImpactResponseDto,
   IndexRunDto,
   ProjectDto,
+  ProjectOverviewDto,
   SaveAgentTaskRequest,
   SaveAgentTaskResponse,
   SpecEntityDto,
@@ -31,6 +32,7 @@ export type ProjectSummaryDto = ProjectDto & {
 export const queryKeys = {
   projects: ["projects"] as const,
   project: (projectId: string) => ["projects", projectId] as const,
+  projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
   entity: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId] as const,
@@ -65,6 +67,14 @@ export function projectQuery(projectId: string) {
   return queryOptions({
     queryKey: queryKeys.project(projectId),
     queryFn: () => apiGet<ProjectSummaryDto>(`/api/projects/${encodeURIComponent(projectId)}`)
+  });
+}
+
+export function projectOverviewQuery(projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.projectOverview(projectId),
+    queryFn: () =>
+      apiGet<ProjectOverviewDto>(`/api/projects/${encodeURIComponent(projectId)}/overview`)
   });
 }
 
