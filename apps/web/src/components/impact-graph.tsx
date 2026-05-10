@@ -3,6 +3,8 @@ import type { EntityImpactResponseDto, ImpactNodeDto } from "@specops/contracts"
 import { Background, Controls, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { impactSpecColumns, type ImpactSpecColumns } from "./impact-graph-model.js";
+
 type ImpactGraphProps = {
   impact: EntityImpactResponseDto;
   selectedNodeId: string | null;
@@ -10,15 +12,16 @@ type ImpactGraphProps = {
 };
 
 export function ImpactGraph({ impact, selectedNodeId, onSelectNode }: ImpactGraphProps) {
+  const columns = useMemo(() => impactSpecColumns(impact), [impact]);
   const nodes = useMemo<Node[]>(
     () =>
       impact.nodes.map((node) => ({
         id: node.id,
-        position: layoutPosition(node, impact),
+        position: layoutPosition(node, impact, columns),
         data: { label: node.label },
         className: nodeClassName(node, selectedNodeId, impact.rootEntity.entityId)
       })),
-    [impact, selectedNodeId]
+    [columns, impact, selectedNodeId]
   );
 
   const edges = useMemo<Edge[]>(
@@ -64,53 +67,47 @@ export function ImpactGraph({ impact, selectedNodeId, onSelectNode }: ImpactGrap
   );
 }
 
-function layoutPosition(node: ImpactNodeDto, impact: EntityImpactResponseDto) {
+function layoutPosition(
+  node: ImpactNodeDto,
+  impact: EntityImpactResponseDto,
+  columns: ImpactSpecColumns
+) {
   if (node.kind === "source") {
-    return sourceNodePosition(node, impact);
+    return sourceNodePosition(node, impact, columns);
   }
 
   if (node.entityId === impact.rootEntity.entityId) {
     return { x: 0, y: 0 };
   }
 
-  const upstreamEntityIds = uniqueEntityIds(impact.upstreamPaths, impact.rootEntity.entityId);
-  const downstreamEntityIds = uniqueEntityIds(impact.downstreamPaths, impact.rootEntity.entityId);
-
-  if (upstreamEntityIds.includes(node.entityId)) {
-    return { x: -320, y: upstreamEntityIds.indexOf(node.entityId) * 120 };
+  if (columns.upstreamEntityIds.includes(node.entityId)) {
+    return { x: -320, y: columns.upstreamEntityIds.indexOf(node.entityId) * 120 };
   }
 
-  if (downstreamEntityIds.includes(node.entityId)) {
-    return { x: 320, y: downstreamEntityIds.indexOf(node.entityId) * 120 };
+  if (columns.downstreamEntityIds.includes(node.entityId)) {
+    return { x: 320, y: columns.downstreamEntityIds.indexOf(node.entityId) * 120 };
   }
 
-  return { x: 0, y: 140 };
+  return { x: 0, y: 140 + columns.otherEntityIds.indexOf(node.entityId) * 120 };
 }
 
-function sourceNodePosition(node: ImpactNodeDto, impact: EntityImpactResponseDto) {
+function sourceNodePosition(
+  node: ImpactNodeDto,
+  impact: EntityImpactResponseDto,
+  columns: ImpactSpecColumns
+) {
   const sourceNodes = impact.nodes.filter(
     (candidate): candidate is Extract<ImpactNodeDto, { kind: "source" }> =>
       candidate.kind === "source"
   );
   const index = sourceNodes.findIndex((candidate) => candidate.id === node.id);
   const y = 180 + Math.max(index, 0) * 120;
-  return { x: node.entityId === impact.rootEntity.entityId ? 0 : 640, y };
-}
-
-function uniqueEntityIds(
-  paths: EntityImpactResponseDto["upstreamPaths"],
-  rootEntityId: string
-) {
-  const entityIds = new Set<string>();
-  for (const path of paths) {
-    for (const entityId of path.entityIds) {
-      if (entityId !== rootEntityId) {
-        entityIds.add(entityId);
-      }
-    }
+  if (node.entityId === impact.rootEntity.entityId) {
+    return { x: 0, y };
   }
 
-  return [...entityIds].sort((left, right) => left.localeCompare(right));
+  const x = columns.upstreamEntityIds.includes(node.entityId) ? -640 : 640;
+  return { x, y };
 }
 
 function nodeClassName(

@@ -168,6 +168,26 @@ function impactResponse(): EntityImpactResponseDto {
         filePath: "domain/decision.md"
       },
       {
+        id: "spec:domain.outcome",
+        kind: "spec",
+        label: "Outcome",
+        entityId: "domain.outcome",
+        type: "domain_entity",
+        status: "draft",
+        title: "Outcome",
+        filePath: "domain/outcome.md"
+      },
+      {
+        id: "spec:domain.policy",
+        kind: "spec",
+        label: "Policy",
+        entityId: "domain.policy",
+        type: "domain_entity",
+        status: "draft",
+        title: "Policy",
+        filePath: "domain/policy.md"
+      },
+      {
         id: "source:src/domain.ts:Decision:domain.decision",
         kind: "source",
         label: "Decision",
@@ -180,6 +200,28 @@ function impactResponse(): EntityImpactResponseDto {
       }
     ],
     edges: [
+      {
+        id: "spec-link:domain-policy-domain-decision",
+        from: "spec:domain.policy",
+        to: "spec:domain.decision",
+        kind: "spec_link",
+        label: "relates_to",
+        fromEntityId: "domain.policy",
+        toEntityId: "domain.decision",
+        linkType: "relates_to",
+        source: "frontmatter"
+      },
+      {
+        id: "spec-link:domain-decision-domain-outcome",
+        from: "spec:domain.decision",
+        to: "spec:domain.outcome",
+        kind: "spec_link",
+        label: "depends_on",
+        fromEntityId: "domain.decision",
+        toEntityId: "domain.outcome",
+        linkType: "depends_on",
+        source: "frontmatter"
+      },
       {
         id: "source-evidence:src/domain.ts:Decision:domain.decision",
         from: "spec:domain.decision",
@@ -275,8 +317,8 @@ function impactResponse(): EntityImpactResponseDto {
     truncated: {
       isTruncated: false,
       reason: null,
-      nodeCount: 2,
-      edgeCount: 1,
+      nodeCount: 4,
+      edgeCount: 3,
       sourceEvidenceCount: 2
     }
   };

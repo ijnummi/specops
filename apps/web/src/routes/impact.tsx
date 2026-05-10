@@ -67,6 +67,7 @@ export function ImpactPage({
       null,
     [impact.data?.nodes, impact.data?.rootEntity.entityId, selectedNodeId]
   );
+  const effectiveSelectedNodeId = selectedNode?.id ?? null;
 
   function updateSearch(
     next: Partial<{
@@ -168,7 +169,7 @@ export function ImpactPage({
           <section className="flex min-h-0 flex-col overflow-hidden rounded border border-slate-200 bg-white">
             <ImpactGraph
               impact={impact.data}
-              selectedNodeId={selectedNodeId}
+              selectedNodeId={effectiveSelectedNodeId}
               onSelectNode={(node) => setSelectedNodeId(node.id)}
             />
             <ImpactTracePanel impact={impact.data} />

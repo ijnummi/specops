@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import type { EntityImpactResponseDto, ImpactNodeDto, ImpactPathDto } from "@specops/contracts";
 
+import { impactSpecColumns } from "./impact-graph-model.js";
+
 type ImpactBriefProps = {
   projectId: string;
   impact: EntityImpactResponseDto;
@@ -8,14 +10,7 @@ type ImpactBriefProps = {
 };
 
 export function ImpactBrief({ projectId, impact, selectedNode }: ImpactBriefProps) {
-  const upstreamSpecCount = uniqueImpactedSpecCount(
-    impact.upstreamPaths,
-    impact.rootEntity.entityId
-  );
-  const downstreamSpecCount = uniqueImpactedSpecCount(
-    impact.downstreamPaths,
-    impact.rootEntity.entityId
-  );
+  const { upstreamEntityIds, downstreamEntityIds } = impactSpecColumns(impact);
 
   return (
     <aside
@@ -29,8 +24,8 @@ export function ImpactBrief({ projectId, impact, selectedNode }: ImpactBriefProp
         </p>
       ) : null}
       <dl className="mt-3 grid grid-cols-3 gap-2 text-sm lg:grid-cols-1">
-        <Metric label="Upstream" value={upstreamSpecCount} />
-        <Metric label="Downstream" value={downstreamSpecCount} />
+        <Metric label="Upstream" value={upstreamEntityIds.length} />
+        <Metric label="Downstream" value={downstreamEntityIds.length} />
         <Metric label="Source evidence" value={impact.sourceEvidence.length} />
       </dl>
       <section className="mt-4 border-t border-slate-200 pt-3">
@@ -77,19 +72,6 @@ function Metric({ label, value }: { label: string; value: number }) {
       <dd className="text-sm font-semibold text-slate-900">{value}</dd>
     </div>
   );
-}
-
-function uniqueImpactedSpecCount(paths: ImpactPathDto[], rootEntityId: string) {
-  const entityIds = new Set<string>();
-  for (const path of paths) {
-    for (const entityId of path.entityIds) {
-      if (entityId !== rootEntityId) {
-        entityIds.add(entityId);
-      }
-    }
-  }
-
-  return entityIds.size;
 }
 
 function pathKey(path: ImpactPathDto, index: number) {
