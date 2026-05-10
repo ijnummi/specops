@@ -204,6 +204,7 @@ function isFileExistsError(error: unknown): boolean {
 function isSourceAnnotationConflict(error: unknown): error is Error {
   return (
     error instanceof Error &&
-    error.message.includes("already has a different @specops annotation")
+    (error.message.includes("already has a different @specops annotation") ||
+      error.message.includes("Multiple source annotations target line"))
   );
 }

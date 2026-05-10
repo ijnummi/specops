@@ -579,6 +579,27 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("refuses source bootstrap when multiple annotations target the same source line", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    const sourcePath = path.join(project.repoPath, "src", "services.ts");
+    const originalSource =
+      "export const DecisionService = {}; export const ReminderScheduler = {};\n";
+    await writeFile(sourcePath, originalSource);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/bootstrap-from-source`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toContain("Multiple source annotations target line");
+    await expect(fileExists(path.join(project.specopsPath, "interfaces", "decision-service.md")))
+      .resolves.toBe(false);
+    await expect(readFile(sourcePath, "utf8")).resolves.toBe(originalSource);
+  });
+
   it("rejects source bootstrap when the generated file parent symlink escapes specops", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);

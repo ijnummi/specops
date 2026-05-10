@@ -24,7 +24,8 @@ const specopsTagPattern = /@specops\s+([A-Za-z0-9_.-]+)/g;
 export function applySourceSpecAnnotations(
   input: ApplySourceSpecAnnotationsInput
 ): ApplySourceSpecAnnotationsResult {
-  const lines = input.content.split("\n");
+  const lineEnding = detectLineEnding(input.content);
+  const lines = input.content.split(lineEnding);
   let changed = false;
 
   const annotations = input.annotations
@@ -32,6 +33,7 @@ export function applySourceSpecAnnotations(
       annotation.symbolLine !== null
     )
     .sort((a, b) => b.symbolLine - a.symbolLine);
+  assertUniqueAnnotationLines(annotations);
 
   for (const annotation of annotations) {
     if (annotation.symbolLine < 1 || annotation.symbolLine > lines.length) {
@@ -71,7 +73,7 @@ export function applySourceSpecAnnotations(
   }
 
   return {
-    content: lines.join("\n"),
+    content: lines.join(lineEnding),
     changed
   };
 }
@@ -83,12 +85,36 @@ function findLeadingJsdoc(lines: string[], declarationIndex: number): LeadingJsd
   }
 
   for (let index = candidateEnd; index >= 0; index -= 1) {
-    if (lines[index]?.includes("/**")) {
-      return { start: index, end: candidateEnd };
+    const line = lines[index] ?? "";
+
+    if (/^\s*\/\*/.test(line)) {
+      if (/^\s*\/\*\*/.test(line)) {
+        return { start: index, end: candidateEnd };
+      }
+
+      return null;
     }
   }
 
   return null;
+}
+
+function assertUniqueAnnotationLines(
+  annotations: Array<SourceSpecAnnotationInput & { symbolLine: number }>
+) {
+  const seenLines = new Set<number>();
+
+  for (const annotation of annotations) {
+    if (seenLines.has(annotation.symbolLine)) {
+      throw new Error(`Multiple source annotations target line ${annotation.symbolLine}`);
+    }
+
+    seenLines.add(annotation.symbolLine);
+  }
+}
+
+function detectLineEnding(content: string): "\r\n" | "\n" {
+  return content.includes("\r\n") ? "\r\n" : "\n";
 }
 
 function extractSpecopsTags(lines: string[]): string[] {

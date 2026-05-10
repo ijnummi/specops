@@ -31,6 +31,29 @@ describe("applySourceSpecAnnotations", () => {
     expect(result.content).toContain(" * Domain object.\n * @specops domain.decision\n");
   });
 
+  it("does not modify a regular block comment before the declaration", () => {
+    const result = applySourceSpecAnnotations({
+      content:
+        "/**\n" +
+        " * File overview.\n" +
+        " */\n" +
+        "/* Internal note. */\n" +
+        "export interface Decision { id: string }\n",
+      annotations: [{ entityId: "domain.decision", symbolName: "Decision", symbolLine: 5 }]
+    });
+
+    expect(result.content).toBe(
+      "/**\n" +
+        " * File overview.\n" +
+        " */\n" +
+        "/* Internal note. */\n" +
+        "/**\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision { id: string }\n"
+    );
+  });
+
   it("refuses conflicting specops tags on the target declaration", () => {
     expect(() =>
       applySourceSpecAnnotations({
@@ -84,6 +107,22 @@ describe("applySourceSpecAnnotations", () => {
     expect(result.changed).toBe(true);
   });
 
+  it("refuses multiple annotations targeting the same source line", () => {
+    expect(() =>
+      applySourceSpecAnnotations({
+        content: "export const DecisionService = {}; export const ReminderScheduler = {};\n",
+        annotations: [
+          { entityId: "interface.decision-service", symbolName: "DecisionService", symbolLine: 1 },
+          {
+            entityId: "interface.reminder-scheduler",
+            symbolName: "ReminderScheduler",
+            symbolLine: 1
+          }
+        ]
+      })
+    ).toThrow(/Multiple source annotations target line/);
+  });
+
   it("handles source files without a trailing newline", () => {
     const result = applySourceSpecAnnotations({
       content: "export interface Decision { id: string }",
@@ -97,5 +136,19 @@ describe("applySourceSpecAnnotations", () => {
         "export interface Decision { id: string }"
     );
     expect(result.changed).toBe(true);
+  });
+
+  it("preserves CRLF line endings when inserting annotations", () => {
+    const result = applySourceSpecAnnotations({
+      content: "export interface Decision { id: string }\r\n",
+      annotations: [{ entityId: "domain.decision", symbolName: "Decision", symbolLine: 1 }]
+    });
+
+    expect(result.content).toBe(
+      "/**\r\n" +
+        " * @specops domain.decision\r\n" +
+        " */\r\n" +
+        "export interface Decision { id: string }\r\n"
+    );
   });
 });
