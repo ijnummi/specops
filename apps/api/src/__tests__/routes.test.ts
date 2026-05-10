@@ -676,6 +676,61 @@ describeWithDb("database-backed routes", () => {
     ]);
   });
 
+  it("persists source spec links for non-dotted entity ids accepted by markdown", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "use-cases", "feature-auth.md"),
+      "---\n" +
+        "id: feature-auth\n" +
+        "type: use_case\n" +
+        "title: Feature Auth\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Feature Auth\n"
+    );
+    await writeFile(
+      path.join(project.repoPath, "src", "auth.ts"),
+      "/** @specops feature-auth */\n" + "export function authenticate() {}\n"
+    );
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const links = await pool.query(
+      "select file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line from source_spec_links where project_id = $1",
+      [project.id]
+    );
+    const messagesResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/validation-messages`
+    });
+
+    expect(links.rows).toContainEqual(
+      expect.objectContaining({
+        file_path: "src/auth.ts",
+        entity_id: "feature-auth",
+        symbol_name: "authenticate",
+        symbol_kind: "function",
+        symbol_line: 2,
+        annotation_line: 1
+      })
+    );
+    expect(messagesResponse.statusCode).toBe(200);
+    expect(messagesResponse.json()).not.toContainEqual(
+      expect.objectContaining({
+        code: "source_spec_invalid_entity_id",
+        entityId: "feature-auth",
+        filePath: "src/auth.ts"
+      })
+    );
+  });
+
   it("warns when a source spec annotation references a missing entity", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

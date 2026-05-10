@@ -480,5 +480,5 @@ function toRecord(value: unknown): Record<string, unknown> {
 }
 
 function isValidSpecopsEntityId(value: string): boolean {
-  return /^[a-z][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)+$/.test(value);
+  return value.trim().length > 0 && value === value.trim();
 }
