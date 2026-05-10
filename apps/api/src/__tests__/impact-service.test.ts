@@ -218,6 +218,15 @@ describe("buildEntityImpact", () => {
       ["root", "a"],
       ["root", "b"]
     ]);
+    expect(impact.nodes.map((node) => node.id)).toEqual([
+      "spec:a",
+      "spec:b",
+      "spec:root"
+    ]);
+    expect(impact.edges.map((edge) => edge.id)).toEqual([
+      "spec-link:root-a-uses",
+      "spec-link:root-b-uses"
+    ]);
     expect(impact.truncated).toMatchObject({
       isTruncated: true,
       reason: "path_limit"

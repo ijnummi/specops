@@ -212,6 +212,11 @@ function traverseDirection(input: {
         continue;
       }
 
+      if (paths.length >= input.limits.maxPaths) {
+        truncatedReason = chooseTruncationReason(truncatedReason, "path_limit");
+        continue;
+      }
+
       const needsEntityAdmission = !input.includedEntityIds.has(nextEntityId);
       const needsLinkAdmission = !input.includedLinkKeys.has(linkKey(link));
 
@@ -245,11 +250,6 @@ function traverseDirection(input: {
         input.direction === "downstream"
           ? [...current.linkTypes, link.linkType]
           : [link.linkType, ...current.linkTypes];
-
-      if (paths.length >= input.limits.maxPaths) {
-        truncatedReason = chooseTruncationReason(truncatedReason, "path_limit");
-        continue;
-      }
 
       paths.push({
         direction: input.direction,
