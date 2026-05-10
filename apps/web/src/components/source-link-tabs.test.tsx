@@ -134,6 +134,26 @@ describe("SourceLinkTabs", () => {
     expect(container.textContent).toContain("Failed to load source links");
   });
 
+  it("keeps source metadata beside a single-scroll code viewer", async () => {
+    const { container } = await renderTabs({
+      specTitle: "Decision Model",
+      sourceLinks: [sourceLink()],
+      specPanel: <div>Spec editor panel</div>
+    });
+
+    await clickButton(container, "decision-model.ts");
+
+    const panel = container.querySelector('[data-testid="source-link-panel"]');
+    const metadata = container.querySelector('[data-testid="source-link-metadata"]');
+    const codeFrame = container.querySelector('[data-testid="source-code-frame"]');
+
+    expect(panel?.className).toContain("overflow-hidden");
+    expect(panel?.className).not.toContain("overflow-auto");
+    expect(metadata?.className).toContain("md:w-64");
+    expect(codeFrame?.className).toContain("min-h-0");
+    expect(codeFrame?.className).toContain("flex-1");
+  });
+
   it("distinguishes source buttons with duplicate file basenames", async () => {
     const { container } = await renderTabs({
       specTitle: "Decision Model",

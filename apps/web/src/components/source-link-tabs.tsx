@@ -83,17 +83,25 @@ export function SourceLinkTabs({
 
 function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
   return (
-    <section className="min-h-0 flex-1 overflow-auto bg-white p-3">
-      <div className="mb-3 grid gap-1 text-xs text-slate-600">
-        <div className="font-mono text-slate-900">{sourceLink.filePath}</div>
+    <section
+      data-testid="source-link-panel"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white md:flex-row"
+    >
+      <aside
+        data-testid="source-link-metadata"
+        className="grid shrink-0 gap-1 overflow-hidden border-b border-slate-200 p-3 text-xs text-slate-600 md:w-64 md:border-b-0 md:border-r"
+      >
+        <div className="break-words font-mono text-slate-900">{sourceLink.filePath}</div>
         <div>
           <span className="font-medium text-slate-700">{sourceLink.symbolKind}</span>{" "}
           <span>{sourceLink.symbolName}</span>
         </div>
         {sourceLink.symbolLine ? <div>Symbol line {sourceLink.symbolLine}</div> : null}
         {sourceLink.annotationLine ? <div>Annotation line {sourceLink.annotationLine}</div> : null}
+      </aside>
+      <div className="min-h-0 flex-1 p-3">
+        <Excerpt sourceLink={sourceLink} />
       </div>
-      <Excerpt sourceLink={sourceLink} />
     </section>
   );
 }
@@ -110,7 +118,10 @@ function Excerpt({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
   }
 
   return (
-    <div className="h-full min-h-80 overflow-hidden rounded border border-slate-200">
+    <div
+      data-testid="source-code-frame"
+      className="h-full min-h-0 flex-1 overflow-hidden rounded border border-slate-200"
+    >
       <SourceCodeViewer
         filePath={sourceLink.filePath}
         value={excerpt.text}
