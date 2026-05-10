@@ -20,7 +20,7 @@ export function ImpactTracePanel({ impact }: { impact: EntityImpactResponseDto }
             <ul className="mt-2 grid gap-2 text-xs text-slate-600">
               {impact.sourceEvidence.map((item) => (
                 <li
-                  key={`${item.entityId}-${item.filePath}-${item.symbolName}`}
+                  key={sourceEvidenceKey(item)}
                   className="rounded border border-slate-100 bg-slate-50 p-2"
                 >
                   <span className="font-medium text-slate-800">{item.symbolName}</span>
@@ -43,9 +43,9 @@ function PathList({ title, paths }: { title: string; paths: ImpactPathDto[] }) {
       <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
       {paths.length > 0 ? (
         <ul className="mt-2 grid gap-2 text-xs text-slate-600">
-          {paths.map((path) => (
+          {paths.map((path, index) => (
             <li
-              key={`${path.direction}-${path.entityIds.join(">")}`}
+              key={pathKey(path, index)}
               className="rounded border border-slate-100 bg-slate-50 p-2"
             >
               {path.entityIds.join(" -> ")}
@@ -57,4 +57,24 @@ function PathList({ title, paths }: { title: string; paths: ImpactPathDto[] }) {
       )}
     </section>
   );
+}
+
+function pathKey(path: ImpactPathDto, index: number) {
+  return [
+    path.direction,
+    path.entityIds.join(">"),
+    path.linkTypes.join(">"),
+    index.toString()
+  ].join("|");
+}
+
+function sourceEvidenceKey(item: EntityImpactResponseDto["sourceEvidence"][number]) {
+  return [
+    item.sourceFileId,
+    item.entityId,
+    item.filePath,
+    item.symbolName,
+    String(item.symbolLine),
+    String(item.annotationLine)
+  ].join("|");
 }

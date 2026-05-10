@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import type { EntityImpactResponseDto, ImpactNodeDto } from "@specops/contracts";
+import type { EntityImpactResponseDto, ImpactNodeDto, ImpactPathDto } from "@specops/contracts";
 
 type ImpactBriefProps = {
   projectId: string;
@@ -50,8 +50,8 @@ export function ImpactBrief({ projectId, impact, selectedNode }: ImpactBriefProp
       <section className="mt-4 border-t border-slate-200 pt-3">
         <h3 className="text-sm font-semibold text-slate-800">Top paths</h3>
         <ul className="mt-2 grid gap-2 text-xs text-slate-600">
-          {[...impact.upstreamPaths, ...impact.downstreamPaths].slice(0, 5).map((path) => (
-            <li key={`${path.direction}-${path.entityIds.join(">")}`} className="rounded bg-slate-50 p-2">
+          {[...impact.upstreamPaths, ...impact.downstreamPaths].slice(0, 5).map((path, index) => (
+            <li key={pathKey(path, index)} className="rounded bg-slate-50 p-2">
               {path.entityIds.join(" -> ")}
             </li>
           ))}
@@ -68,4 +68,13 @@ function Metric({ label, value }: { label: string; value: number }) {
       <dd className="text-sm font-semibold text-slate-900">{value}</dd>
     </div>
   );
+}
+
+function pathKey(path: ImpactPathDto, index: number) {
+  return [
+    path.direction,
+    path.entityIds.join(">"),
+    path.linkTypes.join(">"),
+    index.toString()
+  ].join("|");
 }

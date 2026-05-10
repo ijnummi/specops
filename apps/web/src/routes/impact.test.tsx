@@ -59,27 +59,36 @@ describe("ImpactPage", () => {
   });
 
   it("renders impact controls, counts, and navigation", async () => {
-    const { container } = await renderImpactPage();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect(container.textContent).toContain("Decision");
-    expect(container.textContent).toContain("Depth");
-    expect(container.textContent).toContain("Direction");
-    expect(container.textContent).toContain("Source evidence");
-    expect(container.textContent).toContain("Upstream");
-    expect(container.textContent).toContain("Downstream");
-    expect(container.textContent).toContain("Trace Details");
-    expect(container.textContent).toContain("Impact Brief");
-    expect(container.textContent).toContain("Upstream 1 / Downstream 1 / Source 1");
-    expect(container.querySelector('[data-testid="impact-graph"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="impact-brief"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="impact-trace-panel"]')).not.toBeNull();
-    expect(definitionValue(container, "Upstream")).toBe("1");
-    expect(definitionValue(container, "Downstream")).toBe("1");
-    expect(definitionValue(container, "Source evidence")).toBe("1");
-    expect(container.textContent).toContain("src/domain.ts");
-    expect(linkHref(container, "Open Editor")).toBe(
-      "/projects/project-1/entities/domain.decision"
-    );
+    try {
+      const { container } = await renderImpactPage();
+
+      expect(container.textContent).toContain("Decision");
+      expect(container.textContent).toContain("Depth");
+      expect(container.textContent).toContain("Direction");
+      expect(container.textContent).toContain("Source evidence");
+      expect(container.textContent).toContain("Upstream");
+      expect(container.textContent).toContain("Downstream");
+      expect(container.textContent).toContain("Trace Details");
+      expect(container.textContent).toContain("Impact Brief");
+      expect(container.textContent).toContain("Upstream 2 / Downstream 1 / Source 2");
+      expect(container.querySelector('[data-testid="impact-graph"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="impact-brief"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="impact-trace-panel"]')).not.toBeNull();
+      expect(definitionValue(container, "Upstream")).toBe("2");
+      expect(definitionValue(container, "Downstream")).toBe("1");
+      expect(definitionValue(container, "Source evidence")).toBe("2");
+      expect(container.textContent).toContain("src/domain.ts");
+      expect(linkHref(container, "Open Editor")).toBe(
+        "/projects/project-1/entities/domain.decision"
+      );
+      expect(consoleError.mock.calls.flat().join("\n")).not.toContain(
+        "Encountered two children with the same key"
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 
@@ -199,6 +208,25 @@ function impactResponse(): EntityImpactResponseDto {
           }
         ],
         linkTypes: ["relates_to"]
+      },
+      {
+        direction: "upstream",
+        entityIds: ["domain.policy", "domain.decision"],
+        steps: [
+          {
+            entityId: "domain.policy",
+            title: "Policy",
+            type: "domain_entity",
+            status: "draft"
+          },
+          {
+            entityId: "domain.decision",
+            title: "Decision",
+            type: "domain_entity",
+            status: "draft"
+          }
+        ],
+        linkTypes: ["depends_on"]
       }
     ],
     downstreamPaths: [
@@ -231,6 +259,15 @@ function impactResponse(): EntityImpactResponseDto {
         symbolKind: "interface",
         symbolLine: 3,
         annotationLine: 2
+      },
+      {
+        entityId: "domain.decision",
+        filePath: "src/domain.ts",
+        sourceFileId: "source-file-2",
+        symbolName: "Decision",
+        symbolKind: "interface",
+        symbolLine: 7,
+        annotationLine: 6
       }
     ],
     truncated: {
