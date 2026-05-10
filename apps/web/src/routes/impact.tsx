@@ -17,10 +17,36 @@ import { ImpactTracePanel } from "../components/impact-trace-panel.js";
 type ImpactPageProps = {
   projectId: string;
   entityId: string;
-  depth: ImpactDepth;
+  depth: ImpactSearchDepth;
   direction: ImpactDirection;
   includeSource: boolean;
 };
+
+export type ImpactSearchDepth = 1 | 2 | "all";
+
+function impactDepthForApi(depth: ImpactSearchDepth): ImpactDepth {
+  if (depth === 1) {
+    return "1";
+  }
+
+  if (depth === 2) {
+    return "2";
+  }
+
+  return depth;
+}
+
+function impactDepthForSearch(depth: ImpactDepth): ImpactSearchDepth {
+  if (depth === "1") {
+    return 1;
+  }
+
+  if (depth === "2") {
+    return 2;
+  }
+
+  return depth;
+}
 
 export function ImpactPage({
   projectId,
@@ -30,7 +56,8 @@ export function ImpactPage({
   includeSource
 }: ImpactPageProps) {
   const navigate = useNavigate();
-  const queryInput: EntityImpactQuery = { depth, direction, includeSource };
+  const apiDepth = impactDepthForApi(depth);
+  const queryInput: EntityImpactQuery = { depth: apiDepth, direction, includeSource };
   const impact = useQuery(entityImpactQuery(projectId, entityId, queryInput));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = useMemo<ImpactNodeDto | null>(
@@ -38,7 +65,13 @@ export function ImpactPage({
     [impact.data?.nodes, selectedNodeId]
   );
 
-  function updateSearch(next: Partial<EntityImpactQuery>) {
+  function updateSearch(
+    next: Partial<{
+      depth: ImpactSearchDepth;
+      direction: ImpactDirection;
+      includeSource: boolean;
+    }>
+  ) {
     navigate({
       to: "/projects/$projectId/impact/$entityId",
       params: { projectId, entityId },
@@ -51,7 +84,7 @@ export function ImpactPage({
   }
 
   return (
-    <main className="mx-auto flex h-full max-w-[1600px] flex-col overflow-hidden p-4">
+    <main className="mx-auto flex h-full max-w-[1600px] flex-col overflow-auto p-4 lg:overflow-hidden">
       <div className="mb-3 flex min-w-0 shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold">
@@ -66,8 +99,10 @@ export function ImpactPage({
             <span>Depth</span>
             <select
               className="input h-9 py-1"
-              value={depth}
-              onChange={(event) => updateSearch({ depth: event.target.value as ImpactDepth })}
+              value={apiDepth}
+              onChange={(event) =>
+                updateSearch({ depth: impactDepthForSearch(event.target.value as ImpactDepth) })
+              }
             >
               <option value="1">1 hop</option>
               <option value="2">2 hops</option>
@@ -126,7 +161,7 @@ export function ImpactPage({
           {impact.error.message}
         </div>
       ) : impact.data ? (
-        <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid flex-none gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="flex min-h-0 flex-col overflow-hidden rounded border border-slate-200 bg-white">
             <ImpactGraph
               impact={impact.data}

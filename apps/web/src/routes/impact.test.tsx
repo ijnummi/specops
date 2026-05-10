@@ -17,10 +17,10 @@ vi.mock("@tanstack/react-router", () => ({
   }: {
     children: React.ReactNode;
     params?: Record<string, string>;
-    search?: Record<string, string | undefined>;
+    search?: Record<string, boolean | number | string | undefined>;
     to: string;
   }) => {
-    const suffix = search?.depth ? `?depth=${search.depth}` : "";
+    const suffix = search?.depth !== undefined ? `?depth=${String(search.depth)}` : "";
     const href = to
       .replace("$projectId", params?.projectId ?? "")
       .replace("$entityId", params?.entityId ?? "");
@@ -108,7 +108,7 @@ async function renderImpactPage() {
         <ImpactPage
           projectId="project-1"
           entityId="domain.decision"
-          depth="1"
+          depth={1}
           direction="both"
           includeSource={true}
         />
@@ -275,7 +275,7 @@ function impactResponse(): EntityImpactResponseDto {
       reason: null,
       nodeCount: 2,
       edgeCount: 1,
-      sourceEvidenceCount: 1
+      sourceEvidenceCount: 2
     }
   };
 }

@@ -37,7 +37,7 @@ export function ImpactGraph({ impact, selectedNodeId, onSelectNode }: ImpactGrap
     return (
       <div
         data-testid="impact-graph"
-        className="flex min-h-0 flex-1 items-center justify-center bg-slate-50 p-6 text-center text-sm text-slate-500"
+        className="flex h-[360px] shrink-0 items-center justify-center bg-slate-50 p-6 text-center text-sm text-slate-500 lg:h-auto lg:min-h-0 lg:flex-1"
       >
         No linked specs or source evidence match the current filters.
       </div>
@@ -45,7 +45,7 @@ export function ImpactGraph({ impact, selectedNodeId, onSelectNode }: ImpactGrap
   }
 
   return (
-    <div data-testid="impact-graph" className="min-h-0 flex-1">
+    <div data-testid="impact-graph" className="h-[360px] shrink-0 lg:h-auto lg:min-h-0 lg:flex-1">
       <ReactFlow
         nodes={nodes}
         edges={edges}

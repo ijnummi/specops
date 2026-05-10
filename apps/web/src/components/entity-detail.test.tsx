@@ -59,7 +59,7 @@ vi.mock("@tanstack/react-router", () => ({
   }: {
     children: ReactNode;
     params: { projectId: string; entityId: string };
-    search?: Record<string, string | boolean | undefined>;
+    search?: Record<string, boolean | number | string | undefined>;
     to: string;
   }) => {
     const href = to

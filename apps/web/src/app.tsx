@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { ImpactPage } from "./routes/impact.js";
+import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
 import { ProjectsPage } from "./routes/projects.js";
 import { RootRoute } from "./routes/root.js";
@@ -26,8 +27,11 @@ const rootRoute = createRootRoute({
 });
 
 function parseImpactSearch(search: Record<string, unknown>) {
+  const depth: ImpactSearchDepth =
+    search.depth === 2 || search.depth === "2" ? 2 : search.depth === "all" ? "all" : 1;
+
   return {
-    depth: search.depth === "2" || search.depth === "all" ? search.depth : "1",
+    depth,
     direction:
       search.direction === "upstream" || search.direction === "downstream"
         ? search.direction

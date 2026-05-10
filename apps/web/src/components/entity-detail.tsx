@@ -298,7 +298,7 @@ export function EntityDetail({
                 <Link
                   to="/projects/$projectId/impact/$entityId"
                   params={{ projectId, entityId }}
-                  search={{ depth: "1", direction: "both", includeSource: true }}
+                  search={{ depth: 1, direction: "both", includeSource: true }}
                   className="button-secondary"
                   onClick={(event) => {
                     if (isDirty && onBeforeSelect && !onBeforeSelect()) {
