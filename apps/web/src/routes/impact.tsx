@@ -1,9 +1,18 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import type { EntityImpactQuery, ImpactDepth, ImpactDirection } from "@specops/contracts";
+import type {
+  EntityImpactQuery,
+  ImpactDepth,
+  ImpactDirection,
+  ImpactNodeDto
+} from "@specops/contracts";
 import { ArrowLeft, FileText } from "lucide-react";
 
 import { entityImpactQuery } from "../api/queries.js";
+import { ImpactBrief } from "../components/impact-brief.js";
+import { ImpactGraph } from "../components/impact-graph.js";
+import { ImpactTracePanel } from "../components/impact-trace-panel.js";
 
 type ImpactPageProps = {
   projectId: string;
@@ -23,6 +32,11 @@ export function ImpactPage({
   const navigate = useNavigate();
   const queryInput: EntityImpactQuery = { depth, direction, includeSource };
   const impact = useQuery(entityImpactQuery(projectId, entityId, queryInput));
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNode = useMemo<ImpactNodeDto | null>(
+    () => impact.data?.nodes.find((node) => node.id === selectedNodeId) ?? null,
+    [impact.data?.nodes, selectedNodeId]
+  );
 
   function updateSearch(next: Partial<EntityImpactQuery>) {
     navigate({
@@ -114,41 +128,14 @@ export function ImpactPage({
       ) : impact.data ? (
         <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="flex min-h-0 flex-col overflow-hidden rounded border border-slate-200 bg-white">
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-50 text-sm text-slate-500">
-              Graph canvas
-            </div>
-            <div className="border-t border-slate-200 p-3 text-sm text-slate-700">
-              <h2 className="section-heading">Trace Details</h2>
-              <p className="mt-2">
-                Upstream {impact.data.upstreamPaths.length} / Downstream{" "}
-                {impact.data.downstreamPaths.length} / Source {impact.data.sourceEvidence.length}
-              </p>
-              <ul className="mt-2 grid gap-1 text-xs text-slate-600">
-                {impact.data.sourceEvidence.map((item) => (
-                  <li key={`${item.entityId}-${item.filePath}-${item.symbolName}`}>
-                    {item.filePath} / {item.symbolName}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <ImpactGraph
+              impact={impact.data}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={(node) => setSelectedNodeId(node.id)}
+            />
+            <ImpactTracePanel impact={impact.data} />
           </section>
-          <aside className="min-h-0 overflow-auto rounded border border-slate-200 bg-white p-3">
-            <h2 className="section-heading">Impact Brief</h2>
-            <dl className="mt-3 grid gap-2 text-sm">
-              <div>
-                <dt className="text-xs text-slate-500">Upstream</dt>
-                <dd className="font-semibold">{impact.data.upstreamPaths.length}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Downstream</dt>
-                <dd className="font-semibold">{impact.data.downstreamPaths.length}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Source evidence</dt>
-                <dd className="font-semibold">{impact.data.sourceEvidence.length}</dd>
-              </div>
-            </dl>
-          </aside>
+          <ImpactBrief projectId={projectId} impact={impact.data} selectedNode={selectedNode} />
         </div>
       ) : null}
     </main>

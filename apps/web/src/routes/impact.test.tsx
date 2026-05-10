@@ -70,6 +70,9 @@ describe("ImpactPage", () => {
     expect(container.textContent).toContain("Trace Details");
     expect(container.textContent).toContain("Impact Brief");
     expect(container.textContent).toContain("Upstream 1 / Downstream 1 / Source 1");
+    expect(container.querySelector('[data-testid="impact-graph"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="impact-brief"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="impact-trace-panel"]')).not.toBeNull();
     expect(definitionValue(container, "Upstream")).toBe("1");
     expect(definitionValue(container, "Downstream")).toBe("1");
     expect(definitionValue(container, "Source evidence")).toBe("1");
