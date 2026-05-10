@@ -6,6 +6,7 @@ import {
   RouterProvider
 } from "@tanstack/react-router";
 
+import { ImpactPage } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
 import { ProjectsPage } from "./routes/projects.js";
 import { RootRoute } from "./routes/root.js";
@@ -23,6 +24,17 @@ const queryClient = new QueryClient({
 const rootRoute = createRootRoute({
   component: RootRoute
 });
+
+function parseImpactSearch(search: Record<string, unknown>) {
+  return {
+    depth: search.depth === "2" || search.depth === "all" ? search.depth : "1",
+    direction:
+      search.direction === "upstream" || search.direction === "downstream"
+        ? search.direction
+        : "both",
+    includeSource: search.includeSource === false || search.includeSource === "false" ? false : true
+  } as const;
+}
 
 const projectsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -56,7 +68,26 @@ const entityRoute = createRoute({
   }
 });
 
-const routeTree = rootRoute.addChildren([projectsRoute, projectRoute, entityRoute]);
+const impactRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/impact/$entityId",
+  validateSearch: parseImpactSearch,
+  component: () => {
+    const { projectId, entityId } = impactRoute.useParams();
+    const { depth, direction, includeSource } = impactRoute.useSearch();
+    return (
+      <ImpactPage
+        projectId={projectId}
+        entityId={entityId}
+        depth={depth}
+        direction={direction}
+        includeSource={includeSource}
+      />
+    );
+  }
+});
+
+const routeTree = rootRoute.addChildren([projectsRoute, projectRoute, entityRoute, impactRoute]);
 const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {

@@ -4,6 +4,8 @@ import type {
   AgentTaskPreviewResponse,
   CreateEntityRequest,
   CreateProjectRequest,
+  EntityImpactQuery,
+  EntityImpactResponseDto,
   IndexRunDto,
   ProjectDto,
   SaveAgentTaskRequest,
@@ -36,6 +38,8 @@ export const queryKeys = {
     ["projects", projectId, "entities", entityId, "backlinks"] as const,
   sourceLinks: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId, "source-links"] as const,
+  entityImpact: (projectId: string, entityId: string, input: EntityImpactQuery) =>
+    ["projects", projectId, "entities", entityId, "impact", input] as const,
   agentTaskPreview: (projectId: string, input: AgentTaskPreviewRequest) =>
     ["projects", projectId, "agent-tasks", "preview", input] as const,
   validation: (projectId: string) => ["projects", projectId, "validation-messages"] as const,
@@ -106,6 +110,28 @@ export function entitySourceLinksQuery(projectId: string, entityId: string) {
         `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
           entityId
         )}/source-links`
+      )
+  });
+}
+
+export function entityImpactQuery(
+  projectId: string,
+  entityId: string,
+  input: EntityImpactQuery
+) {
+  const search = new URLSearchParams({
+    depth: input.depth,
+    direction: input.direction,
+    includeSource: String(input.includeSource)
+  });
+
+  return queryOptions({
+    queryKey: queryKeys.entityImpact(projectId, entityId, input),
+    queryFn: () =>
+      apiGet<EntityImpactResponseDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
+          entityId
+        )}/impact?${search.toString()}`
       )
   });
 }
