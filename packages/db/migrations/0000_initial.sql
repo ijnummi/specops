@@ -73,7 +73,14 @@ CREATE INDEX IF NOT EXISTS spec_entities_project_type_idx ON spec_entities(proje
 CREATE INDEX IF NOT EXISTS spec_entities_project_status_idx ON spec_entities(project_id, status);
 CREATE INDEX IF NOT EXISTS spec_entities_search_vector_idx ON spec_entities USING gin (
   (
-    setweight(to_tsvector('simple', coalesce(entity_id, '')), 'A') ||
+    setweight(
+      to_tsvector(
+        'simple',
+        coalesce(entity_id, '') || ' ' ||
+          regexp_replace(coalesce(entity_id, ''), '[^[:alnum:]]+', ' ', 'g')
+      ),
+      'A'
+    ) ||
     setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
     setweight(to_tsvector('simple', coalesce(type, '')), 'B') ||
     setweight(to_tsvector('simple', coalesce(status, '')), 'B') ||

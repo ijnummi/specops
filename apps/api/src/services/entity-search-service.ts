@@ -42,7 +42,14 @@ export function createEntitySearchService(db: Pick<Db, "execute">) {
           se.file_path as "filePath",
           se.body_text,
           (
-            setweight(to_tsvector('simple', coalesce(se.entity_id, '')), 'A') ||
+            setweight(
+              to_tsvector(
+                'simple',
+                coalesce(se.entity_id, '') || ' ' ||
+                  regexp_replace(coalesce(se.entity_id, ''), '[^[:alnum:]]+', ' ', 'g')
+              ),
+              'A'
+            ) ||
             setweight(to_tsvector('simple', coalesce(se.title, '')), 'A') ||
             setweight(to_tsvector('simple', coalesce(se.type, '')), 'B') ||
             setweight(to_tsvector('simple', coalesce(se.status, '')), 'B') ||

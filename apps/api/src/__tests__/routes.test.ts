@@ -509,6 +509,27 @@ describeWithDb("database-backed routes", () => {
     expect(body[0].rank).toBeGreaterThanOrEqual(body[1].rank);
   });
 
+  it("matches entity id segments separated by punctuation", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await insertSearchEntity(project.id, {
+      entityId: "domain.customer-profile",
+      title: "Profile Record",
+      bodyText: "Stores account preferences."
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/search?q=customer`
+    });
+    const body = response.json() as Array<{ entityId: string; matchedFields: string[] }>;
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ entityId: "domain.customer-profile" });
+    expect(body[0].matchedFields).toContain("entityId");
+  });
+
   it("filters entity search results by type and status", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
