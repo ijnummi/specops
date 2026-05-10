@@ -5,6 +5,7 @@ import { createProjectRequestSchema, updateProjectRequestSchema } from "@specops
 import type { Db } from "@specops/db";
 
 import { createIndexerService } from "../services/indexer-service.js";
+import { createProjectOverviewService } from "../services/project-overview-service.js";
 import { createProjectService } from "../services/project-service.js";
 import { createSourceBootstrapService } from "../services/source-bootstrap-service.js";
 import { createSpecopsInitializerService } from "../services/specops-initializer.js";
@@ -19,6 +20,7 @@ const projectParamsSchema = z.object({
 
 export const registerProjectRoutes: FastifyPluginAsync<RouteOptions> = async (app, { db }) => {
   const projectService = createProjectService(db);
+  const projectOverviewService = createProjectOverviewService(db);
   const initializerService = createSpecopsInitializerService(db);
   const indexerService = createIndexerService(db);
   const sourceBootstrapService = createSourceBootstrapService(db);
@@ -34,6 +36,11 @@ export const registerProjectRoutes: FastifyPluginAsync<RouteOptions> = async (ap
   app.get("/projects/:projectId", async (request) => {
     const { projectId } = projectParamsSchema.parse(request.params);
     return projectService.getProjectSummary(projectId);
+  });
+
+  app.get("/projects/:projectId/overview", async (request) => {
+    const { projectId } = projectParamsSchema.parse(request.params);
+    return projectOverviewService.getProjectOverview(projectId);
   });
 
   app.patch("/projects/:projectId", async (request) => {

@@ -156,6 +156,240 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("returns a populated project overview", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const runResult = await pool.query<{ id: string }>(
+      "insert into index_runs (project_id, started_at, finished_at, status, entity_count, link_count, error_count, warning_count, source_file_count, source_import_count, source_export_count, source_symbol_count, git_commit) values ($1, '2026-05-10T10:00:00Z', '2026-05-10T10:00:03Z', 'succeeded', 6, 1, 1, 1, 2, 1, 1, 2, 'abc123') returning id",
+      [project.id]
+    );
+    const indexRunId = runResult.rows[0].id;
+
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, body_markdown, body_text, content_hash, created_at, updated_at) values " +
+        "($1, 'domain.customer', 'domain_entity', 'Customer', 'draft', 'domain/customer.md', '# Customer', 'Customer', 'hash-1', '2026-05-10T09:00:00Z', '2026-05-10T09:00:00Z')," +
+        "($1, 'interface.customer-api', 'interface', 'Customer API', 'ready', 'interfaces/customer-api.md', '# Customer API', 'Customer API', 'hash-2', '2026-05-10T09:01:00Z', '2026-05-10T09:01:00Z')," +
+        "($1, 'data.customer-record', 'data_model', 'Customer Record', 'draft', 'data/customer-record.md', '# Customer Record', 'Customer Record', 'hash-3', '2026-05-10T09:02:00Z', '2026-05-10T09:02:00Z')," +
+        "($1, 'ui.customer-dashboard', 'ui_view', 'Customer Dashboard', 'draft', 'ui/customer-dashboard.md', '# Customer Dashboard', 'Customer Dashboard', 'hash-4', '2026-05-10T09:03:00Z', '2026-05-10T09:03:00Z')," +
+        "($1, 'task.review-dashboard', 'agent_task', 'Review Dashboard', 'open', 'agent-tasks/task.review-dashboard.md', '# Review Dashboard', 'Review Dashboard', 'hash-5', '2026-05-10T09:04:00Z', '2026-05-10T09:07:00Z')," +
+        "($1, 'adr.source-evidence', 'adr', 'Source Evidence ADR', 'accepted', 'adrs/source-evidence.md', '# Source Evidence ADR', 'Source Evidence ADR', 'hash-6', '2026-05-10T09:05:00Z', '2026-05-10T09:05:00Z')",
+      [project.id]
+    );
+    await pool.query(
+      "insert into spec_links (project_id, from_entity_id, to_entity_id, link_type, source) values ($1, 'domain.customer', 'interface.customer-api', 'interfaces', 'frontmatter')",
+      [project.id]
+    );
+    await pool.query(
+      "insert into validation_messages (project_id, index_run_id, file_path, entity_id, level, code, message, created_at) values " +
+        "($1, $2, 'domain/customer.md', 'domain.customer', 'error', 'duplicate_entity_id', 'Duplicate customer entity.', '2026-05-10T10:00:01Z')," +
+        "($1, $2, 'interfaces/customer-api.md', 'interface.customer-api', 'warning', 'broken_link', 'Broken interface link.', '2026-05-10T10:00:02Z')," +
+        "($1, $2, 'adrs/source-evidence.md', 'adr.source-evidence', 'info', 'orphan_entity', 'ADR has no valid links.', '2026-05-10T10:00:03Z')",
+      [project.id, indexRunId]
+    );
+    const sourceFileResult = await pool.query<{ id: string; path: string }>(
+      "insert into source_files (project_id, path, language, kind, size_bytes, content_hash, last_seen_at) values " +
+        "($1, 'src/customer.ts', 'typescript', 'source', 120, 'source-hash-1', '2026-05-10T10:00:01Z')," +
+        "($1, 'src/customer-api.ts', 'typescript', 'source', 80, 'source-hash-2', '2026-05-10T10:00:02Z') returning id, path",
+      [project.id]
+    );
+    const customerSourceId = sourceFileResult.rows.find((row) => row.path === "src/customer.ts")!.id;
+    const apiSourceId = sourceFileResult.rows.find((row) => row.path === "src/customer-api.ts")!.id;
+    await pool.query(
+      "insert into source_imports (project_id, source_file_id, file_path, specifier, import_kind, imported_names, is_relative, resolved_path) values ($1, $2, 'src/customer-api.ts', './customer', 'named', array['Customer'], true, 'src/customer.ts')",
+      [project.id, apiSourceId]
+    );
+    await pool.query(
+      "insert into source_exports (project_id, source_file_id, file_path, exported_name, export_kind) values ($1, $2, 'src/customer.ts', 'Customer', 'interface')",
+      [project.id, customerSourceId]
+    );
+    await pool.query(
+      "insert into source_symbols (project_id, source_file_id, file_path, name, symbol_kind, is_exported, line) values " +
+        "($1, $2, 'src/customer.ts', 'Customer', 'interface', true, 1)," +
+        "($1, $3, 'src/customer-api.ts', 'CustomerApi', 'class', true, 3)",
+      [project.id, customerSourceId, apiSourceId]
+    );
+    await pool.query(
+      "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash, created_at) values " +
+        "($1, $2, 'src/customer.ts', 'domain.customer', 'Customer', 'interface', 1, 1, 'source-hash-1', '2026-05-10T10:00:01Z')," +
+        "($1, $3, 'src/customer-api.ts', 'interface.customer-api', 'CustomerApi', 'class', 3, 2, 'source-hash-2', '2026-05-10T10:00:02Z')",
+      [project.id, customerSourceId, apiSourceId]
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/overview`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      project: {
+        id: project.id,
+        entityCount: 6,
+        linkCount: 1,
+        validationErrorCount: 1,
+        validationWarningCount: 1,
+        lastIndexedAt: "2026-05-10T10:00:03.000Z"
+      },
+      latestIndexRun: {
+        projectId: project.id,
+        status: "succeeded",
+        entityCount: 6,
+        linkCount: 1,
+        errorCount: 1,
+        warningCount: 1,
+        sourceFileCount: 2,
+        sourceImportCount: 1,
+        sourceExportCount: 1,
+        sourceSymbolCount: 2,
+        gitCommit: "abc123"
+      },
+      entityCountsByType: [
+        { type: "adr", count: 1 },
+        { type: "agent_task", count: 1 },
+        { type: "data_model", count: 1 },
+        { type: "domain_entity", count: 1 },
+        { type: "interface", count: 1 },
+        { type: "ui_view", count: 1 }
+      ],
+      entityCountsByStatus: [
+        { status: "accepted", count: 1 },
+        { status: "draft", count: 3 },
+        { status: "open", count: 1 },
+        { status: "ready", count: 1 }
+      ],
+      validationSummary: {
+        errorCount: 1,
+        warningCount: 1,
+        samples: [
+          {
+            level: "error",
+            code: "duplicate_entity_id",
+            message: "Duplicate customer entity.",
+            entityId: "domain.customer",
+            filePath: "domain/customer.md"
+          },
+          {
+            level: "warning",
+            code: "broken_link",
+            message: "Broken interface link.",
+            entityId: "interface.customer-api",
+            filePath: "interfaces/customer-api.md"
+          }
+        ]
+      },
+      sourceInventory: {
+        fileCount: 2,
+        symbolCount: 2,
+        importCount: 1,
+        exportCount: 1
+      },
+      sourceEvidence: {
+        eligibleSpecCount: 4,
+        withSourceEvidenceCount: 2,
+        withoutSourceEvidenceCount: 2,
+        missingSamples: [
+          { entityId: "data.customer-record", title: "Customer Record", type: "data_model" },
+          { entityId: "ui.customer-dashboard", title: "Customer Dashboard", type: "ui_view" }
+        ]
+      },
+      agentTasks: {
+        totalCount: 1,
+        recent: [
+          {
+            entityId: "task.review-dashboard",
+            title: "Review Dashboard",
+            status: "open",
+            updatedAt: "2026-05-10T09:07:00.000Z"
+          }
+        ]
+      },
+      attentionItems: [
+        {
+          kind: "validation_error",
+          label: "Duplicate customer entity.",
+          entityId: "domain.customer",
+          filePath: "domain/customer.md"
+        },
+        {
+          kind: "validation_warning",
+          label: "Broken interface link.",
+          entityId: "interface.customer-api",
+          filePath: "interfaces/customer-api.md"
+        },
+        {
+          kind: "missing_source_evidence",
+          label: "Customer Record is missing source evidence.",
+          entityId: "data.customer-record",
+          filePath: "data/customer-record.md"
+        },
+        {
+          kind: "missing_source_evidence",
+          label: "Customer Dashboard is missing source evidence.",
+          entityId: "ui.customer-dashboard",
+          filePath: "ui/customer-dashboard.md"
+        }
+      ]
+    });
+  });
+
+  it("returns an empty project overview before indexing", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/overview`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      project: {
+        id: project.id,
+        entityCount: 0,
+        linkCount: 0,
+        validationErrorCount: 0,
+        validationWarningCount: 0,
+        lastIndexedAt: null
+      },
+      latestIndexRun: null,
+      entityCountsByType: [],
+      entityCountsByStatus: [],
+      validationSummary: {
+        errorCount: 0,
+        warningCount: 0,
+        samples: []
+      },
+      sourceInventory: {
+        fileCount: 0,
+        symbolCount: 0,
+        importCount: 0,
+        exportCount: 0
+      },
+      sourceEvidence: {
+        eligibleSpecCount: 0,
+        withSourceEvidenceCount: 0,
+        withoutSourceEvidenceCount: 0,
+        missingSamples: []
+      },
+      agentTasks: {
+        totalCount: 0,
+        recent: []
+      },
+      attentionItems: []
+    });
+  });
+
+  it("returns 404 for a missing project overview", async () => {
+    app = buildServer(testDatabaseUrl!);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/00000000-0000-4000-8000-000000000000/overview"
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it("creates an entity markdown file, indexes it, and returns searchable entities", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

@@ -1,6 +1,7 @@
 import type {
   CreateProjectRequest,
   ProjectDto,
+  ProjectSummaryDto,
   UpdateProjectRequest
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
@@ -9,14 +10,6 @@ import { and, count, desc, eq } from "drizzle-orm";
 
 import { ConflictError, NotFoundError } from "../lib/http-errors.js";
 import { normalizeProjectPathsForPersistence } from "../lib/path-safety.js";
-
-export type ProjectSummaryDto = ProjectDto & {
-  entityCount: number;
-  linkCount: number;
-  validationErrorCount: number;
-  validationWarningCount: number;
-  lastIndexedAt: string | null;
-};
 
 export function createProjectService(db: Db) {
   async function listProjects(): Promise<ProjectDto[]> {
