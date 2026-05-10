@@ -148,6 +148,29 @@ describe("IncidentCommandService", () => {
     expect(auditEvents.map((event) => event.action)).toEqual(["incident.opened", "incident.triaged"]);
   });
 
+  it("rejects opening an incident from a resolved alert", () => {
+    const seed = createIncidentOperationsSeed();
+    const incidentRepository = new InMemoryIncidentRepository({ alerts: seed.alerts });
+    const operationsRepository = new InMemoryOperationsRepository(seed);
+    const service = new IncidentCommandService(incidentRepository, operationsRepository);
+    const alert = incidentRepository.getAlertById("alert.checkout-latency");
+
+    if (!alert) {
+      throw new Error("Expected checkout latency alert in seed data.");
+    }
+
+    incidentRepository.saveAlert({
+      ...alert,
+      status: "resolved",
+      resolvedAt: "2026-05-10T11:15:00.000Z"
+    });
+
+    expect(() => service.openIncidentFromAlert("alert.checkout-latency")).toThrow(
+      "Cannot open incident from non-firing alert: alert.checkout-latency"
+    );
+    expect(incidentRepository.listIncidents()).toEqual([]);
+  });
+
   it("does not duplicate assignment or status history when responders are already assigned", () => {
     const seed = createIncidentOperationsSeed();
     const incidentRepository = new InMemoryIncidentRepository({ alerts: seed.alerts });

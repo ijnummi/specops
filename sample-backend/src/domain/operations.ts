@@ -101,7 +101,7 @@ const severityRank: Readonly<Record<IncidentSeverity, number>> = {
 
 /**
  * Selects the primary responder declared by a service ownership record.
- * @specops domain.primary-service-owner
+ * @specops domain.service-ownership
  */
 export function primaryOwnerForService(service: MonitoredService): ServiceOwner {
   return {
@@ -113,7 +113,7 @@ export function primaryOwnerForService(service: MonitoredService): ServiceOwner 
 
 /**
  * Returns runbook steps that apply to the current incident severity.
- * @specops domain.runbook-severity-steps
+ * @specops domain.runbook-step
  */
 export function stepsForSeverity(runbook: Runbook, severity: IncidentSeverity): RunbookStep[] {
   return runbook.steps

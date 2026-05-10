@@ -7,7 +7,7 @@ export type OperationsSearchSource = "incident" | "service" | "decision" | "runb
 
 /**
  * Search hit returned from incident operations repository data.
- * @specops interface.operations-search-result
+ * @specops interface.operations-search-service
  */
 export interface OperationsSearchResult {
   source: OperationsSearchSource;

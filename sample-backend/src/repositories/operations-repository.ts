@@ -20,7 +20,7 @@ export type InMemoryOperationsRepositoryInput = IncidentOperationsSeed;
 
 /**
  * Seed-backed in-memory operations repository for sample use cases and tests.
- * @specops interface.in-memory-operations-repository
+ * @specops interface.operations-repository
  */
 export class InMemoryOperationsRepository implements OperationsRepository {
   private readonly workspaces = new Map<string, Workspace>();

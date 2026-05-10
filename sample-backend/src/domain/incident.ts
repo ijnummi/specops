@@ -112,7 +112,7 @@ const allowedStatusTransitions: Readonly<Record<IncidentStatus, readonly Inciden
 
 /**
  * Checks whether an incident can move between lifecycle states.
- * @specops domain.incident-status-transition
+ * @specops domain.incident-status
  */
 export function canTransitionIncidentStatus(from: IncidentStatus, to: IncidentStatus): boolean {
   return from === to || allowedStatusTransitions[from].includes(to);
@@ -120,7 +120,7 @@ export function canTransitionIncidentStatus(from: IncidentStatus, to: IncidentSt
 
 /**
  * Allocates the next monotonically increasing timeline sequence.
- * @specops domain.incident-timeline-sequence
+ * @specops domain.incident-timeline-event
  */
 export function nextTimelineSequence(events: readonly Pick<IncidentTimelineEvent, "sequence">[]): number {
   return events.reduce((maxSequence, event) => Math.max(maxSequence, event.sequence), 0) + 1;

@@ -15,7 +15,7 @@ import type { OperationsRepository } from "../repositories/operations-repository
 
 /**
  * Input for recording an incident decision.
- * @specops interface.record-incident-decision-input
+ * @specops domain.incident-decision
  */
 export interface RecordIncidentDecisionInput {
   summary: string;
@@ -37,6 +37,9 @@ export class IncidentCommandService {
     const alert = this.incidentRepository.getAlertById(alertId);
     if (!alert) {
       throw new Error(`Alert not found: ${alertId}`);
+    }
+    if (alert.status !== "firing") {
+      throw new Error(`Cannot open incident from non-firing alert: ${alertId}`);
     }
 
     const service = this.operationsRepository.getServiceById(alert.serviceId);

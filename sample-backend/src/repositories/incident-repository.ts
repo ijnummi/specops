@@ -37,7 +37,7 @@ export interface InMemoryIncidentRepositoryInput {
 
 /**
  * In-memory incident repository for sample use cases and tests.
- * @specops interface.in-memory-incident-repository
+ * @specops interface.incident-repository
  */
 export class InMemoryIncidentRepository implements IncidentRepository {
   private readonly alerts = new Map<string, Alert>();

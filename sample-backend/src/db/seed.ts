@@ -12,7 +12,7 @@ export interface IncidentOperationsSeed {
 
 /**
  * Creates a connected incident operations sample graph.
- * @specops domain.incident-operations-seed
+ * @specops domain.incident-operations-tables
  */
 export function createIncidentOperationsSeed(): IncidentOperationsSeed {
   const workspace: Workspace = {
