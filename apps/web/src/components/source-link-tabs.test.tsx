@@ -134,7 +134,7 @@ describe("SourceLinkTabs", () => {
     expect(container.textContent).toContain("Failed to load source links");
   });
 
-  it("keeps source metadata beside a single-scroll code viewer", async () => {
+  it("keeps source metadata above a single-scroll code viewer", async () => {
     const { container } = await renderTabs({
       specTitle: "Decision Model",
       sourceLinks: [sourceLink()],
@@ -149,7 +149,9 @@ describe("SourceLinkTabs", () => {
 
     expect(panel?.className).toContain("overflow-hidden");
     expect(panel?.className).not.toContain("overflow-auto");
-    expect(metadata?.className).toContain("md:w-64");
+    expect(panel?.className).not.toContain("md:flex-row");
+    expect(metadata?.className).toContain("border-b");
+    expect(metadata?.className).not.toContain("md:w-64");
     expect(codeFrame?.className).toContain("min-h-0");
     expect(codeFrame?.className).toContain("flex-1");
   });

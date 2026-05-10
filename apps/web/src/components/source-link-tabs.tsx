@@ -85,11 +85,11 @@ function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
   return (
     <section
       data-testid="source-link-panel"
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white md:flex-row"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white"
     >
       <aside
         data-testid="source-link-metadata"
-        className="grid shrink-0 gap-1 overflow-hidden border-b border-slate-200 p-3 text-xs text-slate-600 md:w-64 md:border-b-0 md:border-r"
+        className="grid shrink-0 gap-1 overflow-hidden border-b border-slate-200 p-3 text-xs text-slate-600"
       >
         <div className="break-words font-mono text-slate-900">{sourceLink.filePath}</div>
         <div>
