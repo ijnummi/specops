@@ -36,18 +36,23 @@ type ImpactLimits = {
   maxSpecNodes: number;
   maxSpecEdges: number;
   maxSourceEvidence: number;
+  maxPaths?: number;
 };
 
-const defaultLimits: ImpactLimits = {
+type ResolvedImpactLimits = Required<ImpactLimits>;
+
+const defaultLimits: ResolvedImpactLimits = {
   maxSpecNodes: 150,
   maxSpecEdges: 400,
-  maxSourceEvidence: 300
+  maxSourceEvidence: 300,
+  maxPaths: 600
 };
 
 type Direction = "upstream" | "downstream";
+type TruncationReason = "path_limit" | "source_evidence_limit" | "spec_edge_limit" | "spec_node_limit";
 
 export function buildEntityImpact(input: BuildEntityImpactInput): EntityImpactResponseDto {
-  const limits = input.limits ?? defaultLimits;
+  const limits = { ...defaultLimits, ...input.limits };
   const entityById = new Map(input.entities.map((entity) => [entity.entityId, entity]));
   const rootEntity = entityById.get(input.rootEntityId);
 
@@ -61,7 +66,7 @@ export function buildEntityImpact(input: BuildEntityImpactInput): EntityImpactRe
   const includedLinkKeys = new Set<string>();
   const upstreamPaths: EntityImpactResponseDto["upstreamPaths"] = [];
   const downstreamPaths: EntityImpactResponseDto["downstreamPaths"] = [];
-  let truncatedReason: string | null = null;
+  let truncatedReason: TruncationReason | null = null;
 
   for (const direction of directions) {
     const paths = traverseDirection({
@@ -75,9 +80,7 @@ export function buildEntityImpact(input: BuildEntityImpactInput): EntityImpactRe
       includedLinkKeys
     });
 
-    if (paths.truncatedReason && !truncatedReason) {
-      truncatedReason = paths.truncatedReason;
-    }
+    truncatedReason = chooseTruncationReason(truncatedReason, paths.truncatedReason);
 
     if (direction === "upstream") {
       upstreamPaths.push(...paths.paths);
@@ -99,7 +102,7 @@ export function buildEntityImpact(input: BuildEntityImpactInput): EntityImpactRe
 
   if (sourceEvidence.length > limits.maxSourceEvidence) {
     sourceEvidence = sourceEvidence.slice(0, limits.maxSourceEvidence);
-    truncatedReason ??= "source_evidence_limit";
+    truncatedReason = chooseTruncationReason(truncatedReason, "source_evidence_limit");
   }
 
   const specNodes = sortedEntities.map((entity) => ({
@@ -170,10 +173,10 @@ function traverseDirection(input: {
   depth: ImpactDepth;
   links: ImpactLinkInput[];
   entityById: Map<string, ImpactEntityInput>;
-  limits: ImpactLimits;
+  limits: ResolvedImpactLimits;
   includedEntityIds: Set<string>;
   includedLinkKeys: Set<string>;
-}): { paths: EntityImpactResponseDto["upstreamPaths"]; truncatedReason: string | null } {
+}): { paths: EntityImpactResponseDto["upstreamPaths"]; truncatedReason: TruncationReason | null } {
   const maxDepth = input.depth === "all" ? Number.POSITIVE_INFINITY : Number(input.depth);
   const queue = [
     {
@@ -183,7 +186,7 @@ function traverseDirection(input: {
     }
   ];
   const paths: EntityImpactResponseDto["upstreamPaths"] = [];
-  let truncatedReason: string | null = null;
+  let truncatedReason: TruncationReason | null = null;
 
   while (queue.length > 0) {
     const current = queue.shift()!;
@@ -214,14 +217,14 @@ function traverseDirection(input: {
 
       if (needsEntityAdmission) {
         if (input.includedEntityIds.size >= input.limits.maxSpecNodes) {
-          truncatedReason = "spec_node_limit";
+          truncatedReason = chooseTruncationReason(truncatedReason, "spec_node_limit");
           continue;
         }
       }
 
       if (needsLinkAdmission) {
         if (input.includedLinkKeys.size >= input.limits.maxSpecEdges) {
-          truncatedReason ??= "spec_edge_limit";
+          truncatedReason = chooseTruncationReason(truncatedReason, "spec_edge_limit");
           continue;
         }
       }
@@ -242,6 +245,11 @@ function traverseDirection(input: {
         input.direction === "downstream"
           ? [...current.linkTypes, link.linkType]
           : [link.linkType, ...current.linkTypes];
+
+      if (paths.length >= input.limits.maxPaths) {
+        truncatedReason = chooseTruncationReason(truncatedReason, "path_limit");
+        continue;
+      }
 
       paths.push({
         direction: input.direction,
@@ -311,6 +319,42 @@ function compareSourceEvidence(left: ImpactSourceEvidenceDto, right: ImpactSourc
   return (
     left.entityId.localeCompare(right.entityId) ||
     left.filePath.localeCompare(right.filePath) ||
-    left.symbolName.localeCompare(right.symbolName)
+    left.symbolName.localeCompare(right.symbolName) ||
+    left.sourceFileId.localeCompare(right.sourceFileId) ||
+    compareNullableNumbers(left.symbolLine, right.symbolLine) ||
+    compareNullableNumbers(left.annotationLine, right.annotationLine)
   );
+}
+
+function chooseTruncationReason(
+  current: TruncationReason | null,
+  next: TruncationReason | null
+) {
+  if (!next) {
+    return current;
+  }
+  if (!current || truncationReasonPriority[next] > truncationReasonPriority[current]) {
+    return next;
+  }
+  return current;
+}
+
+const truncationReasonPriority: Record<TruncationReason, number> = {
+  path_limit: 1,
+  source_evidence_limit: 2,
+  spec_edge_limit: 3,
+  spec_node_limit: 4
+};
+
+function compareNullableNumbers(left: number | null, right: number | null) {
+  if (left === right) {
+    return 0;
+  }
+  if (left === null) {
+    return -1;
+  }
+  if (right === null) {
+    return 1;
+  }
+  return left - right;
 }

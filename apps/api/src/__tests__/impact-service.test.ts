@@ -185,6 +185,94 @@ describe("buildEntityImpact", () => {
       ["root", "b", "c", "d"]
     ]);
   });
+
+  it("truncates traversal when the path cap is reached", () => {
+    const impact = buildEntityImpact({
+      rootEntityId: "root",
+      depth: "all",
+      direction: "downstream",
+      includeSource: false,
+      limits: {
+        maxSpecNodes: 150,
+        maxSpecEdges: 400,
+        maxSourceEvidence: 300,
+        maxPaths: 2
+      },
+      entities: [
+        entity("root", "Root"),
+        entity("a", "A"),
+        entity("b", "B"),
+        entity("c", "C"),
+        entity("d", "D")
+      ],
+      links: [
+        link("root", "a", "uses"),
+        link("root", "b", "uses"),
+        link("a", "c", "uses"),
+        link("b", "d", "uses")
+      ],
+      sourceEvidence: []
+    });
+
+    expect(impact.downstreamPaths.map((path) => path.entityIds)).toEqual([
+      ["root", "a"],
+      ["root", "b"]
+    ]);
+    expect(impact.truncated).toMatchObject({
+      isTruncated: true,
+      reason: "path_limit"
+    });
+  });
+
+  it("orders source evidence deterministically by source identity fields", () => {
+    const impact = buildEntityImpact({
+      rootEntityId: "domain.decision",
+      depth: "1",
+      direction: "both",
+      includeSource: true,
+      entities: [entity("domain.decision", "Decision", "domain_entity")],
+      links: [],
+      sourceEvidence: [
+        evidence("domain.decision", "src/domain.ts", "Decision", {
+          sourceFileId: "source-file-2",
+          symbolLine: 8,
+          annotationLine: 7
+        }),
+        evidence("domain.decision", "src/domain.ts", "Decision", {
+          sourceFileId: "source-file-1",
+          symbolLine: 4,
+          annotationLine: 3
+        }),
+        evidence("domain.decision", "src/domain.ts", "Decision", {
+          sourceFileId: "source-file-1",
+          symbolLine: 3,
+          annotationLine: 2
+        })
+      ]
+    });
+
+    expect(
+      impact.sourceEvidence.map((item) => [
+        item.sourceFileId,
+        item.symbolLine,
+        item.annotationLine
+      ])
+    ).toEqual([
+      ["source-file-1", 3, 2],
+      ["source-file-1", 4, 3],
+      ["source-file-2", 8, 7]
+    ]);
+    expect(impact.nodes.filter((node) => node.kind === "source").map((node) => node.id)).toEqual([
+      "source:src/domain.ts:source-file-1:Decision:3:2:domain.decision",
+      "source:src/domain.ts:source-file-1:Decision:4:3:domain.decision",
+      "source:src/domain.ts:source-file-2:Decision:8:7:domain.decision"
+    ]);
+    expect(impact.edges.filter((edge) => edge.kind === "source_evidence").map((edge) => edge.id)).toEqual([
+      "source-evidence:src/domain.ts:source-file-1:Decision:3:2:domain.decision",
+      "source-evidence:src/domain.ts:source-file-1:Decision:4:3:domain.decision",
+      "source-evidence:src/domain.ts:source-file-2:Decision:8:7:domain.decision"
+    ]);
+  });
 });
 
 function entity(entityId: string, title: string, type = "domain_entity") {
