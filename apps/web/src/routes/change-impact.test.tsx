@@ -160,6 +160,29 @@ describe("ChangeImpactPage", () => {
     expect(container.querySelector('[data-testid="agent-task-preview"]')).toBeNull();
   });
 
+  it("ignores stale generated task previews after the impact query changes", async () => {
+    const deferredPreview = deferred<ReturnType<typeof agentTaskPreviewResponse>>();
+    mocks.previewAgentTask.mockReturnValue(deferredPreview.promise);
+    const { container, rerender } = await renderChangeImpactPage();
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      rerender({ depth: 2 });
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      deferredPreview.resolve(agentTaskPreviewResponse());
+      await waitForQueryResult();
+    });
+
+    expect(container.querySelector('[data-testid="agent-task-preview"]')).toBeNull();
+  });
+
   it("clears an already-rendered task preview when the route entity changes", async () => {
     mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
     const { container, rerender } = await renderChangeImpactPage();
@@ -173,6 +196,25 @@ describe("ChangeImpactPage", () => {
 
     await act(async () => {
       rerender({ projectId: "project-2", entityId: "domain.other" });
+      await waitForQueryResult();
+    });
+
+    expect(container.querySelector('[data-testid="agent-task-preview"]')).toBeNull();
+  });
+
+  it("clears an already-rendered task preview when the impact query changes", async () => {
+    mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
+    const { container, rerender } = await renderChangeImpactPage();
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    expect(container.querySelector('[data-testid="agent-task-preview"]')).not.toBeNull();
+
+    await act(async () => {
+      rerender({ direction: "downstream" });
       await waitForQueryResult();
     });
 
@@ -198,6 +240,45 @@ describe("ChangeImpactPage", () => {
 
     await act(async () => {
       rerender({ projectId: "project-2", entityId: "domain.other" });
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      deferredSave.resolve(savedTaskResponse());
+      await waitForQueryResult();
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "projects",
+        "project-1",
+        "entities",
+        "domain.decision",
+        "change-impact-preview",
+        { depth: "1", direction: "both", includeSource: true }
+      ]
+    });
+  });
+
+  it("invalidates the original change impact preview when save completes after impact query change", async () => {
+    const deferredSave = deferred<ReturnType<typeof savedTaskResponse>>();
+    mocks.previewAgentTask.mockResolvedValue(agentTaskPreviewResponse());
+    mocks.saveAgentTask.mockReturnValue(deferredSave.promise);
+    const { container, queryClient, rerender } = await renderChangeImpactPage();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await act(async () => {
+      clickButton(container, "Generate task from impact");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      clickButton(container, "Save Task");
+      await waitForQueryResult();
+    });
+
+    await act(async () => {
+      rerender({ includeSource: false });
       await waitForQueryResult();
     });
 

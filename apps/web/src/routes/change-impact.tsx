@@ -33,6 +33,8 @@ type ChangeImpactPageProps = {
 type PreviewTaskMutationInput = {
   projectId: string;
   entityId: string;
+  queryInput: ChangeImpactPreviewQuery;
+  querySignature: string;
   taskSeed: AgentTaskPreviewRequest;
 };
 
@@ -40,6 +42,7 @@ type SaveTaskMutationInput = {
   projectId: string;
   entityId: string;
   queryInput: ChangeImpactPreviewQuery;
+  querySignature: string;
   preview: AgentTaskPreviewResponse;
 };
 
@@ -78,12 +81,16 @@ export function ChangeImpactPage({
   const queryClient = useQueryClient();
   const currentProjectIdRef = useRef(projectId);
   const currentEntityIdRef = useRef(entityId);
+  const currentQuerySignatureRef = useRef("");
   const apiDepth = impactDepthForApi(depth);
   const queryInput: ChangeImpactPreviewQuery = { depth: apiDepth, direction, includeSource };
+  const querySignature = querySignatureFor(queryInput);
   const preview = useQuery(changeImpactPreviewQuery(projectId, entityId, queryInput));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [taskPreview, setTaskPreview] = useState<AgentTaskPreviewResponse | null>(null);
   const [taskPreviewOriginalMarkdown, setTaskPreviewOriginalMarkdown] = useState("");
+  const [taskPreviewQueryInput, setTaskPreviewQueryInput] =
+    useState<ChangeImpactPreviewQuery | null>(null);
   const [taskPreviewError, setTaskPreviewError] = useState<string | null>(null);
   const [taskSaveError, setTaskSaveError] = useState<string | null>(null);
   const effectiveSelectedNodeId = useMemo(
@@ -98,14 +105,16 @@ export function ChangeImpactPage({
 
   currentProjectIdRef.current = projectId;
   currentEntityIdRef.current = entityId;
+  currentQuerySignatureRef.current = querySignature;
 
   useEffect(() => {
     setSelectedNodeId(null);
     setTaskPreview(null);
     setTaskPreviewOriginalMarkdown("");
+    setTaskPreviewQueryInput(null);
     setTaskPreviewError(null);
     setTaskSaveError(null);
-  }, [entityId, projectId]);
+  }, [entityId, projectId, querySignature]);
 
   const previewTaskMutation = useMutation({
     mutationFn: ({ projectId: requestedProjectId, taskSeed }: PreviewTaskMutationInput) =>
@@ -116,20 +125,23 @@ export function ChangeImpactPage({
     onSuccess: (generatedPreview, request) => {
       if (
         request.projectId !== currentProjectIdRef.current ||
-        request.entityId !== currentEntityIdRef.current
+        request.entityId !== currentEntityIdRef.current ||
+        request.querySignature !== currentQuerySignatureRef.current
       ) {
         return;
       }
 
       setTaskPreview(generatedPreview);
       setTaskPreviewOriginalMarkdown(generatedPreview.markdown);
+      setTaskPreviewQueryInput(request.queryInput);
       setTaskSaveError(null);
       setTaskPreviewError(null);
     },
     onError: (error, request) => {
       if (
         request.projectId !== currentProjectIdRef.current ||
-        request.entityId !== currentEntityIdRef.current
+        request.entityId !== currentEntityIdRef.current ||
+        request.querySignature !== currentQuerySignatureRef.current
       ) {
         return;
       }
@@ -178,19 +190,22 @@ export function ChangeImpactPage({
 
       if (
         request.projectId !== currentProjectIdRef.current ||
-        request.entityId !== currentEntityIdRef.current
+        request.entityId !== currentEntityIdRef.current ||
+        request.querySignature !== currentQuerySignatureRef.current
       ) {
         return;
       }
 
       setTaskPreview(null);
       setTaskPreviewOriginalMarkdown("");
+      setTaskPreviewQueryInput(null);
       setTaskSaveError(null);
     },
     onError: (error, request) => {
       if (
         request.projectId !== currentProjectIdRef.current ||
-        request.entityId !== currentEntityIdRef.current
+        request.entityId !== currentEntityIdRef.current ||
+        request.querySignature !== currentQuerySignatureRef.current
       ) {
         return;
       }
@@ -312,6 +327,8 @@ export function ChangeImpactPage({
                 previewTaskMutation.mutate({
                   projectId,
                   entityId,
+                  queryInput,
+                  querySignature,
                   taskSeed: preview.data.taskSeed
                 })
               }
@@ -335,13 +352,17 @@ export function ChangeImpactPage({
                 saveTaskMutation.mutate({
                   projectId,
                   entityId,
-                  queryInput,
+                  queryInput: taskPreviewQueryInput ?? queryInput,
+                  querySignature: taskPreviewQueryInput
+                    ? querySignatureFor(taskPreviewQueryInput)
+                    : querySignature,
                   preview: taskPreview
                 })
               }
               onClose={() => {
                 setTaskPreview(null);
                 setTaskPreviewOriginalMarkdown("");
+                setTaskPreviewQueryInput(null);
                 setTaskSaveError(null);
               }}
             />
@@ -350,4 +371,8 @@ export function ChangeImpactPage({
       ) : null}
     </main>
   );
+}
+
+function querySignatureFor(input: ChangeImpactPreviewQuery) {
+  return `${input.depth}:${input.direction}:${String(input.includeSource)}`;
 }
