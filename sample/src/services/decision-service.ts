@@ -1,5 +1,8 @@
 import type { Decision, DecisionLink, DecisionStatus, Workspace } from "../domain";
 
+/**
+ * @specops domain.create-decision-input
+ */
 export type CreateDecisionInput = {
   title: string;
   contextMarkdown: string;
@@ -8,6 +11,9 @@ export type CreateDecisionInput = {
   status?: DecisionStatus;
 };
 
+/**
+ * @specops interface.decision-service
+ */
 export class DecisionService {
   private readonly decisions = new Map<string, Decision>();
 

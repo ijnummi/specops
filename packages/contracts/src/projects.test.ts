@@ -14,6 +14,16 @@ describe("createProjectRequestSchema", () => {
     expect(parsed.slug).toBe("specops-workbench");
   });
 
+  it("allows the API to default the specops path", () => {
+    const parsed = createProjectRequestSchema.parse({
+      name: "SpecOps",
+      slug: "specops-workbench",
+      repoPath: "/repo"
+    });
+
+    expect(parsed.specopsPath).toBeUndefined();
+  });
+
   it("rejects slugs that are not kebab-case", () => {
     expect(() =>
       createProjectRequestSchema.parse({

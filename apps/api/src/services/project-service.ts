@@ -9,7 +9,10 @@ import { indexRuns, projects, specEntities, specLinks, validationMessages } from
 import { and, count, desc, eq } from "drizzle-orm";
 
 import { ConflictError, NotFoundError } from "../lib/http-errors.js";
-import { normalizeProjectPathsForPersistence } from "../lib/path-safety.js";
+import {
+  ensureProjectSpecopsDirectory,
+  normalizeProjectPathsForPersistence
+} from "../lib/path-safety.js";
 
 export function createProjectService(db: Db) {
   async function listProjects(): Promise<ProjectDto[]> {
@@ -22,6 +25,7 @@ export function createProjectService(db: Db) {
       repoPath: input.repoPath,
       specopsPath: input.specopsPath
     });
+    await ensureProjectSpecopsDirectory(paths);
 
     try {
       const [row] = await db
@@ -75,6 +79,7 @@ export function createProjectService(db: Db) {
     if (input.slug !== undefined) values.slug = input.slug;
     if (input.description !== undefined) values.description = input.description;
     if (paths) {
+      await ensureProjectSpecopsDirectory(paths);
       values.repoPath = paths.repoPath;
       values.specopsPath = paths.specopsPath;
     }

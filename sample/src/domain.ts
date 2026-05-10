@@ -1,5 +1,11 @@
+/**
+ * @specops domain.decision-status
+ */
 export type DecisionStatus = "proposed" | "accepted" | "superseded" | "archived";
 
+/**
+ * @specops domain.workspace
+ */
 export type Workspace = {
   id: string;
   name: string;
@@ -7,6 +13,9 @@ export type Workspace = {
   decisionPath: string;
 };
 
+/**
+ * @specops domain.decision-link
+ */
 export type DecisionLink = {
   fromDecisionId: string;
   toDecisionId: string;
@@ -14,6 +23,9 @@ export type DecisionLink = {
   source: "frontmatter" | "author";
 };
 
+/**
+ * @specops domain.decision
+ */
 export type Decision = {
   id: string;
   workspaceId: string;
@@ -27,6 +39,9 @@ export type Decision = {
   updatedAt: string;
 };
 
+/**
+ * @specops domain.review-reminder
+ */
 export type ReviewReminder = {
   id: string;
   decisionId: string;

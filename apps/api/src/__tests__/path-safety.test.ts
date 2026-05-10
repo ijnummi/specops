@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertExistingParentInsideDirectory,
   assertInsideDirectory,
-  assertRealPathInsideDirectory
+  assertRealPathInsideDirectory,
+  ensureProjectSpecopsDirectory,
+  normalizeProjectPaths
 } from "../lib/path-safety.js";
 
 describe("path safety", () => {
@@ -77,5 +79,23 @@ describe("path safety", () => {
     await expect(
       assertExistingParentInsideDirectory(repo, path.join(repo, "escape", ".specops"))
     ).rejects.toThrow(/inside/);
+  });
+
+  it("defaults the specops path to a specops folder under the repository", () => {
+    const repo = path.join(os.tmpdir(), "repo");
+
+    expect(normalizeProjectPaths({ repoPath: repo }).specopsPath).toBe(
+      path.resolve(repo, "specops")
+    );
+  });
+
+  it("creates the default specops directory for an existing repository", async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), "specops-path-safety-"));
+    tempRoots.push(repo);
+    const specopsPath = path.join(repo, "specops");
+
+    await ensureProjectSpecopsDirectory({ repoPath: repo, specopsPath });
+
+    expect((await stat(specopsPath)).isDirectory()).toBe(true);
   });
 });

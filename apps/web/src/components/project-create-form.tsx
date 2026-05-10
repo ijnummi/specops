@@ -26,8 +26,11 @@ export function ProjectCreateForm({ isSubmitting, error, onSubmit }: ProjectCrea
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const repoPath = form.repoPath.trim();
     onSubmit({
       ...form,
+      repoPath,
+      specopsPath: (form.specopsPath ?? "").trim() || defaultSpecopsPathForRepoInput(repoPath),
       description: form.description?.trim() || undefined
     });
   }
@@ -65,7 +68,14 @@ export function ProjectCreateForm({ isSubmitting, error, onSubmit }: ProjectCrea
             className="input"
             required
             value={form.repoPath}
-            onChange={(event) => updateField("repoPath", event.target.value)}
+            onChange={(event) => {
+              const nextRepoPath = event.target.value;
+              const previousDefault = defaultSpecopsPathForRepoInput(form.repoPath);
+              updateField("repoPath", nextRepoPath);
+              if (!form.specopsPath || form.specopsPath === previousDefault) {
+                updateField("specopsPath", defaultSpecopsPathForRepoInput(nextRepoPath));
+              }
+            }}
           />
         </label>
         <label className="field">
@@ -73,7 +83,7 @@ export function ProjectCreateForm({ isSubmitting, error, onSubmit }: ProjectCrea
           <input
             className="input"
             required
-            value={form.specopsPath}
+            value={form.specopsPath ?? ""}
             onChange={(event) => updateField("specopsPath", event.target.value)}
           />
         </label>
@@ -93,6 +103,11 @@ export function ProjectCreateForm({ isSubmitting, error, onSubmit }: ProjectCrea
       </div>
     </form>
   );
+}
+
+export function defaultSpecopsPathForRepoInput(repoPath: string) {
+  const trimmed = repoPath.trim();
+  return trimmed ? `${trimmed.replace(/[\\/]+$/, "")}/specops` : "";
 }
 
 function slugify(value: string) {

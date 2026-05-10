@@ -1,5 +1,8 @@
 import type { Decision } from "../domain";
 
+/**
+ * @specops domain.decision-search-result
+ */
 export type DecisionSearchResult = {
   id: string;
   title: string;

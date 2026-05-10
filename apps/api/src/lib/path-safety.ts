@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export function assertInsideDirectory(baseDir: string, targetPath: string): string {
@@ -60,10 +60,13 @@ export function assertAbsolutePath(label: string, value: string): string {
 
 export function normalizeProjectPaths(input: {
   repoPath: string;
-  specopsPath: string;
+  specopsPath?: string;
 }): { repoPath: string; specopsPath: string } {
   const repoPath = assertAbsolutePath("repoPath", input.repoPath);
-  const specopsPath = assertAbsolutePath("specopsPath", input.specopsPath);
+  const specopsPath = assertAbsolutePath(
+    "specopsPath",
+    input.specopsPath?.trim() ? input.specopsPath : path.join(repoPath, "specops")
+  );
   assertInsideDirectory(repoPath, specopsPath);
 
   return { repoPath, specopsPath };
@@ -71,7 +74,7 @@ export function normalizeProjectPaths(input: {
 
 export async function normalizeProjectPathsForPersistence(input: {
   repoPath: string;
-  specopsPath: string;
+  specopsPath?: string;
 }): Promise<{ repoPath: string; specopsPath: string }> {
   const paths = normalizeProjectPaths(input);
 
@@ -80,6 +83,21 @@ export async function normalizeProjectPathsForPersistence(input: {
   }
 
   return paths;
+}
+
+export async function ensureProjectSpecopsDirectory(input: {
+  repoPath: string;
+  specopsPath: string;
+}): Promise<void> {
+  const paths = normalizeProjectPaths(input);
+
+  if (!(await pathExists(paths.repoPath))) {
+    return;
+  }
+
+  await assertExistingParentInsideDirectory(paths.repoPath, paths.specopsPath);
+  await mkdir(paths.specopsPath, { recursive: true });
+  await assertRealPathInsideDirectory(paths.repoPath, paths.specopsPath);
 }
 
 function isNotFoundError(error: unknown): boolean {
