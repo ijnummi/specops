@@ -3,6 +3,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  changeImpactPreviewQuerySchema,
   createEntityRequestSchema,
   entityImpactQuerySchema,
   type ProjectDto,
@@ -25,6 +26,7 @@ import {
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
+import { createChangeImpactPreviewService } from "../services/change-impact-preview-service.js";
 import { createImpactService } from "../services/impact-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
@@ -60,6 +62,7 @@ const typeDirectories: Record<string, string> = {
 export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app, { db }) => {
   const projectService = createProjectService(db);
   const impactService = createImpactService(db);
+  const changeImpactPreviewService = createChangeImpactPreviewService(db);
   const indexerService = createIndexerService(db);
   const sourceScanService = createSourceScanService(db);
 
@@ -111,6 +114,13 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
       direction: query.direction,
       includeSource: query.includeSource
     });
+  });
+
+  app.get("/projects/:projectId/entities/:entityId/change-impact-preview", async (request) => {
+    const { projectId, entityId } = entityParamsSchema.parse(request.params);
+    const query = changeImpactPreviewQuerySchema.parse(request.query);
+
+    return changeImpactPreviewService.getChangeImpactPreview({ projectId, entityId, query });
   });
 
   app.post("/projects/:projectId/entities", async (request, reply) => {
