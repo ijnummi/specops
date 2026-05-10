@@ -123,7 +123,7 @@ export function createProjectService(db: Db) {
           .select({ finishedAt: indexRuns.finishedAt })
           .from(indexRuns)
           .where(eq(indexRuns.projectId, projectId))
-          .orderBy(desc(indexRuns.startedAt))
+          .orderBy(desc(indexRuns.startedAt), desc(indexRuns.id))
           .limit(1)
       ]);
 

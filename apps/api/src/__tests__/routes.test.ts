@@ -332,6 +332,47 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("uses one deterministic latest index run for project overview summary", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const olderRunId = "10000000-0000-4000-8000-000000000001";
+    const latestRunId = "f0000000-0000-4000-8000-000000000002";
+
+    await pool.query(
+      "insert into index_runs (id, project_id, started_at, finished_at, status, entity_count, link_count, error_count, warning_count, source_file_count, source_import_count, source_export_count, source_symbol_count, git_commit) values " +
+        "($1, $3, '2026-05-10T11:00:00Z', '2026-05-10T11:00:01Z', 'succeeded', 1, 0, 0, 0, 0, 0, 0, 0, 'older')," +
+        "($2, $3, '2026-05-10T11:00:00Z', '2026-05-10T11:00:09Z', 'succeeded', 2, 0, 0, 0, 0, 0, 0, 0, 'latest')",
+      [olderRunId, latestRunId, project.id]
+    );
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, body_markdown, body_text, content_hash, created_at, updated_at) values " +
+        "($1, 'domain.alpha', 'domain_entity', 'Alpha', 'draft', 'domain/alpha.md', '# Alpha', 'Alpha', 'hash-alpha', '2026-05-10T09:00:00Z', '2026-05-10T09:00:00Z')," +
+        "($1, 'interface.beta', 'interface', 'Beta', 'ready', 'interfaces/beta.md', '# Beta', 'Beta', 'hash-beta', '2026-05-10T09:01:00Z', '2026-05-10T09:01:00Z')",
+      [project.id]
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/overview`
+    });
+    const body = response.json() as {
+      project: { entityCount: number; lastIndexedAt: string | null };
+      latestIndexRun: { id: string; finishedAt: string | null; gitCommit: string | null };
+      entityCountsByType: Array<{ count: number }>;
+    };
+
+    expect(response.statusCode).toBe(200);
+    expect(body.latestIndexRun).toMatchObject({
+      id: latestRunId,
+      gitCommit: "latest",
+      finishedAt: "2026-05-10T11:00:09.000Z"
+    });
+    expect(body.project.lastIndexedAt).toBe(body.latestIndexRun.finishedAt);
+    expect(body.project.entityCount).toBe(
+      body.entityCountsByType.reduce((total, row) => total + row.count, 0)
+    );
+  });
+
   it("returns an empty project overview before indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
