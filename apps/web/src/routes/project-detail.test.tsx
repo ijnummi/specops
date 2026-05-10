@@ -328,6 +328,28 @@ describe("ProjectDetailPage actions", () => {
     ]);
   });
 
+  it("shows searching instead of a stale error while a changed query is waiting for debounce", () => {
+    mocks.debouncedValueOverride = "customer";
+    mocks.searchState = {
+      data: [],
+      error: new Error("Stale customer search failed"),
+      isLoading: false
+    };
+
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="portal" />
+    );
+
+    expect(html).toContain("Searching");
+    expect(html).not.toContain("Stale customer search failed");
+    expect(mocks.searchQueryOptions).toEqual([
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "search", { q: "customer", limit: 25 }]
+      })
+    ]);
+  });
+
   it("keeps empty query behavior when a cleared query has a stale debounced value", () => {
     mocks.debouncedValueOverride = "customer";
 

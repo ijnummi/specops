@@ -60,6 +60,8 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     ...searchOptions,
     enabled: hasActiveQuery && hasDebouncedQuery && !isSearchDebouncing
   });
+  const isSearchPending =
+    isSearchDebouncing || searchResults.isLoading || !hasDebouncedQuery;
   const [entities, validation, indexRuns] = useQueries({
     queries: [
       entitiesQuery(projectId),
@@ -206,10 +208,10 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           </div>
           <EntityCreateForm projectId={projectId} />
           {hasActiveQuery ? (
-            searchResults.error ? (
-              <div className="p-3 text-sm text-red-700">{searchResults.error.message}</div>
-            ) : isSearchDebouncing || searchResults.isLoading || !hasDebouncedQuery ? (
+            isSearchPending ? (
               <p className="p-3 text-sm text-slate-500">Searching</p>
+            ) : searchResults.error ? (
+              <div className="p-3 text-sm text-red-700">{searchResults.error.message}</div>
             ) : (
               <EntitySearchResults
                 projectId={projectId}
@@ -269,13 +271,13 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           onBeforeSelect={confirmEntitySwitch}
         />
       ) : hasActiveQuery ? (
-        searchResults.error ? (
-          <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            {searchResults.error.message}
-          </div>
-        ) : isSearchDebouncing || searchResults.isLoading || !hasDebouncedQuery ? (
+        isSearchPending ? (
           <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
             Searching
+          </div>
+        ) : searchResults.error ? (
+          <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            {searchResults.error.message}
           </div>
         ) : (
           <EntitySearchResults
