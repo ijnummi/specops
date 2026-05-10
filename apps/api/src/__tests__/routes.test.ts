@@ -731,6 +731,102 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("returns bounded source excerpts for entity source links", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "const before = true;\n" +
+        "/**\n" +
+        " * @specops domain.decision\n" +
+        " */\n" +
+        "export interface Decision { id: string }\n" +
+        "const after = true;\n"
+    );
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      excerpt: {
+        status: "available",
+        startLine: 1,
+        endLine: 6
+      }
+    });
+    expect(response.json()[0].excerpt.text).toContain("@specops domain.decision");
+  });
+
+  it("marks source excerpts changed when file content hash differs", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    const sourcePath = path.join(project.repoPath, "src", "decision.ts");
+    await writeFile(sourcePath, "/** @specops domain.decision */\nexport interface Decision {}\n");
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+    await writeFile(sourcePath, "export interface Decision { changed: true }\n");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      excerpt: {
+        status: "changed",
+        message: "Source file changed since the last index run."
+      }
+    });
+  });
+
+  it("marks source excerpts unavailable when stored source paths escape the repo", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "/** @specops domain.decision */\nexport interface Decision {}\n"
+    );
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+    await pool.query("update source_spec_links set file_path = '../outside.ts' where project_id = $1", [
+      project.id
+    ]);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      excerpt: {
+        status: "unavailable"
+      }
+    });
+    expect(response.json()[0].excerpt.message).toContain("Path must be inside");
+  });
+
   it("warns when a source spec annotation references a missing entity", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

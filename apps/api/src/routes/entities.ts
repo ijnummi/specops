@@ -26,6 +26,7 @@ import {
 } from "../lib/path-safety.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
+import { createSourceScanService } from "../services/source-scan-service.js";
 
 type RouteOptions = {
   db: Db;
@@ -57,6 +58,7 @@ const typeDirectories: Record<string, string> = {
 export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app, { db }) => {
   const projectService = createProjectService(db);
   const indexerService = createIndexerService(db);
+  const sourceScanService = createSourceScanService(db);
 
   app.get("/projects/:projectId/entities", async (request) => {
     const { projectId } = projectParamsSchema.parse(request.params);
@@ -82,6 +84,17 @@ export const registerEntityRoutes: FastifyPluginAsync<RouteOptions> = async (app
     const { projectId, entityId } = entityParamsSchema.parse(request.params);
     const project = await projectService.getProject(projectId);
     return getEntityForEditing(db, project, projectId, entityId);
+  });
+
+  app.get("/projects/:projectId/entities/:entityId/source-links", async (request) => {
+    const { projectId, entityId } = entityParamsSchema.parse(request.params);
+    const project = await projectService.getProject(projectId);
+    await getEntity(db, projectId, entityId);
+    return sourceScanService.listSourceSpecLinksForEntity({
+      projectId,
+      repoPath: project.repoPath,
+      entityId
+    });
   });
 
   app.post("/projects/:projectId/entities", async (request, reply) => {

@@ -1,7 +1,12 @@
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
+
 import type {
   SourceAggregateDto,
   SourceFileDetailDto,
   SourceFileListQuery,
+  SourceSpecLinkDto,
   SourceFileSummaryDto
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
@@ -18,6 +23,12 @@ import { scanRepository, type ScanRepositoryResult } from "@specops/repo-scanner
 import { and, asc, count, eq, ilike, inArray, sql } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
+import {
+  assertInsideDirectory,
+  assertRealPathInsideDirectory
+} from "../lib/path-safety.js";
+
+const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
 
 type SourceScanTransactionDb = Pick<Db, "delete" | "execute" | "insert" | "select">;
 type SourceScanDb = SourceScanTransactionDb & {
@@ -61,6 +72,14 @@ export function createSourceScanService(db: SourceScanDb) {
 
     async getSourceAggregate(projectId: string): Promise<SourceAggregateDto> {
       return withSourceReadSnapshot(db, (snapshotDb) => getSourceAggregate(snapshotDb, projectId));
+    },
+
+    async listSourceSpecLinksForEntity(input: {
+      projectId: string;
+      repoPath: string;
+      entityId: string;
+    }): Promise<SourceSpecLinkDto[]> {
+      return listSourceSpecLinksForEntity(db, input);
     }
   };
 }
@@ -257,6 +276,81 @@ async function persistSourceScan(
     sourceSymbolCount: result.files.reduce((total, file) => total + file.symbols.length, 0),
     warningCount: result.warnings.length + missingEntityWarnings.length + invalidAnnotationWarnings.length
   };
+}
+
+async function listSourceSpecLinksForEntity(
+  db: SourceScanDb,
+  input: { projectId: string; repoPath: string; entityId: string }
+): Promise<SourceSpecLinkDto[]> {
+  const rows = await db
+    .select()
+    .from(sourceSpecLinks)
+    .where(and(eq(sourceSpecLinks.projectId, input.projectId), eq(sourceSpecLinks.entityId, input.entityId)))
+    .orderBy(asc(sourceSpecLinks.filePath), asc(sourceSpecLinks.symbolName), asc(sourceSpecLinks.id));
+
+  return Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      sourceFileId: row.sourceFileId,
+      filePath: row.filePath,
+      entityId: row.entityId,
+      symbolName: row.symbolName,
+      symbolKind: row.symbolKind,
+      symbolLine: row.symbolLine,
+      annotationLine: row.annotationLine,
+      contentHash: row.contentHash,
+      excerpt: await readSourceExcerpt(input.repoPath, row),
+      createdAt: row.createdAt.toISOString()
+    }))
+  );
+}
+
+async function readSourceExcerpt(
+  repoPath: string,
+  link: typeof sourceSpecLinks.$inferSelect
+): Promise<SourceSpecLinkDto["excerpt"]> {
+  try {
+    const targetPath = assertInsideDirectory(repoPath, path.join(repoPath, link.filePath));
+    const safePath = await assertRealPathInsideDirectory(repoPath, targetPath);
+    const fileStats = await stat(safePath);
+
+    if (fileStats.size > MAX_SOURCE_EXCERPT_FILE_BYTES) {
+      return {
+        status: "unavailable",
+        message: `Source file is too large to excerpt.`
+      };
+    }
+
+    const content = await readFile(safePath, "utf8");
+
+    if (sha256(content) !== link.contentHash) {
+      return { status: "changed", message: "Source file changed since the last index run." };
+    }
+
+    const lines = content.replace(/\r?\n$/, "").split(/\r?\n/);
+    const centerLine = link.annotationLine ?? link.symbolLine ?? 1;
+    const startLine = Math.max(1, centerLine - 3);
+    const endLine = Math.min(lines.length, centerLine + 4);
+    return {
+      status: "available",
+      startLine,
+      endLine,
+      text: lines.slice(startLine - 1, endLine).join("\n")
+    };
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return {
+        status: "missing",
+        message: "Source file is missing."
+      };
+    }
+
+    return {
+      status: "unavailable",
+      message: error instanceof Error ? error.message : "Source excerpt unavailable."
+    };
+  }
 }
 
 async function listSourceFiles(
@@ -481,4 +575,17 @@ function toRecord(value: unknown): Record<string, unknown> {
 
 function isValidSpecopsEntityId(value: string): boolean {
   return value.trim().length > 0 && value === value.trim();
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
