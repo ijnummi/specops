@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { AgentTaskPreviewRequest, AgentTaskPreviewResponse } from "@specops/contracts";
-import { Bot, Save } from "lucide-react";
+import { Bot, Network, Save } from "lucide-react";
 
 import {
   backlinksQuery,
@@ -294,6 +295,20 @@ export function EntityDetail({
                 />
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Link
+                  to="/projects/$projectId/impact/$entityId"
+                  params={{ projectId, entityId }}
+                  search={{ depth: "1", direction: "both", includeSource: true }}
+                  className="button-secondary"
+                  onClick={(event) => {
+                    if (isDirty && onBeforeSelect && !onBeforeSelect()) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  <Network className="h-4 w-4" aria-hidden="true" />
+                  Impact
+                </Link>
                 <button
                   type="button"
                   className="button-secondary"
