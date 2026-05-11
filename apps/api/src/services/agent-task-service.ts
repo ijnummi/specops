@@ -4,6 +4,7 @@ import path from "node:path";
 import type {
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
+  AgentTaskWarningDto,
   ProjectDto,
   SaveAgentTaskRequest,
   SaveAgentTaskResponse,
@@ -26,12 +27,14 @@ import {
 } from "../lib/path-safety.js";
 import { createIndexerService } from "./indexer-service.js";
 import { createProjectService } from "./project-service.js";
+import { createSpecReadinessService } from "./spec-readiness-service.js";
 
 const fallbackValidationCommands = ["pnpm typecheck", "pnpm test"];
 
 export function createAgentTaskService(db: Db) {
   const projectService = createProjectService(db);
   const indexerService = createIndexerService(db);
+  const readinessService = createSpecReadinessService(db);
 
   async function previewAgentTask(
     projectId: string,
@@ -49,7 +52,7 @@ export function createAgentTaskService(db: Db) {
     const context = contextIds.length > 0 ? await getEntities(projectId, contextIds) : [];
     const validationCommands = await readValidationCommands(project);
 
-    return generateAgentTaskMarkdown({
+    const preview = generateAgentTaskMarkdown({
       source: toTaskgenEntity(source),
       context: context.map(toTaskgenEntity),
       links: links.map((link) => ({
@@ -63,6 +66,13 @@ export function createAgentTaskService(db: Db) {
       title: input.title,
       validationCommands
     });
+    const readinessWarnings = await buildReadinessWarnings({
+      projectId,
+      entityIds: [input.sourceEntityId, ...preview.contextSpecIds],
+      readinessService
+    });
+
+    return { ...preview, warnings: [...preview.warnings, ...readinessWarnings] };
   }
 
   async function saveAgentTask(
@@ -139,6 +149,28 @@ export function createAgentTaskService(db: Db) {
     previewAgentTask,
     saveAgentTask
   };
+}
+
+async function buildReadinessWarnings(input: {
+  projectId: string;
+  entityIds: string[];
+  readinessService: ReturnType<typeof createSpecReadinessService>;
+}): Promise<AgentTaskWarningDto[]> {
+  const warnings: AgentTaskWarningDto[] = [];
+
+  for (const entityId of [...new Set(input.entityIds)]) {
+    const readiness = await input.readinessService.getEntityReadiness(input.projectId, entityId);
+
+    for (const check of readiness.checks) {
+      warnings.push({
+        code: `readiness:${check.id}`,
+        message: `${readiness.title}: ${check.detail} Suggested fix: ${check.suggestedFix}`,
+        entityId: readiness.entityId
+      });
+    }
+  }
+
+  return warnings;
 }
 
 function validateTaskFilePath(taskId: string, filePath: string) {

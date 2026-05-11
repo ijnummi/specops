@@ -3799,6 +3799,43 @@ describeWithDb("database-backed routes", () => {
     expect(preview.markdown).toContain("domain.spec-entity");
   });
 
+  it("includes readiness warnings in generated task previews", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "use-cases", "checkout.md"),
+      `---
+id: uc.checkout
+type: use_case
+title: Checkout
+status: draft
+---
+
+# Checkout
+
+## Goal
+
+Let customers buy products and receive confirmation while keeping payment and order handling clear enough for implementation planning.
+`
+    );
+    await createIndexerService(db).indexProject(project.id);
+
+    const preview = await createAgentTaskService(db).previewAgentTask(project.id, {
+      sourceEntityId: "uc.checkout",
+      targetAgent: "codex",
+      impactedContextEntityIds: []
+    });
+
+    expect(preview.warnings).toContainEqual(
+      expect.objectContaining({
+        code: "readiness:use_case_acceptance_criteria_missing",
+        entityId: "uc.checkout"
+      })
+    );
+  });
+
   it("includes explicit impacted context when previewing an agent task", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
