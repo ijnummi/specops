@@ -422,6 +422,69 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("reports affected spec validation errors as blocker agent run findings", async () => {
+    const db = createTestDb();
+    const project = await createLinkedReviewProject(db, {
+      useCaseBody: "# Review Loop\n\n## Goal\n\nReview changes.\n\n## Acceptance Criteria\n\n- Review passes.\n"
+    });
+    await pool.query(
+      "insert into validation_messages (project_id, entity_id, file_path, level, code, message) values ($1, 'uc.review', 'use-cases/uc.review.md', 'error', 'review_error', 'Review spec is invalid')",
+      [project.id]
+    );
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'changed'; }\n"
+    );
+
+    const finished = await service.finishRun(project.id, started.id);
+    const validationFinding = finished.reviewSummary.findings.find(
+      (finding) => finding.kind === "validation_warning" && finding.entityId === "uc.review"
+    );
+
+    expect(validationFinding).toMatchObject({
+      severity: "blocker",
+      kind: "validation_warning",
+      entityId: "uc.review",
+      filePath: "use-cases/uc.review.md"
+    });
+    expect(finished.findingCounts.blocker).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reports non-ready affected specs as readiness agent run findings", async () => {
+    const db = createTestDb();
+    const project = await createLinkedReviewProject(db, {
+      useCaseBody: "# Review Loop\n"
+    });
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'changed'; }\n"
+    );
+
+    const finished = await service.finishRun(project.id, started.id);
+    const readinessFinding = finished.reviewSummary.findings.find(
+      (finding) => finding.kind === "readiness_warning" && finding.entityId === "uc.review"
+    );
+
+    expect(readinessFinding).toMatchObject({
+      severity: "review",
+      kind: "readiness_warning",
+      entityId: "uc.review",
+      filePath: "use-cases/uc.review.md"
+    });
+  });
+
   it("rejects starting an agent run from a non-agent-task entity", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);
@@ -4668,6 +4731,57 @@ Let customers buy products and receive confirmation while keeping payment and or
       path.join(repoPath, "src", "services", "reminder-scheduler.ts"),
       "export class ReminderScheduler { schedule() { return null; } }\n"
     );
+  }
+
+  async function createLinkedReviewProject(
+    db: ReturnType<typeof createDb>,
+    input: { useCaseBody: string }
+  ) {
+    const project = await createProjectDirectly(db);
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'ready'; }\n"
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: input.useCaseBody
+      })
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n"
+      })
+    );
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "specops@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "SpecOps Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "Initial state"]);
+    await createIndexerService(db).indexProject(project.id);
+
+    const sourceFileResult = await pool.query<{ id: string }>(
+      "select id from source_files where project_id = $1 and path = 'src/review-service.ts'",
+      [project.id]
+    );
+    expect(sourceFileResult.rows[0]).toBeDefined();
+    await pool.query(
+      "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash) values ($1, $2, 'src/review-service.ts', 'uc.review', 'reviewService', 'function', 1, null, 'review-link-hash')",
+      [project.id, sourceFileResult.rows[0]!.id]
+    );
+
+    return project;
   }
 });
 

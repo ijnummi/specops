@@ -7,6 +7,7 @@ import type {
   AgentRunFindingSeverity,
   AgentRunReview,
   AgentRunStatus,
+  EntityReadinessDto,
   AgentRunSummary,
   StartAgentRunRequest,
   UpdateAgentRunStatusRequest
@@ -25,6 +26,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { BadRequestError, NotFoundError } from "../lib/http-errors.js";
 import { readGitChangedFiles, readGitStatus, type GitStatusEntry } from "./git-service.js";
+import { createSpecReadinessService } from "./spec-readiness-service.js";
 
 type AgentRunRow = typeof agentRuns.$inferSelect;
 type ProjectRow = typeof projects.$inferSelect;
@@ -257,7 +259,7 @@ export function createAgentRunService(db: Db) {
     changedFiles: AgentRunChangedFiles;
     gitComparisonUnavailable: boolean;
   }): Promise<AgentRunReview> {
-    const [entities, sourceLinks, indexedLinks, warnings] = await Promise.all([
+    const [entities, sourceLinks, indexedLinks] = await Promise.all([
       db.select().from(specEntities).where(eq(specEntities.projectId, input.project.id)),
       input.changedFiles.source.length > 0
         ? db
@@ -279,11 +281,7 @@ export function createAgentRunService(db: Db) {
             eq(specLinks.fromEntityId, input.task.entityId),
             inArray(specLinks.linkType, ["generated_from", "uses"])
           )
-        ),
-      db
-        .select()
-        .from(validationMessages)
-        .where(and(eq(validationMessages.projectId, input.project.id), eq(validationMessages.level, "warning")))
+        )
     ]);
     const entitiesById = new Map(entities.map((entity) => [entity.entityId, entity]));
     const taskContext = deriveTaskContext(input.task, indexedLinks, entitiesById);
@@ -294,6 +292,24 @@ export function createAgentRunService(db: Db) {
       sourceLinks,
       taskContext
     });
+    const affectedEntityIds = affectedSpecs.map((spec) => spec.entityId);
+    const readinessService = createSpecReadinessService(db);
+    const [affectedValidationMessages, affectedReadiness] = await Promise.all([
+      affectedEntityIds.length > 0
+        ? db
+            .select()
+            .from(validationMessages)
+            .where(
+              and(
+                eq(validationMessages.projectId, input.project.id),
+                inArray(validationMessages.entityId, affectedEntityIds)
+              )
+            )
+        : Promise.resolve([]),
+      Promise.all(
+        affectedSpecs.map((spec) => readinessService.getEntityReadiness(input.project.id, spec.entityId))
+      )
+    ]);
     const findings = collectFindings({
       project: input.project,
       task: input.task,
@@ -301,7 +317,8 @@ export function createAgentRunService(db: Db) {
       sourceLinks,
       taskContext,
       affectedSpecs,
-      warningCount: warnings.length,
+      validationMessages: affectedValidationMessages,
+      readinessByEntityId: new Map(affectedReadiness.map((readiness) => [readiness.entityId, readiness])),
       gitComparisonUnavailable: input.gitComparisonUnavailable
     });
 
@@ -440,7 +457,8 @@ function collectFindings(input: {
   sourceLinks: Array<typeof sourceSpecLinks.$inferSelect>;
   taskContext: AgentRunReview["taskContext"];
   affectedSpecs: AgentRunReview["affectedSpecs"];
-  warningCount: number;
+  validationMessages: Array<typeof validationMessages.$inferSelect>;
+  readinessByEntityId: Map<string, EntityReadinessDto>;
   gitComparisonUnavailable: boolean;
 }): AgentRunFinding[] {
   const findings: AgentRunFinding[] = [];
@@ -452,8 +470,9 @@ function collectFindings(input: {
     entityId: string | null,
     filePath: string | null
   ) => {
+    const idBase = `${kind}:${entityId ?? filePath ?? "project"}`;
     findings.push({
-      id: `${kind}:${entityId ?? filePath ?? "project"}`,
+      id: idBase,
       severity,
       kind,
       message,
@@ -524,14 +543,31 @@ function collectFindings(input: {
     );
   }
 
-  if (input.warningCount > 0) {
+  for (const message of input.validationMessages) {
+    findings.push({
+      id: `validation_warning:${message.entityId ?? message.filePath ?? "project"}:${message.id}`,
+      severity: message.level === "error" ? "blocker" : "review",
+      kind: "validation_warning",
+      message: message.message,
+      suggestedFollowUp: "Resolve the affected spec validation message before accepting this run.",
+      entityId: message.entityId,
+      filePath: message.filePath
+    });
+  }
+
+  for (const spec of input.affectedSpecs) {
+    const readiness = input.readinessByEntityId.get(spec.entityId);
+    if (!readiness || readiness.readiness === "ready") {
+      continue;
+    }
+
     addFinding(
-      "validation_warning",
-      "context",
-      "The project has validation warnings.",
-      "Review validation warnings before accepting this run.",
-      null,
-      null
+      "readiness_warning",
+      readiness.readiness === "blocked" ? "blocker" : "review",
+      `Affected spec ${spec.entityId} readiness is ${readiness.readiness}.`,
+      "Resolve affected spec readiness checks before accepting this run.",
+      spec.entityId,
+      spec.filePath
     );
   }
 
