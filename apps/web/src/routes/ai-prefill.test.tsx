@@ -126,6 +126,7 @@ vi.mock("../api/queries.js", () => ({
     project: (projectId: string) => ["projects", projectId],
     projectHealth: (projectId: string) => ["projects", projectId, "health"],
     projectOverview: (projectId: string) => ["projects", projectId, "overview"],
+    projectReadiness: (projectId: string) => ["projects", projectId, "readiness"],
     proposal: (projectId: string, proposalId: string) => [
       "projects",
       projectId,
@@ -291,6 +292,9 @@ describe("AiPrefillPage", () => {
 
     expect(mocks.acceptProposals).toHaveBeenCalledWith("project-1", {
       proposalIds: ["proposal-1"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "readiness"]
     });
   });
 

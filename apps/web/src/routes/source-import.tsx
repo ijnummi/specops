@@ -132,6 +132,7 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
       queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) })

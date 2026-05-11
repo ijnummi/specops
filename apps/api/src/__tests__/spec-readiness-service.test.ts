@@ -97,6 +97,76 @@ describe("buildEntityReadiness", () => {
     expect(stale.readiness).toBe("needs_review");
     expect(stale.checks.map((check) => check.id)).toEqual(["agent_task_stale"]);
   });
+
+  it("keeps a model needing context when linked only to another model", () => {
+    const readiness = buildEntityReadiness(
+      entityInput({
+        entityId: "domain.account",
+        type: "domain_entity",
+        outgoingLinks: [link("domain.account", "data.account-record", "uses")],
+        allEntityIds: ["domain.account", "data.account-record"],
+        entityTypesById: {
+          "domain.account": "domain_entity",
+          "data.account-record": "data_model"
+        }
+      })
+    );
+
+    expect(readiness.readiness).toBe("needs_context");
+    expect(readiness.checks.map((check) => check.id)).toContain("model_isolated");
+  });
+
+  it("passes model context when source-backed without spec links", () => {
+    const readiness = buildEntityReadiness(
+      entityInput({
+        entityId: "data.account-record",
+        type: "data_model",
+        allEntityIds: ["data.account-record", "uc.manage-accounts"],
+        entityTypesById: {
+          "data.account-record": "data_model",
+          "uc.manage-accounts": "use_case"
+        },
+        sourceBackedEntityIds: ["data.account-record"]
+      })
+    );
+
+    expect(readiness.checks.map((check) => check.id)).not.toContain("model_isolated");
+  });
+
+  it("keeps an interface needing context when linked only to unrelated spec types", () => {
+    const readiness = buildEntityReadiness(
+      entityInput({
+        entityId: "interface.billing",
+        type: "interface",
+        outgoingLinks: [link("interface.billing", "adr.billing-protocol", "uses")],
+        allEntityIds: ["interface.billing", "adr.billing-protocol"],
+        entityTypesById: {
+          "interface.billing": "interface",
+          "adr.billing-protocol": "adr"
+        }
+      })
+    );
+
+    expect(readiness.readiness).toBe("needs_context");
+    expect(readiness.checks.map((check) => check.id)).toContain("interface_context_missing");
+  });
+
+  it("passes interface context when source-backed without spec links", () => {
+    const readiness = buildEntityReadiness(
+      entityInput({
+        entityId: "interface.billing",
+        type: "interface",
+        allEntityIds: ["interface.billing", "agent.refresh-billing"],
+        entityTypesById: {
+          "interface.billing": "interface",
+          "agent.refresh-billing": "agent_task"
+        },
+        sourceBackedEntityIds: ["interface.billing"]
+      })
+    );
+
+    expect(readiness.checks.map((check) => check.id)).not.toContain("interface_context_missing");
+  });
 });
 
 describe("buildProjectReadiness", () => {

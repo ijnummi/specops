@@ -94,6 +94,8 @@ const checkIdRank = [
 ];
 
 const planningLinkTargetTypes = new Set(["domain_entity", "interface", "ui_view", "data_model"]);
+const modelContextLinkTargetTypes = new Set(["use_case", "interface"]);
+const interfaceContextLinkTargetTypes = new Set(["use_case", "domain_entity", "data_model"]);
 
 const staleReasonRank: Record<StaleTaskReason, number> = {
   missing_source_entity: 0,
@@ -403,7 +405,7 @@ function useCaseChecks(input: ReadinessEntityInput): SpecReadinessCheckDto[] {
 }
 
 function modelChecks(input: ReadinessEntityInput): SpecReadinessCheckDto[] {
-  if (input.allEntityIds.length <= 1 || input.incomingLinks.length > 0 || input.outgoingLinks.length > 0) {
+  if (hasSourceEvidenceContext(input) || hasLinkedContext(input, modelContextLinkTargetTypes)) {
     return [];
   }
 
@@ -414,7 +416,7 @@ function interfaceChecks(input: ReadinessEntityInput): SpecReadinessCheckDto[] {
   const hasSourceEvidence = sourceBackedEntityIdSet(input).has(input.entityId);
   const checks: SpecReadinessCheckDto[] = [];
 
-  if (!hasValidLinkedSpecs(input) && !hasSourceEvidence) {
+  if (!hasLinkedContext(input, interfaceContextLinkTargetTypes) && !hasSourceEvidence) {
     checks.push(contextCheck(input, "interface_context_missing", "Interface context missing"));
   }
 
@@ -573,11 +575,22 @@ function hasNewerLinkedEntity(
   });
 }
 
-function hasValidLinkedSpecs(input: ReadinessEntityInput): boolean {
+function hasLinkedContext(input: ReadinessEntityInput, acceptedTypes: Set<string>): boolean {
   const knownEntityIds = entityIdSet(input);
-  return [...input.incomingLinks, ...input.outgoingLinks].some(
-    (link) => knownEntityIds.has(link.fromEntityId) && knownEntityIds.has(link.toEntityId)
-  );
+  const sourceBackedEntityIds = sourceBackedEntityIdSet(input);
+  return [...input.incomingLinks, ...input.outgoingLinks].some((link) => {
+    if (!knownEntityIds.has(link.fromEntityId) || !knownEntityIds.has(link.toEntityId)) {
+      return false;
+    }
+
+    const otherEntityId = link.fromEntityId === input.entityId ? link.toEntityId : link.fromEntityId;
+    const otherType = input.entityTypesById[otherEntityId] ?? "";
+    return acceptedTypes.has(otherType) || sourceBackedEntityIds.has(otherEntityId);
+  });
+}
+
+function hasSourceEvidenceContext(input: ReadinessEntityInput): boolean {
+  return sourceBackedEntityIdSet(input).has(input.entityId);
 }
 
 function hasMarkdownHeading(markdown: string, headings: string[]): boolean {
