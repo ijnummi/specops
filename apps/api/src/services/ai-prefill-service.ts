@@ -24,13 +24,22 @@ import {
 } from "@specops/ai-prefill";
 import type {
   AiPrefillProvider,
+  AiPrefillProviderInput,
   AiPrefillProviderName,
-  CreateAiPrefillProviderInput
+  AiPrefillProviderResult,
+  CreateAiPrefillProviderInput,
+  NormalizeProviderResponseInput,
+  NormalizeProviderResponseResult
 } from "@specops/ai-prefill";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import type { ApiConfig } from "../config.js";
-import { BadRequestError, ConflictError } from "../lib/http-errors.js";
+import {
+  BadGatewayError,
+  BadRequestError,
+  ConflictError,
+  GatewayTimeoutError
+} from "../lib/http-errors.js";
 import {
   assertAbsolutePath,
   assertInsideDirectory,
@@ -71,12 +80,22 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
     projectId: string,
     input: AiPrefillGenerateRequest
   ): Promise<{ proposals: ProposalSummaryDto[]; diagnostics: AiPrefillDiagnostic[] }> {
+    const uniqueSourceFileIds = [...new Set(input.sourceFileIds)];
+    if (uniqueSourceFileIds.length === 0) {
+      throw new BadRequestError("Select at least one source file for AI Prefill");
+    }
+    if (uniqueSourceFileIds.length > options.config.maxFiles) {
+      throw new BadRequestError("Selected source file count exceeds AI Prefill limit", {
+        maxFiles: options.config.maxFiles,
+        selectedFiles: uniqueSourceFileIds.length
+      });
+    }
+
     const project = await projectService.getProject(projectId);
     const repoPath = assertAbsolutePath("repoPath", project.repoPath);
     assertAbsolutePath("specopsPath", project.specopsPath);
     await assertRealPathInsideDirectory(repoPath, repoPath);
 
-    const uniqueSourceFileIds = [...new Set(input.sourceFileIds)];
     const selectedRows = await loadSelectedSourceFiles(projectId, uniqueSourceFileIds);
     const selectedSourceRows = uniqueSourceFileIds.map((sourceFileId) => {
       const row = selectedRows.get(sourceFileId);
@@ -87,6 +106,15 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
       }
       return row;
     });
+
+    const selectedBytes = selectedSourceRows.reduce((sum, row) => sum + row.sizeBytes, 0);
+    if (selectedBytes > options.config.maxTotalBytes) {
+      throw new BadRequestError("Selected source content exceeds AI Prefill limit", {
+        maxTotalBytes: options.config.maxTotalBytes,
+        selectedBytes
+      });
+    }
+
     const selectedFiles = await Promise.all(
       selectedSourceRows.map((row) => loadSourceFileForPrompt(repoPath, row))
     );
@@ -111,19 +139,13 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
       );
     }
 
-    const provider = (options.providerFactory ?? createAiPrefillProvider)({
-      provider: input.provider as AiPrefillProviderName,
-      ollamaBaseUrl: options.config.ollamaBaseUrl,
-      openAiApiKey: options.config.openAiApiKey,
-      openAiBaseUrl: options.config.openAiBaseUrl,
-      timeoutMs: options.config.timeoutMs
-    });
-    const providerResult = await provider.generateSpecProposals({
+    const provider = createProvider(input);
+    const providerResult = await generateProviderResult(provider, {
       packet,
       model: input.model,
       temperature: input.temperature
     });
-    const normalized = normalizeProviderResponse({
+    const normalized = normalizeProviderOutput({
       text: providerResult.text,
       selectedSourceFiles: selectedFiles.map((file) => file.path),
       existingEntityIds: new Set(existingEntities.map((entity) => entity.entityId))
@@ -145,7 +167,7 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
       })
     );
 
-    await db.transaction(async (tx) => {
+    const insertedRows = await db.transaction(async (tx) => {
       const now = new Date();
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:ai_spec_entity`}, 0))`
@@ -162,26 +184,40 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
           )
         );
 
-      await tx.insert(aiProposals).values(
-        rendered.map((proposal) => ({
-          projectId,
-          proposalType: proposal.proposalType,
-          title: proposal.title,
-          payloadJson: proposal.payload,
-          evidenceJson: proposal.evidence,
-          confidence: proposal.confidence,
-          status: "pending"
-        }))
-      );
+      return tx
+        .insert(aiProposals)
+        .values(
+          rendered.map((proposal) => ({
+            projectId,
+            proposalType: proposal.proposalType,
+            title: proposal.title,
+            payloadJson: proposal.payload,
+            evidenceJson: proposal.evidence,
+            confidence: proposal.confidence,
+            status: "pending"
+          }))
+        )
+        .returning();
     });
 
     return {
-      proposals: await proposalService.listProposals(projectId, {
-        status: "pending",
-        proposalType: "ai_spec_entity"
-      }),
+      proposals: await proposalService.summarizeProposals(projectId, insertedRows),
       diagnostics: normalized.diagnostics
     };
+  }
+
+  function createProvider(input: AiPrefillGenerateRequest): AiPrefillProvider {
+    try {
+      return (options.providerFactory ?? createAiPrefillProvider)({
+        provider: input.provider as AiPrefillProviderName,
+        ollamaBaseUrl: options.config.ollamaBaseUrl,
+        openAiApiKey: options.config.openAiApiKey,
+        openAiBaseUrl: options.config.openAiBaseUrl,
+        timeoutMs: options.config.timeoutMs
+      });
+    } catch (error) {
+      throw mapProviderSetupError(error);
+    }
   }
 
   async function loadSelectedSourceFiles(
@@ -301,6 +337,61 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+async function generateProviderResult(
+  provider: AiPrefillProvider,
+  input: AiPrefillProviderInput
+): Promise<AiPrefillProviderResult> {
+  try {
+    return await provider.generateSpecProposals(input);
+  } catch (error) {
+    throw mapProviderFailure(error);
+  }
+}
+
+function normalizeProviderOutput(
+  input: NormalizeProviderResponseInput
+): NormalizeProviderResponseResult {
+  try {
+    return normalizeProviderResponse(input);
+  } catch (error) {
+    throw new BadRequestError(errorMessage(error, "AI provider returned invalid model output"));
+  }
+}
+
+function mapProviderSetupError(error: unknown): Error {
+  const message = errorMessage(error, "AI provider setup failed");
+  if (message === "OPENAI_API_KEY is required for OpenAI AI Prefill") {
+    return new BadRequestError(message);
+  }
+
+  return mapProviderFailure(error);
+}
+
+function mapProviderFailure(error: unknown): Error {
+  if (isTimeoutError(error)) {
+    return new GatewayTimeoutError("AI provider generation timed out", {
+      cause: errorMessage(error, "AI provider timed out")
+    });
+  }
+
+  return new BadGatewayError("AI provider generation failed", {
+    cause: errorMessage(error, "AI provider generation failed")
+  });
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function isNotFoundError(error: unknown): boolean {

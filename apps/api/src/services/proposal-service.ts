@@ -159,6 +159,14 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
     return mapSummaries(rows, project);
   }
 
+  async function summarizeProposals(
+    projectId: string,
+    rows: ProposalRow[]
+  ): Promise<ProposalSummaryDto[]> {
+    const project = await projectService.getProject(projectId);
+    return mapSummaries(rows, project);
+  }
+
   async function getProposal(projectId: string, proposalId: string): Promise<ProposalDetailDto> {
     const project = await projectService.getProject(projectId);
     const row = await getProposalRow(projectId, proposalId);
@@ -490,6 +498,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
   return {
     generateSourceImportProposals,
     listProposals,
+    summarizeProposals,
     getProposal,
     patchProposal,
     acceptProposals

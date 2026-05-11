@@ -33,6 +33,20 @@ export class ConflictError extends HttpError {
   }
 }
 
+export class BadGatewayError extends HttpError {
+  constructor(message: string, details?: unknown) {
+    super(502, "bad_gateway", message, details);
+    this.name = "BadGatewayError";
+  }
+}
+
+export class GatewayTimeoutError extends HttpError {
+  constructor(message: string, details?: unknown) {
+    super(504, "gateway_timeout", message, details);
+    this.name = "GatewayTimeoutError";
+  }
+}
+
 export function isHttpError(error: unknown): error is HttpError {
   return error instanceof HttpError;
 }

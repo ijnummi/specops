@@ -1544,7 +1544,45 @@ describeWithDb("database-backed routes", () => {
       }
     });
 
-    expect(response.statusCode).toBe(500);
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error).toMatchObject({
+      code: "bad_gateway",
+      message: "AI provider generation failed"
+    });
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("writes no AI proposals when provider returns malformed JSON", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          return {
+            provider: "ollama",
+            model: input.model,
+            text: "not json"
+          };
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "malformed-output",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatchObject({
+      code: "bad_request",
+      message: "AI provider returned invalid JSON"
+    });
     await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
   });
 
@@ -1640,6 +1678,93 @@ describeWithDb("database-backed routes", () => {
     });
 
     expect(response.statusCode).toBe(400);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("rejects AI generation over the file count limit before reading selected files", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillConfig: {
+        ollamaBaseUrl: "http://127.0.0.1:11434",
+        openAiBaseUrl: "https://api.openai.com/v1",
+        timeoutMs: 60_000,
+        maxFiles: 1,
+        maxTotalBytes: 60_000
+      },
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals() {
+          providerCalled = true;
+          throw new Error("provider should not be called");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const firstSourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    const secondSourceFile = await insertIndexedSourceFile(
+      project.id,
+      project.repoPath,
+      "src/extra.ts"
+    );
+    await rm(path.join(project.repoPath, "src", "extra.ts"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [firstSourceFile.id, secondSourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe(
+      "Selected source file count exceeds AI Prefill limit"
+    );
+    expect(providerCalled).toBe(false);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("rejects AI generation over the indexed byte limit before reading selected files", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillConfig: {
+        ollamaBaseUrl: "http://127.0.0.1:11434",
+        openAiBaseUrl: "https://api.openai.com/v1",
+        timeoutMs: 60_000,
+        maxFiles: 5,
+        maxTotalBytes: 10_000
+      },
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals() {
+          providerCalled = true;
+          throw new Error("provider should not be called");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    await pool.query("update source_files set size_bytes = 10001 where id = $1", [
+      sourceFile.id
+    ]);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe(
+      "Selected source content exceeds AI Prefill limit"
+    );
+    expect(providerCalled).toBe(false);
     await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
   });
 
@@ -1886,6 +2011,12 @@ describeWithDb("database-backed routes", () => {
     const responses = await Promise.all([first, second]);
 
     expect(responses.map((response) => response.statusCode)).toEqual([201, 201]);
+    expect(
+      responses.map(
+        (response) =>
+          (response.json() as { proposals: ProposalSummaryForTest[] }).proposals[0].entityId
+      )
+    ).toEqual(["uc.manage-projects", "uc.inspect-projects"]);
     expect(providerCallCount).toBe(2);
     await expect(countPendingAiPrefillProposals(project.id)).resolves.toBe(1);
   });
@@ -3938,9 +4069,12 @@ describeWithDb("database-backed routes", () => {
     return result.rows[0].count;
   }
 
-  async function insertIndexedSourceFile(projectId: string, repoPath: string): Promise<{ id: string }> {
+  async function insertIndexedSourceFile(
+    projectId: string,
+    repoPath: string,
+    relativePath = "src/projects.ts"
+  ): Promise<{ id: string }> {
     await mkdir(path.join(repoPath, "src"), { recursive: true });
-    const relativePath = "src/projects.ts";
     const content = [
       "import { ProjectStore } from './db';",
       "",
