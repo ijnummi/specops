@@ -171,6 +171,7 @@ export function ChangeImpactPage({
         queryClient.invalidateQueries({ queryKey: queryKeys.project(request.projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(request.projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(request.projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(request.projectId) }),
         queryClient.invalidateQueries({
           queryKey: queryKeys.changeImpactPreview(
             request.projectId,

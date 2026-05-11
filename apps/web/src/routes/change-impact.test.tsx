@@ -145,6 +145,9 @@ describe("ChangeImpactPage", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "health"]
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "readiness"]
+    });
   });
 
   it("ignores stale generated task previews after the route entity changes", async () => {
