@@ -1423,6 +1423,135 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("generates source import proposals without writing markdown files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    const body = response.json() as Array<{
+      status: string;
+      title: string;
+      entityId: string;
+      filePath: string;
+    }>;
+
+    expect(response.statusCode).toBe(201);
+    expect(body).toContainEqual(
+      expect.objectContaining({
+        status: "pending",
+        title: "DecisionService",
+        entityId: "interface.decision-service",
+        filePath: "interfaces/decision-service.md"
+      })
+    );
+    await expect(fileExists(path.join(project.specopsPath, "interfaces", "decision-service.md")))
+      .resolves.toBe(false);
+  });
+
+  it("obsoletes prior pending source import proposals on regeneration", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+
+    const pendingResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=pending`
+    });
+    const obsoleteResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=obsolete`
+    });
+
+    expect(pendingResponse.statusCode).toBe(200);
+    expect(obsoleteResponse.statusCode).toBe(200);
+    expect((pendingResponse.json() as unknown[]).length).toBeGreaterThan(0);
+    expect((obsoleteResponse.json() as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("returns source import proposal detail and persists edited markdown", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposals = generateResponse.json() as Array<{
+      id: string;
+      entityId: string;
+    }>;
+    const proposal = proposals.find((item) => item.entityId === "interface.decision-service");
+    expect(proposal).toBeDefined();
+
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal!.id}`
+    });
+    const detail = detailResponse.json() as { payload: { markdown: string } };
+    const editedMarkdown = detail.payload.markdown.replace(
+      "Initial spec generated from exported source symbol",
+      "Reviewed spec generated from exported source symbol"
+    );
+
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/proposals/${proposal!.id}`,
+      payload: { markdown: editedMarkdown }
+    });
+    const patched = patchResponse.json() as { payload: { markdown: string } };
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(patchResponse.statusCode).toBe(200);
+    expect(patched.payload.markdown).toContain(
+      "Reviewed spec generated from exported source symbol"
+    );
+  });
+
+  it("rejects a pending source import proposal", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposals = generateResponse.json() as Array<{
+      id: string;
+      entityId: string;
+    }>;
+    const proposal = proposals.find((item) => item.entityId === "interface.decision-service");
+    expect(proposal).toBeDefined();
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/proposals/${proposal!.id}`,
+      payload: { status: "rejected" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "rejected",
+      reviewedAt: expect.any(String)
+    });
+  });
+
   it("returns entity impact with spec links and source evidence", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
