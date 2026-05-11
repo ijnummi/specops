@@ -522,6 +522,41 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("reports nested untracked spec and source files instead of directory placeholders", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi({ specopsDirectoryName: "specops" });
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n");
+    await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 1;\n");
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "routes@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "Routes Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "initial"]);
+    await mkdir(path.join(project.specopsPath, "new"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src", "new"), { recursive: true });
+    await writeFile(path.join(project.specopsPath, "new", "nested.md"), "# Nested\n");
+    await writeFile(path.join(project.repoPath, "src", "new", "component.ts"), "export const component = 1;\n");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      git: {
+        untrackedSpecFiles: ["specops/new/nested.md"],
+        untrackedSourceFiles: ["src/new/component.ts"]
+      },
+      drift: {
+        currentSpecFileChangeCount: 1,
+        currentSourceFileChangeCount: 1
+      }
+    });
+  });
+
   it("reports missing source tasks before timestamp fallback stale tasks", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

@@ -60,10 +60,14 @@ async function readHeadCommit(repoPath: string): Promise<string | null> {
 }
 
 async function readStatusEntries(repoPath: string): Promise<GitStatusEntry[]> {
-  const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "-z"], {
-    cwd: repoPath,
-    encoding: "buffer"
-  });
+  const { stdout } = await execFileAsync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    {
+      cwd: repoPath,
+      encoding: "buffer"
+    }
+  );
   return parsePorcelainStatus(stdout.toString("utf8"));
 }
 
