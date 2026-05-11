@@ -80,8 +80,15 @@ vi.mock("@tanstack/react-query", () => ({
     }
 
     if (options.queryType === "proposals") {
+      const input = options.queryKey[3] as { status?: string } | undefined;
+      const summaries = (mocks.proposalSummariesOverride ?? []) as ReturnType<
+        typeof aiProposalSummary
+      >[];
+
       return {
-        data: mocks.proposalSummariesOverride ?? [],
+        data: input?.status
+          ? summaries.filter((proposal) => proposal.status === input.status)
+          : summaries,
         error: null,
         isLoading: false
       };
@@ -218,8 +225,7 @@ describe("AiPrefillPage", () => {
     await clickButton(container, "Manage projects");
 
     expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1", {
-      proposalType: "ai_spec_entity",
-      status: "pending"
+      proposalType: "ai_spec_entity"
     });
     expect(mocks.proposalQuery).toHaveBeenCalledWith("project-1", "proposal-1");
     expect(mocks.proposalQueryOptions).toContainEqual(
@@ -295,15 +301,73 @@ describe("AiPrefillPage", () => {
       mocks.proposalSummariesOverride = [aiProposalSummary()];
       const { container } = await renderAiPrefillPage();
 
+      await changeCheckbox(container, "Select apps/api/src/routes/projects.ts", true);
       await changeCheckbox(container, "Select Manage projects", true);
       await clickButton(container, "Manage projects");
-      await changeTextarea(container, "Proposal markdown", "# Manage projects\n\nEdited.");
 
       expect(buttonNamed(container, "Accept selected").disabled).toBe(true);
       expect(buttonNamed(container, "Reject").disabled).toBe(true);
+      expect(buttonNamed(container, "Generate").disabled).toBe(true);
+
+      await changeTextarea(container, "Proposal markdown", "# Manage projects\n\nEdited.");
+
       expect(buttonNamed(container, "Save").disabled).toBe(true);
     }
   );
+
+  it("keeps dirty drafts in place by disabling status tabs while editing", async () => {
+    mocks.proposalSummariesOverride = [
+      aiProposalSummary(),
+      aiProposalSummary({
+        id: "proposal-2",
+        status: "accepted",
+        title: "Accepted projects"
+      })
+    ];
+    const { container } = await renderAiPrefillPage();
+
+    await clickButton(container, "Manage projects");
+    await changeTextarea(container, "Proposal markdown", "# Manage projects\n\nUnsaved draft.");
+
+    expect(buttonNamed(container, "Accepted").disabled).toBe(true);
+    expect(buttonNamed(container, "Generate").disabled).toBe(true);
+    expect(textarea(container, "Proposal markdown").value).toBe(
+      "# Manage projects\n\nUnsaved draft."
+    );
+  });
+
+  it("shows edited accepted AI proposals in the accepted review history", async () => {
+    mocks.proposalSummariesOverride = [
+      aiProposalSummary(),
+      aiProposalSummary({
+        id: "proposal-2",
+        status: "accepted",
+        title: "Accepted projects"
+      }),
+      aiProposalSummary({
+        id: "proposal-3",
+        status: "edited_and_accepted",
+        title: "Edited accepted projects"
+      })
+    ];
+    const { container } = await renderAiPrefillPage();
+
+    await clickButton(container, "Accepted");
+
+    expect(container.textContent).toContain("Accepted projects");
+    expect(container.textContent).toContain("Edited accepted projects");
+  });
+
+  it("disables generate while a review draft is dirty", async () => {
+    mocks.proposalSummariesOverride = [aiProposalSummary()];
+    const { container } = await renderAiPrefillPage();
+
+    await changeCheckbox(container, "Select apps/api/src/routes/projects.ts", true);
+    await clickButton(container, "Manage projects");
+    await changeTextarea(container, "Proposal markdown", "# Manage projects\n\nUnsaved draft.");
+
+    expect(buttonNamed(container, "Generate").disabled).toBe(true);
+  });
 });
 
 async function renderAiPrefillPage() {
@@ -405,13 +469,19 @@ function waitForRender() {
   });
 }
 
-function aiProposalSummary() {
+function aiProposalSummary(
+  overrides: {
+    id?: string;
+    status?: string;
+    title?: string;
+  } = {}
+) {
   return {
-    id: "proposal-1",
+    id: overrides.id ?? "proposal-1",
     projectId: "project-1",
     proposalType: "ai_spec_entity",
-    status: "pending",
-    title: "Manage projects",
+    status: overrides.status ?? "pending",
+    title: overrides.title ?? "Manage projects",
     entityId: "uc.manage-projects",
     entityType: "use_case",
     filePath: "use-cases/uc.manage-projects.md",

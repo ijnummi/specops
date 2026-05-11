@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AiPrefillGenerateRequest,
   ProposalConflictDto,
+  ProposalStatus,
   ProposalSummaryDto,
   SourceFileSummaryDto
 } from "@specops/contracts";
@@ -48,16 +49,19 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
   );
 
   const sourceFiles = useQuery(sourceFilesQuery(projectId, { limit: 100, offset: 0 }));
-  const proposals = useQuery(
-    proposalsQuery(projectId, { proposalType: "ai_spec_entity", status: statusFilter })
+  const proposals = useQuery(proposalsQuery(projectId, { proposalType: "ai_spec_entity" }));
+  const allProposals = useMemo(() => proposals.data ?? [], [proposals.data]);
+  const visibleProposals = useMemo(
+    () => allProposals.filter((proposal) => matchesStatusFilter(proposal.status, statusFilter)),
+    [allProposals, statusFilter]
   );
   const pendingProposals = useMemo(
-    () => (proposals.data ?? []).filter((proposal) => proposal.status === "pending"),
-    [proposals.data]
+    () => allProposals.filter((proposal) => proposal.status === "pending"),
+    [allProposals]
   );
   const allProposalIds = useMemo(
-    () => new Set((proposals.data ?? []).map((proposal) => proposal.id)),
-    [proposals.data]
+    () => new Set(allProposals.map((proposal) => proposal.id)),
+    [allProposals]
   );
   const pendingProposalIds = useMemo(
     () => new Set(pendingProposals.map((proposal) => proposal.id)),
@@ -178,10 +182,14 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
     ]);
   };
 
-  const isGenerateDisabled =
-    selectedSourceFileIds.size === 0 || model.trim().length === 0 || generateMutation.isPending;
   const isReviewMutationPending =
     acceptMutation.isPending || rejectMutation.isPending || saveMutation.isPending;
+  const isGenerateDisabled =
+    selectedSourceFileIds.size === 0 ||
+    model.trim().length === 0 ||
+    generateMutation.isPending ||
+    hasDirtyDraft ||
+    isReviewMutationPending;
   const isAcceptDisabled =
     checkedProposalIds.size === 0 ||
     isReviewMutationPending ||
@@ -194,6 +202,7 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
   const isSaveDisabled =
     !selectedProposalIsPending || !isMarkdownDirty || isReviewMutationPending;
   const isReviewActionPending = isReviewMutationPending;
+  const isStatusFilterDisabled = hasDirtyDraft || isReviewMutationPending;
 
   useEffect(() => {
     setCheckedProposalIds((current) => {
@@ -202,7 +211,10 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
     });
     setMarkdownDrafts((current) => {
       const next = Object.fromEntries(
-        Object.entries(current).filter(([proposalId]) => allProposalIds.has(proposalId))
+        Object.entries(current).filter(
+          ([proposalId, draft]) =>
+            allProposalIds.has(proposalId) || draft.markdown !== draft.savedMarkdown
+        )
       );
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
@@ -308,12 +320,16 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
                   type="button"
                   role="tab"
                   aria-selected={statusFilter === filter}
+                  disabled={filter !== statusFilter && isStatusFilterDisabled}
                   className={
                     statusFilter === filter
                       ? "rounded border border-slate-800 bg-slate-900 px-2 py-1 text-xs font-medium text-white"
                       : "rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
                   }
                   onClick={() => {
+                    if (filter !== statusFilter && isStatusFilterDisabled) {
+                      return;
+                    }
                     setStatusFilter(filter);
                     setSelectedProposalId(null);
                   }}
@@ -333,13 +349,13 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
               <div className="p-3 text-sm text-red-700">{proposals.error.message}</div>
             ) : proposals.isLoading ? (
               <div className="p-3 text-sm text-slate-600">Loading proposals...</div>
-            ) : (proposals.data ?? []).length === 0 ? (
+            ) : visibleProposals.length === 0 ? (
               <div className="p-3 text-sm text-slate-600">
                 No {statusFilterLabel(statusFilter).toLowerCase()} AI proposals.
               </div>
             ) : (
               <div className="divide-y divide-slate-200">
-                {(proposals.data ?? []).map((proposal) => (
+                {visibleProposals.map((proposal) => (
                   <ProposalRow
                     key={proposal.id}
                     proposal={proposal}
@@ -638,6 +654,14 @@ function statusFilterLabel(status: ProposalStatusFilter) {
     case "obsolete":
       return "Obsolete";
   }
+}
+
+function matchesStatusFilter(status: ProposalStatus, filter: ProposalStatusFilter) {
+  if (filter === "accepted") {
+    return status === "accepted" || status === "edited_and_accepted";
+  }
+
+  return status === filter;
 }
 
 function mutationError(error: Error | null, label: string) {
