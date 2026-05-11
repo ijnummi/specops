@@ -10,6 +10,9 @@
     "test": "vitest run --passWithNoTests",
     "build": "tsc -b"
   },
-  "dependencies": {},
+  "dependencies": {
+    "yaml": "^2.8.4",
+    "zod": "^4.4.3"
+  },
   "devDependencies": {}
 }
