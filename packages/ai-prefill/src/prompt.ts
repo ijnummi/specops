@@ -68,7 +68,7 @@ export function buildAiPrefillPromptPacket(
             responseSchema: {
               proposals: [
                 {
-                  entityId: "use-case.short-id",
+                  entityId: "uc.short-id",
                   type: "use_case",
                   title: "Short proposal title",
                   summary: "Concise behavior summary.",

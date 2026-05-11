@@ -58,7 +58,7 @@ describe("buildAiPrefillPromptPacket", () => {
       text: "export async function listProjects() {\n  return [];\n}\n"
     });
     expect(userPayload.responseSchema.proposals[0]).toMatchObject({
-      entityId: "use-case.short-id",
+      entityId: "uc.short-id",
       type: "use_case",
       title: "Short proposal title"
     });
