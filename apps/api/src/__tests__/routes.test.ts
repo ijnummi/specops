@@ -857,6 +857,109 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("returns project readiness summary and queue from indexed specs", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "use-cases", "uc.checkout.md"),
+      "---\n" +
+        "id: uc.checkout\n" +
+        "type: use_case\n" +
+        "title: Checkout\n" +
+        "status: draft\n" +
+        "links:\n" +
+        "  domain:\n" +
+        "    - domain.customer\n" +
+        "---\n\n" +
+        "# Checkout\n\n" +
+        "## Goal\n\n" +
+        "Customers complete purchases with saved account details, selected shipping options, and clear payment confirmation before order fulfillment begins.\n"
+    );
+    await writeFile(
+      path.join(project.specopsPath, "domain", "domain.customer.md"),
+      "---\n" +
+        "id: domain.customer\n" +
+        "type: domain_entity\n" +
+        "title: Customer\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Customer\n\n" +
+        "## Definition\n\n" +
+        "A customer represents the account holder placing orders, managing saved addresses, and confirming payment preferences during checkout.\n"
+    );
+    await createIndexerService(db).indexProject(project.id);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/readiness`
+    });
+    const body = response.json() as {
+      summary: { ready: number; needsContext: number; needsReview: number; blocked: number };
+      queue: Array<{
+        entityId: string;
+        readiness: string;
+        topChecks: Array<{ id: string }>;
+      }>;
+    };
+
+    expect(response.statusCode).toBe(200);
+    expect(body.summary).toEqual({
+      ready: 1,
+      needsContext: 1,
+      needsReview: 0,
+      blocked: 0
+    });
+    expect(body.queue).toContainEqual(
+      expect.objectContaining({
+        entityId: "uc.checkout",
+        readiness: "needs_context",
+        topChecks: expect.arrayContaining([
+          expect.objectContaining({ id: "use_case_acceptance_criteria_missing" })
+        ])
+      })
+    );
+  });
+
+  it("returns entity readiness and 404 for a missing entity readiness request", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "domain.customer.md"),
+      "---\n" +
+        "id: domain.customer\n" +
+        "type: domain_entity\n" +
+        "title: Customer\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Customer\n\n" +
+        "## Definition\n\n" +
+        "A customer is the account profile used to manage identity, saved addresses, order ownership, and checkout communication preferences.\n"
+    );
+    await createIndexerService(db).indexProject(project.id);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.customer/readiness`
+    });
+    const missingResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/entities/domain.missing/readiness`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      entityId: "domain.customer",
+      readiness: "ready",
+      checks: []
+    });
+    expect(missingResponse.statusCode).toBe(404);
+  });
+
   it("returns an empty project overview before indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

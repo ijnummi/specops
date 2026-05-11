@@ -11,6 +11,7 @@ import { registerIndexRunRoutes } from "./routes/index-runs.js";
 import { registerProjectHealthRoutes } from "./routes/project-health.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
+import { registerReadinessRoutes } from "./routes/readiness.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerSourceRoutes } from "./routes/source.js";
 import { registerValidationRoutes } from "./routes/validation.js";
@@ -88,6 +89,7 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
     aiPrefillProviderFactory: options.aiPrefillProviderFactory
   });
   app.register(registerProjectHealthRoutes, { prefix: "/api", db });
+  app.register(registerReadinessRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
   app.register(registerAgentTaskRoutes, { prefix: "/api", db });
   app.register(registerSearchRoutes, { prefix: "/api", db });
