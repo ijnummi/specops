@@ -954,8 +954,8 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       entityId: "domain.customer",
-      readiness: "ready",
-      checks: []
+      readiness: "needs_context",
+      checks: [expect.objectContaining({ id: "model_isolated" })]
     });
     expect(missingResponse.statusCode).toBe(404);
   });
