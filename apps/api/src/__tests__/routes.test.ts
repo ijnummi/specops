@@ -1485,6 +1485,13 @@ describeWithDb("database-backed routes", () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
     await writeSampleSourceProject(project.repoPath);
+    await writeFile(
+      path.join(project.repoPath, "src", "services", "decision-service.ts"),
+      "import type { Decision, Workspace } from '../domain';\n" +
+        "export class DecisionService {\n" +
+        "  list(_workspace: Workspace): Decision[] { return []; }\n" +
+        "}\n"
+    );
 
     const generateResponse = await app.inject({
       method: "POST",
@@ -1502,7 +1509,18 @@ describeWithDb("database-backed routes", () => {
       method: "GET",
       url: `/api/projects/${project.id}/proposals/${proposal!.id}`
     });
-    const detail = detailResponse.json() as { payload: { markdown: string } };
+    const detail = detailResponse.json() as {
+      payload: { markdown: string };
+      evidence: {
+        scanner: string;
+        sourceFiles: Array<{
+          file: string;
+          symbolName: string;
+          symbolKind: string;
+          exported: boolean;
+        }>;
+      };
+    };
     const editedMarkdown = detail.payload.markdown.replace(
       "Initial spec generated from exported source symbol",
       "Reviewed spec generated from exported source symbol"
@@ -1516,6 +1534,17 @@ describeWithDb("database-backed routes", () => {
     const patched = patchResponse.json() as { payload: { markdown: string } };
 
     expect(detailResponse.statusCode).toBe(200);
+    expect(detail.evidence).toMatchObject({
+      scanner: "typescript",
+      sourceFiles: expect.arrayContaining([
+        expect.objectContaining({
+          file: "src/services/decision-service.ts",
+          symbolName: "DecisionService",
+          symbolKind: "class",
+          exported: true
+        })
+      ])
+    });
     expect(patchResponse.statusCode).toBe(200);
     expect(patched.payload.markdown).toContain(
       "Reviewed spec generated from exported source symbol"

@@ -96,12 +96,12 @@ export function createProposalService(db: Db) {
           .select()
           .from(aiProposals)
           .where(and(eq(aiProposals.projectId, projectId), eq(aiProposals.status, status)))
-          .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title))
+          .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id))
       : await db
           .select()
           .from(aiProposals)
           .where(eq(aiProposals.projectId, projectId))
-          .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title));
+          .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id));
 
     return mapSummaries(rows, projectId);
   }
