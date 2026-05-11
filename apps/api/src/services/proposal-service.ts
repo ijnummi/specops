@@ -239,7 +239,6 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
       .where(
         and(
           eq(aiProposals.projectId, projectId),
-          eq(aiProposals.proposalType, sourceSpecEntityProposalType),
           inArray(aiProposals.id, uniqueProposalIds)
         )
       );
@@ -261,7 +260,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
           });
         }
 
-        const payload = parseSourcePayload(row);
+        const payload = parsePayload(row);
         const parsed = parseSpecMarkdown(payload.filePath, payload.markdown);
         const errorMessages = parsed.messages.filter((message) => message.level === "error");
         if (errorMessages.length > 0 || !parsed.entity) {
@@ -398,7 +397,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
   async function assertNoExistingCanonicalEntities(
     specopsPath: string,
     selected: Array<{
-      payload: SourceSpecEntityProposalPayload;
+      payload: SpecEntityProposalPayload;
       targetPath: string;
     }>
   ): Promise<void> {
@@ -500,7 +499,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
 function assertNoDuplicateSelectedTargets(
   selected: Array<{
     row: ProposalRow;
-    payload: SourceSpecEntityProposalPayload;
+    payload: SpecEntityProposalPayload;
     targetPath: string;
   }>
 ): void {

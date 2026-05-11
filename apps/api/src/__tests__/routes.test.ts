@@ -1690,6 +1690,60 @@ describeWithDb("database-backed routes", () => {
     expect(writtenMarkdown).toContain("id: interface.decision-service");
   });
 
+  it("accepts AI spec entity proposals as canonical markdown", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const proposal = await insertPendingAiProposal(project.id);
+
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [proposal.id] }
+    });
+    const targetPath = path.join(project.specopsPath, "use-cases", "uc.manage-projects.md");
+    const acceptedDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`
+    });
+
+    expect(acceptResponse.statusCode).toBe(200);
+    const writtenMarkdown = await readFile(targetPath, "utf8");
+    expect(acceptResponse.json()).toMatchObject({
+      acceptedProposalIds: [proposal.id],
+      indexRun: { status: "succeeded" }
+    });
+    expect(writtenMarkdown).toContain("id: uc.manage-projects");
+    expect(acceptedDetailResponse.statusCode).toBe(200);
+    expect(acceptedDetailResponse.json()).toMatchObject({ status: "accepted" });
+  });
+
+  it("accepts edited AI markdown as edited_and_accepted", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const generatedMarkdown = aiProposalMarkdown();
+    const proposal = await insertPendingAiProposal(project.id, {
+      generatedMarkdown,
+      markdown: generatedMarkdown.replace("# Manage projects", "# Manage project work")
+    });
+
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [proposal.id] }
+    });
+    const acceptedDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`
+    });
+
+    expect(acceptResponse.statusCode).toBe(200);
+    expect(acceptedDetailResponse.statusCode).toBe(200);
+    expect(acceptedDetailResponse.json()).toMatchObject({
+      status: "edited_and_accepted",
+      reviewedAt: expect.any(String)
+    });
+  });
+
   it("marks edited accepted proposals as edited_and_accepted", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -1816,6 +1870,53 @@ describeWithDb("database-backed routes", () => {
     );
     expect(detailResponse.statusCode).toBe(200);
     expect(detailResponse.json()).toMatchObject({ status: "pending" });
+  });
+
+  it("rejects AI proposal file conflicts without partial writes", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const conflictingProposal = await insertPendingAiProposal(project.id);
+    const otherProposal = await insertPendingAiProposal(project.id, {
+      entityId: "uc.review-projects",
+      title: "Review projects",
+      filePath: "use-cases/uc.review-projects.md",
+      generatedMarkdown: aiProposalMarkdown({
+        entityId: "uc.review-projects",
+        title: "Review projects"
+      }),
+      markdown: aiProposalMarkdown({
+        entityId: "uc.review-projects",
+        title: "Review projects"
+      })
+    });
+
+    await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "use-cases", "uc.manage-projects.md"),
+      "---\nid: uc.existing\n---\n\n# Existing\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [conflictingProposal.id, otherProposal.id] }
+    });
+    const conflictingDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${conflictingProposal.id}`
+    });
+    const otherDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${otherProposal.id}`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe("Proposal target markdown file already exists");
+    expect(conflictingDetailResponse.json()).toMatchObject({ status: "pending" });
+    expect(otherDetailResponse.json()).toMatchObject({ status: "pending" });
+    await expect(fileExists(path.join(project.specopsPath, otherProposal.filePath))).resolves.toBe(
+      false
+    );
   });
 
   it("returns source import proposal detail and persists edited markdown", async () => {
@@ -3238,24 +3339,51 @@ describeWithDb("database-backed routes", () => {
     return proposal!;
   }
 
+  async function insertPendingAiProposal(
+    projectId: string,
+    payloadOverrides: Partial<ReturnType<typeof aiProposalPayload>> = {}
+  ): Promise<ProposalSummaryForTest> {
+    const payload = { ...aiProposalPayload(), ...payloadOverrides };
+    const result = await pool.query<{ id: string; entityId: string; filePath: string }>(
+      "insert into ai_proposals (project_id, proposal_type, title, payload_json, evidence_json, confidence, status) values ($1, 'ai_spec_entity', $2, $3::jsonb, $4::jsonb, 0.73, 'pending') returning id, payload_json->>'entityId' as \"entityId\", payload_json->>'filePath' as \"filePath\"",
+      [projectId, payload.title, JSON.stringify(payload), JSON.stringify(aiProposalEvidence())]
+    );
+
+    return result.rows[0];
+  }
+
+  function aiProposalMarkdown({
+    entityId = "uc.manage-projects",
+    title = "Manage projects"
+  }: {
+    entityId?: string;
+    title?: string;
+  } = {}): string {
+    return [
+      "---",
+      `id: ${entityId}`,
+      "type: use_case",
+      `title: ${title}`,
+      "status: draft",
+      "---",
+      "",
+      `# ${title}`
+    ].join("\n");
+  }
+
   function aiProposalPayload() {
+    const markdown = aiProposalMarkdown();
+
     return {
       entityId: "uc.manage-projects",
       type: "use_case",
       title: "Manage projects",
       status: "draft",
       filePath: "use-cases/uc.manage-projects.md",
-      generatedMarkdown: "# Manage projects",
-      markdown: "# Manage projects",
+      generatedMarkdown: markdown,
+      markdown,
       sourceFiles: ["apps/api/src/routes/projects.ts"],
-      proposedLinks: [
-        {
-          linkType: "uses",
-          targetEntityId: "interface.project-service",
-          targetExists: true,
-          rationale: "The selected route delegates project behavior to the project service."
-        }
-      ]
+      proposedLinks: []
     };
   }
 
