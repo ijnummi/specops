@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   acceptProposals: vi.fn(),
   generateAiPrefillProposals: vi.fn(),
   invalidateQueries: vi.fn(),
+  mutationCallIndex: 0,
   patchProposal: vi.fn(),
+  pendingMutationLabel: undefined as string | undefined,
   proposalDetailOverride: undefined as unknown,
   proposalQueryOptions: [] as Array<{
     enabled?: boolean;
@@ -35,15 +37,21 @@ vi.mock("@tanstack/react-query", () => ({
   useMutation: (options: {
     mutationFn: (variables?: unknown) => unknown;
     onSuccess?: (data: unknown, variables: unknown) => unknown;
-  }) => ({
-    error: null,
-    isPending: false,
-    mutate: (variables?: unknown) => {
-      const result = options.mutationFn(variables);
-      void options.onSuccess?.(result, variables);
-      return result;
-    }
-  }),
+  }) => {
+    const mutationLabels = ["generate", "accept", "reject", "save"];
+    const mutationLabel = mutationLabels[mocks.mutationCallIndex % mutationLabels.length];
+    mocks.mutationCallIndex += 1;
+
+    return {
+      error: null,
+      isPending: mutationLabel === mocks.pendingMutationLabel,
+      mutate: (variables?: unknown) => {
+        const result = options.mutationFn(variables);
+        void options.onSuccess?.(result, variables);
+        return result;
+      }
+    };
+  },
   useQuery: (options: {
     enabled?: boolean;
     queryKey: readonly unknown[];
@@ -139,6 +147,7 @@ describe("AiPrefillPage", () => {
     mocks.generateAiPrefillProposals.mockReset();
     mocks.generateAiPrefillProposals.mockImplementation(() => ({ proposals: [], diagnostics: [] }));
     mocks.invalidateQueries.mockReset();
+    mocks.mutationCallIndex = 0;
     mocks.patchProposal.mockReset();
     mocks.patchProposal.mockImplementation(
       (_projectId: string, _proposalId: string, input: { markdown?: string; status?: string }) => ({
@@ -155,6 +164,7 @@ describe("AiPrefillPage", () => {
     mocks.proposalQueryOptions = [];
     mocks.proposalSummariesOverride = undefined;
     mocks.proposalsQuery.mockClear();
+    mocks.pendingMutationLabel = undefined;
     mocks.sourceFilesQuery.mockClear();
   });
 
@@ -277,6 +287,23 @@ describe("AiPrefillPage", () => {
       proposalIds: ["proposal-1"]
     });
   });
+
+  it.each(["accept", "reject", "save"])(
+    "disables review actions while the %s mutation is pending",
+    async (pendingMutationLabel) => {
+      mocks.pendingMutationLabel = pendingMutationLabel;
+      mocks.proposalSummariesOverride = [aiProposalSummary()];
+      const { container } = await renderAiPrefillPage();
+
+      await changeCheckbox(container, "Select Manage projects", true);
+      await clickButton(container, "Manage projects");
+      await changeTextarea(container, "Proposal markdown", "# Manage projects\n\nEdited.");
+
+      expect(buttonNamed(container, "Accept selected").disabled).toBe(true);
+      expect(buttonNamed(container, "Reject").disabled).toBe(true);
+      expect(buttonNamed(container, "Save").disabled).toBe(true);
+    }
+  );
 });
 
 async function renderAiPrefillPage() {

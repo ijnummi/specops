@@ -180,21 +180,20 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
 
   const isGenerateDisabled =
     selectedSourceFileIds.size === 0 || model.trim().length === 0 || generateMutation.isPending;
+  const isReviewMutationPending =
+    acceptMutation.isPending || rejectMutation.isPending || saveMutation.isPending;
   const isAcceptDisabled =
     checkedProposalIds.size === 0 ||
-    acceptMutation.isPending ||
-    saveMutation.isPending ||
+    isReviewMutationPending ||
     hasDirtyCheckedProposal ||
     hasDirtyDraft;
   const isRejectDisabled =
     !selectedProposalIsPending ||
-    rejectMutation.isPending ||
-    saveMutation.isPending ||
+    isReviewMutationPending ||
     hasDirtyDraft;
   const isSaveDisabled =
-    !selectedProposalIsPending || !isMarkdownDirty || saveMutation.isPending;
-  const isReviewActionPending =
-    acceptMutation.isPending || rejectMutation.isPending || saveMutation.isPending;
+    !selectedProposalIsPending || !isMarkdownDirty || isReviewMutationPending;
+  const isReviewActionPending = isReviewMutationPending;
 
   useEffect(() => {
     setCheckedProposalIds((current) => {
@@ -429,10 +428,11 @@ export function AiPrefillPage({ projectId }: { projectId: string }) {
                       if (!selectedProposalIsPending) {
                         return;
                       }
+                      const markdown = event.currentTarget.value;
                       setMarkdownDrafts((current) => ({
                         ...current,
                         [selectedAiDetail.id]: {
-                          markdown: event.currentTarget.value,
+                          markdown,
                           savedMarkdown:
                             current[selectedAiDetail.id]?.savedMarkdown ??
                             selectedAiDetail.payload.markdown
