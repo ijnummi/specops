@@ -14,6 +14,7 @@ import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
 import { ProjectsPage } from "./routes/projects.js";
 import { RootRoute } from "./routes/root.js";
+import { SourceImportPage } from "./routes/source-import.js";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -89,6 +90,15 @@ const entityRoute = createRoute({
   }
 });
 
+const sourceImportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/import/source",
+  component: () => {
+    const { projectId } = sourceImportRoute.useParams();
+    return <SourceImportPage projectId={projectId} />;
+  }
+});
+
 const impactRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/impact/$entityId",
@@ -132,6 +142,7 @@ const routeTree = rootRoute.addChildren([
   adminDatabaseRoute,
   projectRoute,
   entityRoute,
+  sourceImportRoute,
   impactRoute,
   changeImpactRoute
 ]);

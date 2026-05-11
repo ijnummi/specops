@@ -1,5 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import type {
+  AcceptProposalsRequest,
+  AcceptProposalsResponse,
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
   ChangeImpactPreviewQuery,
@@ -11,6 +13,10 @@ import type {
   EntityImpactQuery,
   EntityImpactResponseDto,
   IndexRunDto,
+  ProposalDetailDto,
+  ProposalListQuery,
+  ProposalPatchRequest,
+  ProposalSummaryDto,
   ProjectDto,
   ProjectHealthDto,
   ProjectOverviewDto,
@@ -75,6 +81,10 @@ export const queryKeys = {
   project: (projectId: string) => ["projects", projectId] as const,
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
+  proposals: (projectId: string, input: ProposalListQuery = {}) =>
+    ["projects", projectId, "proposals", input] as const,
+  proposal: (projectId: string, proposalId: string) =>
+    ["projects", projectId, "proposals", proposalId] as const,
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
   entity: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId] as const,
@@ -125,6 +135,34 @@ export function projectHealthQuery(projectId: string) {
   return queryOptions({
     queryKey: queryKeys.projectHealth(projectId),
     queryFn: () => apiGet<ProjectHealthDto>(`/api/projects/${encodeURIComponent(projectId)}/health`)
+  });
+}
+
+export function proposalsQuery(projectId: string, input: ProposalListQuery = {}) {
+  const search = new URLSearchParams();
+  if (input.status) {
+    search.set("status", input.status);
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+
+  return queryOptions({
+    queryKey: queryKeys.proposals(projectId, input),
+    queryFn: () =>
+      apiGet<ProposalSummaryDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/proposals${suffix}`
+      )
+  });
+}
+
+export function proposalQuery(projectId: string, proposalId: string) {
+  return queryOptions({
+    queryKey: queryKeys.proposal(projectId, proposalId),
+    queryFn: () =>
+      apiGet<ProposalDetailDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(
+          proposalId
+        )}`
+      )
   });
 }
 
@@ -347,6 +385,33 @@ export function bootstrapFromSource(projectId: string) {
   return apiSend<IndexRunDto>(
     "POST",
     `/api/projects/${encodeURIComponent(projectId)}/bootstrap-from-source`
+  );
+}
+
+export function generateSourceImportProposals(projectId: string) {
+  return apiSend<ProposalSummaryDto[]>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/proposals/source-import`
+  );
+}
+
+export function patchProposal(
+  projectId: string,
+  proposalId: string,
+  input: ProposalPatchRequest
+) {
+  return apiSend<ProposalDetailDto>(
+    "PATCH",
+    `/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}`,
+    input
+  );
+}
+
+export function acceptProposals(projectId: string, input: AcceptProposalsRequest) {
+  return apiSend<AcceptProposalsResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/proposals/accept`,
+    input
   );
 }
 

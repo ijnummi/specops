@@ -1,22 +1,21 @@
+import { Link } from "@tanstack/react-router";
 import { FolderSearch, FolderSync, Play, RotateCw } from "lucide-react";
 
 export type ProjectActionsProps = {
+  projectId: string;
   isInitializing: boolean;
-  isBootstrapping: boolean;
   isIndexing: boolean;
   isProjectActionPending: boolean;
   onInitialize: () => void;
-  onBootstrap: () => void;
   onReindex: () => void;
 };
 
 export function ProjectActions({
+  projectId,
   isInitializing,
-  isBootstrapping,
   isIndexing,
   isProjectActionPending,
   onInitialize,
-  onBootstrap,
   onReindex
 }: ProjectActionsProps) {
   return (
@@ -34,19 +33,14 @@ export function ProjectActions({
         )}
         Init specops
       </button>
-      <button
-        type="button"
+      <Link
+        to="/projects/$projectId/import/source"
+        params={{ projectId }}
         className="button-secondary"
-        disabled={isProjectActionPending}
-        onClick={onBootstrap}
       >
-        {isBootstrapping ? (
-          <RotateCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <FolderSearch className="h-4 w-4" aria-hidden="true" />
-        )}
-        Bootstrap from source
-      </button>
+        <FolderSearch className="h-4 w-4" aria-hidden="true" />
+        Import from source
+      </Link>
       <button
         type="button"
         className="button-primary"

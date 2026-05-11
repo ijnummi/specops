@@ -1,5 +1,28 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    children,
+    className,
+    params,
+    to
+  }: {
+    children: ReactNode;
+    className?: string;
+    params?: { projectId?: string };
+    to: string;
+  }) => {
+    const href = params?.projectId ? to.replace("$projectId", params.projectId) : to;
+
+    return (
+      <a className={className} href={href}>
+        {children}
+      </a>
+    );
+  }
+}));
 
 import { ProjectActions } from "./project-actions.js";
 
@@ -7,47 +30,46 @@ describe("ProjectActions", () => {
   it("renders project action labels", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
+        projectId="project-1"
         isInitializing={false}
-        isBootstrapping={false}
         isIndexing={false}
         isProjectActionPending={false}
         onInitialize={() => undefined}
-        onBootstrap={() => undefined}
         onReindex={() => undefined}
       />
     );
 
     expect(html).toContain("Init specops");
-    expect(html).toContain("Bootstrap from source");
+    expect(html).toContain("Import from source");
+    expect(html).toContain('href="/projects/project-1/import/source"');
+    expect(html).not.toContain("Bootstrap from source");
     expect(html).toContain("Re-index");
   });
 
-  it("disables bootstrap while pending", () => {
+  it("shows an active spinner while re-indexing", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
+        projectId="project-1"
         isInitializing={false}
-        isBootstrapping={true}
-        isIndexing={false}
+        isIndexing={true}
         isProjectActionPending={true}
         onInitialize={() => undefined}
-        onBootstrap={() => undefined}
         onReindex={() => undefined}
       />
     );
 
-    expect(html).toContain("Bootstrap from source");
-    expect(html).toContain('disabled=""');
+    expect(html).toContain("Re-index");
+    expect(html).toContain("animate-spin");
   });
 
   it("shows an active spinner while initializing", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
+        projectId="project-1"
         isInitializing={true}
-        isBootstrapping={false}
         isIndexing={false}
         isProjectActionPending={true}
         onInitialize={() => undefined}
-        onBootstrap={() => undefined}
         onReindex={() => undefined}
       />
     );
@@ -56,21 +78,20 @@ describe("ProjectActions", () => {
     expect(html).toContain("animate-spin");
   });
 
-  it("disables all project actions while any project action is pending", () => {
+  it("disables project action buttons while any project action is pending", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
+        projectId="project-1"
         isInitializing={false}
-        isBootstrapping={true}
-        isIndexing={false}
+        isIndexing={true}
         isProjectActionPending={true}
         onInitialize={() => undefined}
-        onBootstrap={() => undefined}
         onReindex={() => undefined}
       />
     );
 
-    expect(html.match(/disabled=""/g)).toHaveLength(3);
-    expect(html).toContain("Bootstrap from source");
+    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(html).toContain("Import from source");
     expect(html).toContain("animate-spin");
   });
 });

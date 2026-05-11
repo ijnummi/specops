@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  bootstrapFromSource: vi.fn(),
   mutationStates: [] as Array<{ isPending: boolean; error: Error | null }>,
   navigate: vi.fn(),
   invalidateQueries: vi.fn(),
@@ -46,7 +45,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/queries.js", () => ({
-  bootstrapFromSource: mocks.bootstrapFromSource,
   entitiesQuery: vi.fn((projectId: string) => ({
     queryKey: ["projects", projectId, "entities"],
     queryType: "entities"
@@ -188,9 +186,7 @@ vi.mock("../components/project-actions.js", () => ({
         <button type="button" disabled={props.isProjectActionPending}>
           Init specops
         </button>
-        <button type="button" disabled={props.isProjectActionPending}>
-          Bootstrap from source
-        </button>
+        <a href={`/projects/${props.projectId}/import/source`}>Import from source</a>
         <button type="button" disabled={props.isProjectActionPending}>
           Re-index
         </button>
@@ -226,7 +222,6 @@ import { ProjectDetailPage } from "./project-detail.js";
 
 describe("ProjectDetailPage actions", () => {
   beforeEach(() => {
-    mocks.bootstrapFromSource.mockReset();
     mocks.projectHealthQuery.mockClear();
     mocks.searchQuery.mockClear();
     mocks.projectActionsProps = null;
@@ -260,17 +255,18 @@ describe("ProjectDetailPage actions", () => {
     };
     mocks.mutationStates = [
       { isPending: false, error: null },
-      { isPending: false, error: null },
       { isPending: false, error: null }
     ];
   });
 
-  it("renders the bootstrap from source action", () => {
+  it("renders the import from source action", () => {
     const html = renderToStaticMarkup(
       <ProjectDetailPage projectId="project-1" entityId={null} query="" />
     );
 
-    expect(html).toContain("Bootstrap from source");
+    expect(html).toContain("Import from source");
+    expect(html).toContain('/projects/project-1/import/source');
+    expect(mocks.projectActionsProps?.projectId).toBe("project-1");
   });
 
   it("renders the project overview dashboard when no entity is selected", () => {
@@ -449,18 +445,10 @@ describe("ProjectDetailPage actions", () => {
     expect(html).toContain("Git health failed");
   });
 
-  it("wires the bootstrap action to bootstrap the current project from source", () => {
-    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
-
-    mocks.projectActionsProps?.onBootstrap();
-
-    expect(mocks.bootstrapFromSource).toHaveBeenCalledWith("project-1");
-  });
-
   it("invalidates project overview after project actions succeed", () => {
     renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
 
-    mocks.projectActionsProps?.onBootstrap();
+    mocks.projectActionsProps?.onReindex();
 
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "overview"]
@@ -470,9 +458,8 @@ describe("ProjectDetailPage actions", () => {
     });
   });
 
-  it("disables all project actions while bootstrap is pending", () => {
+  it("disables project action buttons while re-index is pending", () => {
     mocks.mutationStates = [
-      { isPending: false, error: null },
       { isPending: false, error: null },
       { isPending: true, error: null }
     ];
@@ -481,8 +468,8 @@ describe("ProjectDetailPage actions", () => {
       <ProjectDetailPage projectId="project-1" entityId={null} query="" />
     );
 
-    expect(html.match(/disabled=""/g)).toHaveLength(3);
-    expect(mocks.projectActionsProps?.isBootstrapping).toBe(true);
+    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(mocks.projectActionsProps?.isIndexing).toBe(true);
     expect(mocks.projectActionsProps?.isProjectActionPending).toBe(true);
   });
 });

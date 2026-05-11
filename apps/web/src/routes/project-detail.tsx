@@ -3,7 +3,6 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useNavigate } from "@tanstack/react-router";
 
 import {
-  bootstrapFromSource,
   entitiesQuery,
   indexRunsQuery,
   initializeSpecops,
@@ -160,12 +159,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     mutationFn: () => reindexProject(projectId),
     onSuccess: invalidateProject
   });
-  const bootstrapMutation = useMutation({
-    mutationFn: () => bootstrapFromSource(projectId),
-    onSuccess: invalidateProject
-  });
-  const isProjectActionPending =
-    initializeMutation.isPending || bootstrapMutation.isPending || indexMutation.isPending;
+  const isProjectActionPending = initializeMutation.isPending || indexMutation.isPending;
 
   return (
     <WorkbenchLayout
@@ -173,12 +167,11 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
       subtitle={project.data ? `${project.data.repoPath} / ${project.data.specopsPath}` : projectId}
       actions={
         <ProjectActions
+          projectId={projectId}
           isInitializing={initializeMutation.isPending}
-          isBootstrapping={bootstrapMutation.isPending}
           isIndexing={indexMutation.isPending}
           isProjectActionPending={isProjectActionPending}
           onInitialize={() => initializeMutation.mutate()}
-          onBootstrap={() => bootstrapMutation.mutate()}
           onReindex={() => indexMutation.mutate()}
         />
       }
@@ -319,9 +312,6 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
 
       {initializeMutation.error ? (
         <p className="mt-3 text-sm text-red-700">{initializeMutation.error.message}</p>
-      ) : null}
-      {bootstrapMutation.error ? (
-        <p className="mt-3 text-sm text-red-700">{bootstrapMutation.error.message}</p>
       ) : null}
       {indexMutation.error ? <p className="mt-3 text-sm text-red-700">{indexMutation.error.message}</p> : null}
     </WorkbenchLayout>
