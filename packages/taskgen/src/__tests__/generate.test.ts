@@ -162,4 +162,26 @@ describe("generateAgentTaskMarkdown", () => {
     expect(lines).not.toContain("```bash");
     expect(lines).not.toContain("```");
   });
+
+  it("includes deterministic tracked spec hashes when entities provide content hashes", () => {
+    const result = generateAgentTaskMarkdown({
+      source: { ...source, contentHash: "hash-source" },
+      context: [
+        { ...context[1], contentHash: "hash-interface" },
+        { ...context[0], contentHash: "hash-domain" },
+      ],
+      links,
+      targetAgent: "codex",
+      validationCommands: ["pnpm test"],
+    });
+
+    expect(result.markdown).toContain("tracked_spec_hashes:");
+    expect(result.markdown.indexOf("domain.spec-entity: hash-domain")).toBeLessThan(
+      result.markdown.indexOf("interface.spec-entity-service: hash-interface")
+    );
+    expect(result.markdown.indexOf("interface.spec-entity-service: hash-interface")).toBeLessThan(
+      result.markdown.indexOf("uc.generate-agent-task: hash-source")
+    );
+    expect(result.markdown).toContain("uc.generate-agent-task: hash-source");
+  });
 });

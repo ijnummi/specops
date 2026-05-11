@@ -82,8 +82,57 @@ export const projectOverviewSchema = z.object({
   )
 });
 
+export const projectHealthSchema = z.object({
+  git: z.object({
+    isRepo: z.boolean(),
+    headCommit: z.string().nullable(),
+    indexedCommit: z.string().nullable(),
+    hasUncommittedChanges: z.boolean(),
+    changedSpecFiles: z.array(z.string()),
+    changedSourceFiles: z.array(z.string()),
+    untrackedSpecFiles: z.array(z.string()),
+    untrackedSourceFiles: z.array(z.string())
+  }),
+  drift: z.object({
+    indexIsBehindHead: z.boolean(),
+    currentSpecFileChangeCount: z.number(),
+    currentSourceFileChangeCount: z.number()
+  }),
+  staleTasks: z.object({
+    count: z.number(),
+    samples: z.array(
+      z.object({
+        entityId: z.string(),
+        title: z.string(),
+        sourceEntityId: z.string().nullable(),
+        reason: z.enum([
+          "source_spec_changed",
+          "context_spec_changed",
+          "tracked_hash_mismatch",
+          "missing_source_entity"
+        ])
+      })
+    )
+  }),
+  attentionItems: z.array(
+    z.object({
+      kind: z.enum([
+        "index_behind_head",
+        "changed_spec_files",
+        "changed_source_files",
+        "stale_agent_task",
+        "missing_task_source"
+      ]),
+      label: z.string(),
+      entityId: z.string().nullable(),
+      filePath: z.string().nullable()
+    })
+  )
+});
+
 export type ProjectDto = z.infer<typeof projectSchema>;
 export type ProjectSummaryDto = z.infer<typeof projectSummarySchema>;
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
 export type ProjectOverviewDto = z.infer<typeof projectOverviewSchema>;
+export type ProjectHealthDto = z.infer<typeof projectHealthSchema>;

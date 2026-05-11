@@ -275,6 +275,7 @@ function toTaskgenEntity(entity: SpecEntityDto): TaskgenEntity {
     title: entity.title,
     status: entity.status,
     filePath: entity.filePath,
+    contentHash: entity.contentHash,
     frontmatter: entity.frontmatter,
     bodyMarkdown: entity.bodyMarkdown,
     bodyText: entity.bodyText

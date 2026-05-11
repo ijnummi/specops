@@ -4,6 +4,7 @@ export type TaskgenEntity = {
   title: string;
   status: string;
   filePath: string;
+  contentHash?: string;
   frontmatter: Record<string, unknown>;
   bodyMarkdown: string;
   bodyText: string;

@@ -30,6 +30,7 @@ export function generateAgentTaskMarkdown(
   const targetAgent = singleLineMarkdownScalar(input.targetAgent);
   const context = dedupeEntities(input.context).sort(compareEntities);
   const contextSpecIds = context.map((entity) => singleLineMarkdownScalar(entity.entityId));
+  const trackedSpecHashes = trackedSpecHashesFor([input.source, ...context]);
   const validationCommands =
     input.validationCommands.length > 0 ? input.validationCommands : fallbackValidationCommands;
   const validationFence = markdownFenceFor(validationCommands);
@@ -69,6 +70,9 @@ export function generateAgentTaskMarkdown(
       generated_from: [sourceEntityId],
       uses: contextSpecIds,
     },
+    ...(Object.keys(trackedSpecHashes).length > 0
+      ? { tracked_spec_hashes: trackedSpecHashes }
+      : {}),
   }).trim();
 
   const markdown = [
@@ -198,6 +202,23 @@ function dedupeEntities(entities: TaskgenEntity[]): TaskgenEntity[] {
   }
 
   return deduped;
+}
+
+function trackedSpecHashesFor(entities: TaskgenEntity[]): Record<string, string> {
+  const hashesByEntityId = new Map<string, string>();
+
+  for (const entity of entities) {
+    const contentHash = entity.contentHash?.trim();
+    if (!contentHash || hashesByEntityId.has(entity.entityId)) {
+      continue;
+    }
+
+    hashesByEntityId.set(singleLineMarkdownScalar(entity.entityId), contentHash);
+  }
+
+  return Object.fromEntries(
+    [...hashesByEntityId.entries()].sort(([left], [right]) => left.localeCompare(right))
+  );
 }
 
 function compareEntities(left: TaskgenEntity, right: TaskgenEntity): number {
