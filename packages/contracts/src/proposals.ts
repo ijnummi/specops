@@ -180,6 +180,10 @@ export type AiSpecEntityProposalPayload = z.infer<
 export type AiSpecEntityProposalEvidence = z.infer<
   typeof aiSpecEntityProposalEvidenceSchema
 >;
+export type SourceSpecEntityProposalDetail = z.infer<
+  typeof sourceSpecEntityProposalDetailSchema
+>;
+export type AiSpecEntityProposalDetail = z.infer<typeof aiSpecEntityProposalDetailSchema>;
 export type AiPrefillGenerateRequest = z.infer<typeof aiPrefillGenerateRequestSchema>;
 export type AiPrefillDiagnostic = z.infer<typeof aiPrefillDiagnosticSchema>;
 export type ProposalConflictDto = z.infer<typeof proposalConflictSchema>;

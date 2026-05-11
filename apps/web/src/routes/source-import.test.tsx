@@ -10,11 +10,13 @@ const mocks = vi.hoisted(() => ({
   generateSourceImportProposals: vi.fn(),
   invalidateQueries: vi.fn(),
   patchProposal: vi.fn(),
+  proposalDetailOverride: undefined as unknown,
   proposalQueryOptions: [] as Array<{
     enabled?: boolean;
     queryKey: readonly unknown[];
     queryType?: string;
   }>,
+  proposalSummariesOverride: undefined as unknown,
   proposalsQuery: vi.fn((projectId: string, input: { status?: string } = {}) => ({
     queryKey: ["projects", projectId, "proposals", input],
     queryType: "proposals"
@@ -66,7 +68,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }) => {
     if (options.queryType === "proposals") {
       return {
-        data: proposalSummaries(),
+        data: mocks.proposalSummariesOverride ?? proposalSummaries(),
         error: null,
         isLoading: false
       };
@@ -77,7 +79,7 @@ vi.mock("@tanstack/react-query", () => ({
       const proposalId = String(options.queryKey[3]);
 
       return {
-        data: proposalDetail(proposalId),
+        data: mocks.proposalDetailOverride ?? proposalDetail(proposalId),
         error: null,
         isLoading: false
       };
@@ -163,8 +165,10 @@ describe("SourceImportPage", () => {
         });
       }
     );
+    mocks.proposalDetailOverride = undefined;
     mocks.proposalQuery.mockClear();
     mocks.proposalQueryOptions = [];
+    mocks.proposalSummariesOverride = undefined;
     mocks.proposalsQuery.mockClear();
   });
 
@@ -312,6 +316,17 @@ describe("SourceImportPage", () => {
     expect(allowed).toBe(false);
     expect(event.defaultPrevented).toBe(true);
     expect(container.textContent).toContain("Save edits before leaving source import.");
+  });
+
+  it("does not render source evidence for AI proposal details", () => {
+    mocks.proposalSummariesOverride = [aiProposalSummary()];
+    mocks.proposalDetailOverride = aiProposalDetail();
+
+    const html = renderToStaticMarkup(<SourceImportPage projectId="project-1" />);
+
+    expect(html).toContain("Manage projects");
+    expect(html).not.toContain("Source evidence");
+    expect(html).not.toContain("ProjectRoute");
   });
 });
 
@@ -512,6 +527,67 @@ function proposalDetail(
           line: 12
         }
       ]
+    }
+  };
+}
+
+function aiProposalSummary() {
+  return {
+    id: "ai-proposal-1",
+    projectId: "project-1",
+    proposalType: "ai_spec_entity",
+    status: "pending",
+    title: "Manage projects",
+    entityId: "uc.manage-projects",
+    entityType: "use_case",
+    filePath: "use-cases/uc.manage-projects.md",
+    confidence: 0.73,
+    conflict: { status: "none" },
+    createdAt: "2026-05-11T10:00:00.000Z",
+    reviewedAt: null
+  };
+}
+
+function aiProposalDetail() {
+  return {
+    ...aiProposalSummary(),
+    payload: {
+      entityId: "uc.manage-projects",
+      type: "use_case",
+      title: "Manage projects",
+      status: "draft",
+      filePath: "use-cases/uc.manage-projects.md",
+      generatedMarkdown: "# Manage projects",
+      markdown: "# Manage projects",
+      sourceFiles: ["apps/api/src/routes/projects.ts"],
+      proposedLinks: [
+        {
+          linkType: "uses",
+          targetEntityId: "interface.project-service",
+          targetExists: true,
+          rationale: "The selected route delegates project behavior to the project service."
+        }
+      ]
+    },
+    evidence: {
+      provider: "ollama",
+      model: "qwen2.5-coder:7b",
+      promptVersion: "ai-prefill-v1",
+      selectedSourceFiles: [
+        {
+          file: "apps/api/src/routes/projects.ts",
+          contentHash: "hash-1",
+          excerptStartLine: 1,
+          excerptEndLine: 80
+        }
+      ],
+      claims: [
+        {
+          text: "ProjectRoute handles project creation.",
+          sourceFiles: ["apps/api/src/routes/projects.ts"]
+        }
+      ],
+      warnings: []
     }
   };
 }

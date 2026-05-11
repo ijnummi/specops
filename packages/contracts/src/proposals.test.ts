@@ -104,6 +104,37 @@ describe("proposal contracts", () => {
     });
   });
 
+  it("defaults AI prefill generate request temperature", () => {
+    expect(
+      aiPrefillGenerateRequestSchema.parse({
+        sourceFileIds: ["source-file-1"],
+        provider: "ollama",
+        model: "qwen2.5-coder:7b"
+      }).temperature
+    ).toBe(0.1);
+  });
+
+  it("rejects AI prefill generate requests without source file ids", () => {
+    expect(() =>
+      aiPrefillGenerateRequestSchema.parse({
+        sourceFileIds: [],
+        provider: "ollama",
+        model: "qwen2.5-coder:7b"
+      })
+    ).toThrow();
+  });
+
+  it("rejects AI prefill generate requests with out-of-range temperature", () => {
+    expect(() =>
+      aiPrefillGenerateRequestSchema.parse({
+        sourceFileIds: ["source-file-1"],
+        provider: "ollama",
+        model: "qwen2.5-coder:7b",
+        temperature: 2.1
+      })
+    ).toThrow();
+  });
+
   it("parses AI spec entity proposal payloads", () => {
     const parsed = aiSpecEntityProposalPayloadSchema.parse(aiPayload());
 

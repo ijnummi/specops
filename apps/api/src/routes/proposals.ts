@@ -33,8 +33,8 @@ export const registerProposalRoutes: FastifyPluginAsync<RouteOptions> = async (a
 
   app.get("/projects/:projectId/proposals", async (request) => {
     const { projectId } = projectParamsSchema.parse(request.params);
-    const { status } = proposalListQuerySchema.parse(request.query);
-    return proposalService.listProposals(projectId, status);
+    const { status, proposalType } = proposalListQuerySchema.parse(request.query);
+    return proposalService.listProposals(projectId, { status, proposalType });
   });
 
   app.post("/projects/:projectId/proposals/accept", async (request) => {

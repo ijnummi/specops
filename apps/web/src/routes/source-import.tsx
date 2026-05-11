@@ -431,29 +431,33 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
                     }}
                   />
                 </div>
-                <aside className="min-h-0 overflow-auto">
-                  <section className="panel-section">
-                    <h3 className="section-heading">Source evidence</h3>
-                    <div className="mt-2 grid gap-2">
-                      {selectedDetail.data.evidence.sourceFiles.map((sourceFile) => (
-                        <div
-                          key={`${sourceFile.file}:${sourceFile.symbolName}:${sourceFile.line ?? ""}`}
-                          className="rounded border border-slate-200 bg-slate-50 p-2 text-xs"
-                        >
-                          <div className="truncate font-medium text-slate-900">{sourceFile.file}</div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-600">
-                            <span>{sourceFile.symbolKind}</span>
-                            <span className="font-medium text-slate-800">
-                              {sourceFile.symbolName}
-                            </span>
-                            {sourceFile.line ? <span>line {sourceFile.line}</span> : null}
-                            {sourceFile.exported ? <span>exported</span> : null}
+                {selectedDetail.data.proposalType === "source_spec_entity" ? (
+                  <aside className="min-h-0 overflow-auto">
+                    <section className="panel-section">
+                      <h3 className="section-heading">Source evidence</h3>
+                      <div className="mt-2 grid gap-2">
+                        {selectedDetail.data.evidence.sourceFiles.map((sourceFile) => (
+                          <div
+                            key={`${sourceFile.file}:${sourceFile.symbolName}:${sourceFile.line ?? ""}`}
+                            className="rounded border border-slate-200 bg-slate-50 p-2 text-xs"
+                          >
+                            <div className="truncate font-medium text-slate-900">
+                              {sourceFile.file}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-600">
+                              <span>{sourceFile.symbolKind}</span>
+                              <span className="font-medium text-slate-800">
+                                {sourceFile.symbolName}
+                              </span>
+                              {sourceFile.line ? <span>line {sourceFile.line}</span> : null}
+                              {sourceFile.exported ? <span>exported</span> : null}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                </aside>
+                        ))}
+                      </div>
+                    </section>
+                  </aside>
+                ) : null}
               </div>
             </div>
           ) : (

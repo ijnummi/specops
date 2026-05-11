@@ -1453,6 +1453,53 @@ describeWithDb("database-backed routes", () => {
       .resolves.toBe(false);
   });
 
+  it("filters proposal listings by proposal type", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    await pool.query(
+      "insert into ai_proposals (project_id, proposal_type, title, payload_json, evidence_json, confidence, status) values ($1, 'ai_spec_entity', 'Manage projects', $2::jsonb, $3::jsonb, 0.73, 'pending')",
+      [project.id, JSON.stringify(aiProposalPayload()), JSON.stringify(aiProposalEvidence())]
+    );
+
+    const aiResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=pending&proposalType=ai_spec_entity`
+    });
+    const sourceResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=pending&proposalType=source_spec_entity`
+    });
+
+    expect(aiResponse.statusCode).toBe(200);
+    expect(sourceResponse.statusCode).toBe(200);
+    expect(aiResponse.json()).toEqual([
+      expect.objectContaining({
+        proposalType: "ai_spec_entity",
+        entityId: "uc.manage-projects"
+      })
+    ]);
+    expect(sourceResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proposalType: "source_spec_entity",
+          entityId: "interface.decision-service"
+        })
+      ])
+    );
+    expect(
+      (sourceResponse.json() as Array<{ proposalType: string }>).every(
+        (proposal) => proposal.proposalType === "source_spec_entity"
+      )
+    ).toBe(true);
+  });
+
   it("obsoletes prior pending source import proposals on regeneration", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -3189,6 +3236,50 @@ describeWithDb("database-backed routes", () => {
     const proposal = proposals.find((item) => item.id !== proposalId);
     expect(proposal).toBeDefined();
     return proposal!;
+  }
+
+  function aiProposalPayload() {
+    return {
+      entityId: "uc.manage-projects",
+      type: "use_case",
+      title: "Manage projects",
+      status: "draft",
+      filePath: "use-cases/uc.manage-projects.md",
+      generatedMarkdown: "# Manage projects",
+      markdown: "# Manage projects",
+      sourceFiles: ["apps/api/src/routes/projects.ts"],
+      proposedLinks: [
+        {
+          linkType: "uses",
+          targetEntityId: "interface.project-service",
+          targetExists: true,
+          rationale: "The selected route delegates project behavior to the project service."
+        }
+      ]
+    };
+  }
+
+  function aiProposalEvidence() {
+    return {
+      provider: "ollama",
+      model: "qwen2.5-coder:7b",
+      promptVersion: "ai-prefill-v1",
+      selectedSourceFiles: [
+        {
+          file: "apps/api/src/routes/projects.ts",
+          contentHash: "hash-1",
+          excerptStartLine: 1,
+          excerptEndLine: 80
+        }
+      ],
+      claims: [
+        {
+          text: "Project routes expose project creation.",
+          sourceFiles: ["apps/api/src/routes/projects.ts"]
+        }
+      ],
+      warnings: []
+    };
   }
 
   async function expectIndexedSpecReferenceCount(

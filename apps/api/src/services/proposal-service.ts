@@ -4,16 +4,22 @@ import path from "node:path";
 import type {
   AcceptProposalsResponse,
   AcceptProposalsRequest,
+  AiSpecEntityProposalEvidence,
+  AiSpecEntityProposalPayload,
   ProposalDetailDto,
   ProposalPatchRequest,
   ProposalStatus,
   ProposalSummaryDto,
+  ProposalType,
   SourceSpecEntityProposalEvidence,
   SourceSpecEntityProposalPayload
 } from "@specops/contracts";
 import type { ProjectDto } from "@specops/contracts";
 import {
+  aiSpecEntityProposalEvidenceSchema,
+  aiSpecEntityProposalPayloadSchema,
   proposalPatchRequestSchema,
+  proposalTypeSchema,
   sourceSpecEntityProposalEvidenceSchema,
   sourceSpecEntityProposalPayloadSchema
 } from "@specops/contracts";
@@ -50,6 +56,15 @@ type ProposalServiceOptions = {
 };
 
 const sourceSpecEntityProposalType = "source_spec_entity";
+
+type ProposalListFilters = {
+  status?: ProposalStatus;
+  proposalType?: ProposalType;
+};
+
+type SpecEntityProposalPayload =
+  | SourceSpecEntityProposalPayload
+  | AiSpecEntityProposalPayload;
 
 export function createProposalService(db: Db, options: ProposalServiceOptions = {}) {
   const projectService = createProjectService(db);
@@ -122,32 +137,24 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
 
   async function listProposals(
     projectId: string,
-    status?: ProposalStatus
+    filters: ProposalListFilters = {}
   ): Promise<ProposalSummaryDto[]> {
     const project = await projectService.getProject(projectId);
+    const proposalType = filters.proposalType ?? sourceSpecEntityProposalType;
+    const conditions = [
+      eq(aiProposals.projectId, projectId),
+      eq(aiProposals.proposalType, proposalType)
+    ];
 
-    const rows = status
-      ? await db
-          .select()
-          .from(aiProposals)
-          .where(
-            and(
-              eq(aiProposals.projectId, projectId),
-              eq(aiProposals.proposalType, sourceSpecEntityProposalType),
-              eq(aiProposals.status, status)
-            )
-          )
-          .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id))
-      : await db
-          .select()
-          .from(aiProposals)
-          .where(
-            and(
-              eq(aiProposals.projectId, projectId),
-              eq(aiProposals.proposalType, sourceSpecEntityProposalType)
-            )
-          )
-          .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id));
+    if (filters.status) {
+      conditions.push(eq(aiProposals.status, filters.status));
+    }
+
+    const rows = await db
+      .select()
+      .from(aiProposals)
+      .where(and(...conditions))
+      .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id));
 
     return mapSummaries(rows, project);
   }
@@ -254,7 +261,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
           });
         }
 
-        const payload = parsePayload(row);
+        const payload = parseSourcePayload(row);
         const parsed = parseSpecMarkdown(payload.filePath, payload.markdown);
         const errorMessages = parsed.messages.filter((message) => message.level === "error");
         if (errorMessages.length > 0 || !parsed.entity) {
@@ -446,7 +453,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
 
   async function conflictForPayload(
     project: Pick<ProjectDto, "id" | "repoPath" | "specopsPath">,
-    payload: SourceSpecEntityProposalPayload
+    payload: SpecEntityProposalPayload
   ): Promise<ProposalSummaryDto["conflict"]> {
     const [entity] = await db
       .select({ entityId: specEntities.entityId })
@@ -521,12 +528,26 @@ function assertNoDuplicateSelectedTargets(
   }
 }
 
-function parsePayload(row: ProposalRow): SourceSpecEntityProposalPayload {
+function parsePayload(row: ProposalRow): SpecEntityProposalPayload {
+  const proposalType = proposalTypeSchema.parse(row.proposalType);
+
+  if (proposalType === "ai_spec_entity") {
+    return aiSpecEntityProposalPayloadSchema.parse(row.payloadJson);
+  }
+
+  return parseSourcePayload(row);
+}
+
+function parseSourcePayload(row: ProposalRow): SourceSpecEntityProposalPayload {
   return sourceSpecEntityProposalPayloadSchema.parse(row.payloadJson);
 }
 
-function parseEvidence(row: ProposalRow): SourceSpecEntityProposalEvidence {
+function parseSourceEvidence(row: ProposalRow): SourceSpecEntityProposalEvidence {
   return sourceSpecEntityProposalEvidenceSchema.parse(row.evidenceJson);
+}
+
+function parseAiEvidence(row: ProposalRow): AiSpecEntityProposalEvidence {
+  return aiSpecEntityProposalEvidenceSchema.parse(row.evidenceJson);
 }
 
 function mapSummary(
@@ -534,11 +555,12 @@ function mapSummary(
   conflict: ProposalSummaryDto["conflict"]
 ): ProposalSummaryDto {
   const payload = parsePayload(row);
+  const proposalType = proposalTypeSchema.parse(row.proposalType);
 
   return {
     id: row.id,
     projectId: row.projectId,
-    proposalType: sourceSpecEntityProposalType,
+    proposalType,
     status: row.status as ProposalStatus,
     title: row.title,
     entityId: payload.entityId,
@@ -555,10 +577,28 @@ function mapDetail(
   row: ProposalRow,
   conflict: ProposalDetailDto["conflict"]
 ): ProposalDetailDto {
+  const proposalType = proposalTypeSchema.parse(row.proposalType);
+
+  if (proposalType === "ai_spec_entity") {
+    const payload = aiSpecEntityProposalPayloadSchema.parse(row.payloadJson);
+
+    return {
+      ...mapSummary(row, conflict),
+      proposalType: "ai_spec_entity",
+      entityType: payload.type,
+      payload,
+      evidence: parseAiEvidence(row)
+    };
+  }
+
+  const payload = parseSourcePayload(row);
+
   return {
     ...mapSummary(row, conflict),
-    payload: parsePayload(row),
-    evidence: parseEvidence(row)
+    proposalType: "source_spec_entity",
+    entityType: payload.type,
+    payload,
+    evidence: parseSourceEvidence(row)
   };
 }
 
