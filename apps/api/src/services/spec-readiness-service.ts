@@ -18,7 +18,6 @@ import {
 import { asc, eq } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
-import { createProjectHealthService } from "./project-health-service.js";
 
 export type ReadinessLinkInput = {
   id: string;
@@ -47,7 +46,22 @@ export type ReadinessEntityInput = {
   staleTaskEntityIds: string[];
 };
 
+export type ReadinessStaleTaskEntityInput = {
+  entityId: string;
+  title: string;
+  type: string;
+  frontmatterJson: unknown;
+  contentHash: string;
+  updatedAt: Date;
+};
+
 type IndexedValidationMessage = typeof validationMessages.$inferSelect;
+
+type StaleTaskReason =
+  | "missing_source_entity"
+  | "tracked_hash_mismatch"
+  | "source_spec_changed"
+  | "context_spec_changed";
 
 const severityRank: Record<SpecReadinessCheckSeverity, number> = {
   blocker: 0,
@@ -80,6 +94,13 @@ const checkIdRank = [
 ];
 
 const planningLinkTargetTypes = new Set(["domain_entity", "interface", "ui_view", "data_model"]);
+
+const staleReasonRank: Record<StaleTaskReason, number> = {
+  missing_source_entity: 0,
+  tracked_hash_mismatch: 1,
+  source_spec_changed: 2,
+  context_spec_changed: 3
+};
 
 export function createSpecReadinessService(db: Db) {
   return {
@@ -159,6 +180,42 @@ export function buildProjectReadiness(entities: EntityReadinessDto[]): ProjectRe
   };
 }
 
+export function findStaleTaskEntityIds(input: {
+  entities: ReadinessStaleTaskEntityInput[];
+  links: ReadinessLinkInput[];
+}): string[] {
+  const entitiesById = new Map(input.entities.map((entity) => [entity.entityId, entity]));
+  const linkIdsByTaskAndType = new Map<string, Map<string, Set<string>>>();
+
+  for (const link of input.links.filter((item) => item.linkType === "generated_from" || item.linkType === "uses")) {
+    let taskLinks = linkIdsByTaskAndType.get(link.fromEntityId);
+    if (!taskLinks) {
+      taskLinks = new Map();
+      linkIdsByTaskAndType.set(link.fromEntityId, taskLinks);
+    }
+
+    let ids = taskLinks.get(link.linkType);
+    if (!ids) {
+      ids = new Set();
+      taskLinks.set(link.linkType, ids);
+    }
+    ids.add(link.toEntityId);
+  }
+
+  return input.entities
+    .filter((entity) => entity.type === "agent_task")
+    .map((task) => ({
+      entityId: task.entityId,
+      reason: classifyStaleTaskReason(task, entitiesById, linkIdsByTaskAndType.get(task.entityId))
+    }))
+    .filter((task): task is { entityId: string; reason: StaleTaskReason } => task.reason !== null)
+    .sort((left, right) => {
+      const reason = staleReasonRank[left.reason] - staleReasonRank[right.reason];
+      return reason === 0 ? left.entityId.localeCompare(right.entityId) : reason;
+    })
+    .map((task) => task.entityId);
+}
+
 async function assertProjectExists(db: Pick<Db, "select">, projectId: string): Promise<void> {
   const [project] = await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).limit(1);
 
@@ -168,44 +225,44 @@ async function assertProjectExists(db: Pick<Db, "select">, projectId: string): P
 }
 
 async function loadReadinessEntityInputs(db: Db, projectId: string): Promise<ReadinessEntityInput[]> {
-  const [entityRows, linkRows, validationRows, sourceEvidenceRows, sourceFileRows, staleTaskEntityIds] =
-    await Promise.all([
-      db.select().from(specEntities).where(eq(specEntities.projectId, projectId)).orderBy(asc(specEntities.entityId)),
-      db
-        .select()
-        .from(specLinks)
-        .where(eq(specLinks.projectId, projectId))
-        .orderBy(
-          asc(specLinks.fromEntityId),
-          asc(specLinks.toEntityId),
-          asc(specLinks.linkType),
-          asc(specLinks.source)
-        ),
-      db
-        .select()
-        .from(validationMessages)
-        .where(eq(validationMessages.projectId, projectId))
-        .orderBy(
-          asc(validationMessages.entityId),
-          asc(validationMessages.level),
-          asc(validationMessages.code),
-          asc(validationMessages.id)
-        ),
-      db
-        .select({ entityId: sourceSpecLinks.entityId })
-        .from(sourceSpecLinks)
-        .where(eq(sourceSpecLinks.projectId, projectId))
-        .orderBy(asc(sourceSpecLinks.entityId)),
-      db.select({ id: sourceFiles.id }).from(sourceFiles).where(eq(sourceFiles.projectId, projectId)).limit(1),
-      loadStaleTaskEntityIds(db, projectId)
-    ]);
+  const [entityRows, linkRows, validationRows, sourceEvidenceRows, sourceFileRows] = await Promise.all([
+    db.select().from(specEntities).where(eq(specEntities.projectId, projectId)).orderBy(asc(specEntities.entityId)),
+    db
+      .select()
+      .from(specLinks)
+      .where(eq(specLinks.projectId, projectId))
+      .orderBy(
+        asc(specLinks.fromEntityId),
+        asc(specLinks.toEntityId),
+        asc(specLinks.linkType),
+        asc(specLinks.source)
+      ),
+    db
+      .select()
+      .from(validationMessages)
+      .where(eq(validationMessages.projectId, projectId))
+      .orderBy(
+        asc(validationMessages.entityId),
+        asc(validationMessages.level),
+        asc(validationMessages.code),
+        asc(validationMessages.id)
+      ),
+    db
+      .select({ entityId: sourceSpecLinks.entityId })
+      .from(sourceSpecLinks)
+      .where(eq(sourceSpecLinks.projectId, projectId))
+      .orderBy(asc(sourceSpecLinks.entityId)),
+    db.select({ id: sourceFiles.id }).from(sourceFiles).where(eq(sourceFiles.projectId, projectId)).limit(1)
+  ]);
 
   const allEntityIds = entityRows.map((entity) => entity.entityId);
   const entityTypesById = Object.fromEntries(entityRows.map((entity) => [entity.entityId, entity.type]));
   const sourceBackedEntityIds = [...new Set(sourceEvidenceRows.map((row) => row.entityId))].sort();
+  const readinessLinks = linkRows.map(mapReadinessLink);
+  const staleTaskEntityIds = findStaleTaskEntityIds({ entities: entityRows, links: readinessLinks });
   const validationByEntityId = groupValidationByEntityId(validationRows);
-  const incomingLinksByEntityId = groupLinks(linkRows, "toEntityId");
-  const outgoingLinksByEntityId = groupLinks(linkRows, "fromEntityId");
+  const incomingLinksByEntityId = groupLinks(readinessLinks, "toEntityId");
+  const outgoingLinksByEntityId = groupLinks(readinessLinks, "fromEntityId");
 
   return entityRows.map((entity) => ({
     entityId: entity.entityId,
@@ -227,15 +284,6 @@ async function loadReadinessEntityInputs(db: Db, projectId: string): Promise<Rea
   }));
 }
 
-async function loadStaleTaskEntityIds(db: Db, projectId: string): Promise<string[]> {
-  try {
-    const health = await createProjectHealthService(db).getProjectHealth(projectId);
-    return health.staleTasks.samples.map((task) => task.entityId).sort();
-  } catch {
-    return [];
-  }
-}
-
 function groupValidationByEntityId(rows: IndexedValidationMessage[]): Map<string, ValidationMessageDto[]> {
   const result = new Map<string, ValidationMessageDto[]>();
 
@@ -250,24 +298,28 @@ function groupValidationByEntityId(rows: IndexedValidationMessage[]): Map<string
 }
 
 function groupLinks(
-  rows: (typeof specLinks.$inferSelect)[],
+  rows: ReadinessLinkInput[],
   key: "fromEntityId" | "toEntityId"
 ): Map<string, ReadinessLinkInput[]> {
   const result = new Map<string, ReadinessLinkInput[]>();
 
   for (const row of rows) {
     const links = result.get(row[key]) ?? [];
-    links.push({
-      id: row.id,
-      fromEntityId: row.fromEntityId,
-      toEntityId: row.toEntityId,
-      linkType: row.linkType,
-      source: row.source
-    });
+    links.push(row);
     result.set(row[key], links);
   }
 
   return result;
+}
+
+function mapReadinessLink(row: typeof specLinks.$inferSelect): ReadinessLinkInput {
+  return {
+    id: row.id,
+    fromEntityId: row.fromEntityId,
+    toEntityId: row.toEntityId,
+    linkType: row.linkType,
+    source: row.source
+  };
 }
 
 function allEntityChecks(input: ReadinessEntityInput): SpecReadinessCheckDto[] {
@@ -420,7 +472,7 @@ function agentTaskChecks(input: ReadinessEntityInput): SpecReadinessCheckDto[] {
       id: "agent_task_stale",
       severity: "review",
       label: "Agent task may be stale",
-      detail: "Project health indicates this task may need to be refreshed.",
+      detail: "Indexed spec data indicates this task may need to be refreshed.",
       suggestedFix: "Review the task against its source and context specs before implementation.",
       relatedEntityId: null,
       filePath: input.filePath
@@ -439,6 +491,86 @@ function readSourceEntityId(input: ReadinessEntityInput): string | null {
     .filter((link) => link.linkType === "generated_from")
     .sort(compareLinks)[0];
   return generatedFromLink?.toEntityId ?? null;
+}
+
+function classifyStaleTaskReason(
+  task: ReadinessStaleTaskEntityInput,
+  entitiesById: Map<string, ReadinessStaleTaskEntityInput>,
+  linkedIdsByType: Map<string, Set<string>> | undefined
+): StaleTaskReason | null {
+  const frontmatter = readObject(task.frontmatterJson);
+  const sourceEntityId = readString(frontmatter.source_entity);
+  const sourceIds = sourceEntityId ? [sourceEntityId] : [];
+  const contextIds = mergeIds(
+    readFrontmatterLinkIds(frontmatter, "generated_from"),
+    [...(linkedIdsByType?.get("generated_from") ?? [])],
+    readFrontmatterLinkIds(frontmatter, "uses"),
+    [...(linkedIdsByType?.get("uses") ?? [])]
+  ).filter((entityId) => entityId !== sourceEntityId);
+  const trackedHashes = readTrackedSpecHashes(frontmatter.tracked_spec_hashes);
+
+  if (sourceEntityId && !entitiesById.has(sourceEntityId)) return "missing_source_entity";
+  if (trackedHashes && hasTrackedHashMismatch(trackedHashes, entitiesById)) return "tracked_hash_mismatch";
+  if (!trackedHashes && hasNewerLinkedEntity(sourceIds, entitiesById, task.updatedAt)) {
+    return "source_spec_changed";
+  }
+  if (!trackedHashes && hasNewerLinkedEntity(contextIds, entitiesById, task.updatedAt)) {
+    return "context_spec_changed";
+  }
+
+  return null;
+}
+
+function readFrontmatterLinkIds(frontmatter: Record<string, unknown>, linkType: string): string[] {
+  const links = readObject(frontmatter.links);
+  const value = links[linkType];
+
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+
+  return [];
+}
+
+function readTrackedSpecHashes(value: unknown): Record<string, string> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string"
+  );
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function mergeIds(...groups: string[][]): string[] {
+  return [...new Set(groups.flat().filter((id) => id.length > 0))];
+}
+
+function hasTrackedHashMismatch(
+  trackedHashes: Record<string, string>,
+  entitiesById: Map<string, ReadinessStaleTaskEntityInput>
+): boolean {
+  return Object.entries(trackedHashes).some(([entityId, trackedHash]) => {
+    const entity = entitiesById.get(entityId);
+    return !entity || entity.contentHash !== trackedHash;
+  });
+}
+
+function hasNewerLinkedEntity(
+  entityIds: string[],
+  entitiesById: Map<string, ReadinessStaleTaskEntityInput>,
+  taskUpdatedAt: Date
+): boolean {
+  return entityIds.some((entityId) => {
+    const entity = entitiesById.get(entityId);
+    return entity ? entity.updatedAt.getTime() > taskUpdatedAt.getTime() : false;
+  });
 }
 
 function hasValidLinkedSpecs(input: ReadinessEntityInput): boolean {

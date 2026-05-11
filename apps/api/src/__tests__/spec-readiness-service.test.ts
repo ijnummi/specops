@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildEntityReadiness,
   buildProjectReadiness,
+  findStaleTaskEntityIds,
   type ReadinessEntityInput,
-  type ReadinessLinkInput
+  type ReadinessLinkInput,
+  type ReadinessStaleTaskEntityInput
 } from "../services/spec-readiness-service.js";
 
 describe("buildEntityReadiness", () => {
@@ -178,6 +180,67 @@ describe("buildProjectReadiness", () => {
   });
 });
 
+describe("findStaleTaskEntityIds", () => {
+  it("returns every stale agent task instead of capping to health samples", () => {
+    const sourceUpdatedAt = new Date("2026-05-11T12:00:00.000Z");
+    const taskUpdatedAt = new Date("2026-05-11T11:00:00.000Z");
+    const taskIds = Array.from({ length: 7 }, (_, index) => `task.refresh-${index + 1}`);
+    const entities: ReadinessStaleTaskEntityInput[] = [
+      staleEntity({
+        entityId: "uc.checkout",
+        type: "use_case",
+        contentHash: "source-hash",
+        updatedAt: sourceUpdatedAt
+      }),
+      ...taskIds.map((entityId) =>
+        staleEntity({
+          entityId,
+          type: "agent_task",
+          frontmatterJson: { source_entity: "uc.checkout" },
+          updatedAt: taskUpdatedAt
+        })
+      )
+    ];
+
+    expect(findStaleTaskEntityIds({ entities, links: [] })).toEqual(taskIds);
+  });
+
+  it("uses indexed links and tracked hashes when classifying stale agent tasks", () => {
+    const entities: ReadinessStaleTaskEntityInput[] = [
+      staleEntity({
+        entityId: "domain.policy",
+        type: "domain_entity",
+        contentHash: "new-policy-hash",
+        updatedAt: new Date("2026-05-11T11:00:00.000Z")
+      }),
+      staleEntity({
+        entityId: "task.hash",
+        type: "agent_task",
+        frontmatterJson: {
+          source_entity: "domain.policy",
+          tracked_spec_hashes: { "domain.policy": "old-policy-hash" }
+        },
+        updatedAt: new Date("2026-05-11T12:00:00.000Z")
+      }),
+      staleEntity({
+        entityId: "task.context",
+        type: "agent_task",
+        updatedAt: new Date("2026-05-11T10:00:00.000Z")
+      })
+    ];
+
+    expect(
+      findStaleTaskEntityIds({
+        entities,
+        links: [
+          link("task.context", "domain.policy", "uses"),
+          link("task.hash", "domain.policy", "generated_from")
+        ]
+      })
+    ).toEqual(["task.hash", "task.context"]);
+  });
+});
+
 function entityInput(overrides: Partial<ReadinessEntityInput>): ReadinessEntityInput {
   const entityId = overrides.entityId ?? "domain.default";
   const type = overrides.type ?? "domain_entity";
@@ -226,5 +289,18 @@ function validationMessage(id: string, code: string, message: string) {
     code,
     message,
     createdAt: "2026-05-11T00:00:00.000Z"
+  };
+}
+
+function staleEntity(
+  overrides: Partial<ReadinessStaleTaskEntityInput> & Pick<ReadinessStaleTaskEntityInput, "entityId" | "type">
+): ReadinessStaleTaskEntityInput {
+  return {
+    entityId: overrides.entityId,
+    title: overrides.title ?? overrides.entityId,
+    type: overrides.type,
+    frontmatterJson: overrides.frontmatterJson ?? {},
+    contentHash: overrides.contentHash ?? `${overrides.entityId}-hash`,
+    updatedAt: overrides.updatedAt ?? new Date("2026-05-11T00:00:00.000Z")
   };
 }
