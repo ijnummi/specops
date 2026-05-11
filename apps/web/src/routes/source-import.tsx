@@ -14,14 +14,18 @@ import {
 } from "../api/queries.js";
 import { MarkdownEditor } from "../components/markdown-editor.js";
 
+type ProposalMarkdownDraft = {
+  markdown: string;
+  savedMarkdown: string;
+};
+
 export function SourceImportPage({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [checkedProposalIds, setCheckedProposalIds] = useState<Set<string>>(() => new Set());
-  const [markdownDraft, setMarkdownDraft] = useState<{
-    proposalId: string;
-    markdown: string;
-  } | null>(null);
+  const [markdownDrafts, setMarkdownDrafts] = useState<Record<string, ProposalMarkdownDraft>>(
+    () => ({})
+  );
 
   const proposals = useQuery(proposalsQuery(projectId, { status: "pending" }));
   const pendingProposals = useMemo(() => proposals.data ?? [], [proposals.data]);
@@ -37,12 +41,14 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     ...proposalQuery(projectId, effectiveSelectedProposalId ?? ""),
     enabled: effectiveSelectedProposalId !== null
   });
+  const selectedDraft = effectiveSelectedProposalId
+    ? markdownDrafts[effectiveSelectedProposalId]
+    : undefined;
   const editorMarkdown =
-    markdownDraft?.proposalId === effectiveSelectedProposalId
-      ? markdownDraft.markdown
-      : (selectedDetail.data?.payload.markdown ?? "");
-  const isMarkdownDirty =
-    selectedDetail.data !== undefined && editorMarkdown !== selectedDetail.data.payload.markdown;
+    selectedDraft?.markdown ?? selectedDetail.data?.payload.markdown ?? "";
+  const isMarkdownDirty = selectedDraft
+    ? selectedDraft.markdown !== selectedDraft.savedMarkdown
+    : false;
 
   useEffect(() => {
     if (!selectedProposalId && pendingProposals.length > 0) {
@@ -54,6 +60,12 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     setCheckedProposalIds((current) => {
       const next = new Set([...current].filter((proposalId) => pendingProposalIds.has(proposalId)));
       return next.size === current.size ? current : next;
+    });
+    setMarkdownDrafts((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([proposalId]) => pendingProposalIds.has(proposalId))
+      );
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
   }, [pendingProposalIds]);
 
@@ -77,7 +89,7 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     onSuccess: async () => {
       setSelectedProposalId(null);
       setCheckedProposalIds(new Set());
-      setMarkdownDraft(null);
+      setMarkdownDrafts({});
       await invalidateSourceImport();
     }
   });
@@ -86,7 +98,7 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     onSuccess: async () => {
       setSelectedProposalId(null);
       setCheckedProposalIds(new Set());
-      setMarkdownDraft(null);
+      setMarkdownDrafts({});
       await invalidateSourceImport(effectiveSelectedProposalId);
     }
   });
@@ -99,7 +111,10 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
         next.delete(proposalId);
         return next;
       });
-      setMarkdownDraft(null);
+      setMarkdownDrafts((current) => {
+        const { [proposalId]: _removed, ...next } = current;
+        return next;
+      });
       await invalidateSourceImport(proposalId);
     }
   });
@@ -107,16 +122,22 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     mutationFn: ({ proposalId, markdown }: { proposalId: string; markdown: string }) =>
       patchProposal(projectId, proposalId, { markdown }),
     onSuccess: async (updated) => {
-      setMarkdownDraft({ proposalId: updated.id, markdown: updated.payload.markdown });
+      setMarkdownDrafts((current) => ({
+        ...current,
+        [updated.id]: {
+          markdown: updated.payload.markdown,
+          savedMarkdown: updated.payload.markdown
+        }
+      }));
       await invalidateSourceImport(updated.id);
     }
   });
   const selectedCount = checkedProposalIds.size;
-  const isSelectedCheckedAndDirty =
-    effectiveSelectedProposalId !== null &&
-    checkedProposalIds.has(effectiveSelectedProposalId) &&
-    isMarkdownDirty;
-  const acceptBlockMessage = isSelectedCheckedAndDirty
+  const hasDirtyCheckedProposal = [...checkedProposalIds].some((proposalId) => {
+    const draft = markdownDrafts[proposalId];
+    return draft ? draft.markdown !== draft.savedMarkdown : false;
+  });
+  const acceptBlockMessage = hasDirtyCheckedProposal
     ? "Save edits before accepting selected proposals."
     : saveMutation.isPending
       ? "Waiting for markdown save before accepting selected proposals."
@@ -125,7 +146,7 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     selectedCount === 0 ||
     acceptMutation.isPending ||
     saveMutation.isPending ||
-    isSelectedCheckedAndDirty;
+    hasDirtyCheckedProposal;
   const isReviewActionPending =
     generateMutation.isPending ||
     acceptMutation.isPending ||
@@ -288,7 +309,15 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
                     minHeight="0px"
                     className="h-full min-h-0"
                     onChange={(markdown) =>
-                      setMarkdownDraft({ proposalId: selectedDetail.data.id, markdown })
+                      setMarkdownDrafts((current) => ({
+                        ...current,
+                        [selectedDetail.data.id]: {
+                          markdown,
+                          savedMarkdown:
+                            current[selectedDetail.data.id]?.savedMarkdown ??
+                            selectedDetail.data.payload.markdown
+                        }
+                      }))
                     }
                   />
                 </div>

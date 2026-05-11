@@ -60,7 +60,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }) => {
     if (options.queryType === "proposals") {
       return {
-        data: [proposalSummary()],
+        data: proposalSummaries(),
         error: null,
         isLoading: false
       };
@@ -68,9 +68,10 @@ vi.mock("@tanstack/react-query", () => ({
 
     if (options.queryType === "proposal") {
       mocks.proposalQueryOptions.push(options);
+      const proposalId = String(options.queryKey[3]);
 
       return {
-        data: proposalDetail(),
+        data: proposalDetail(proposalId),
         error: null,
         isLoading: false
       };
@@ -142,16 +143,16 @@ describe("SourceImportPage", () => {
     });
     mocks.generateSourceImportProposals.mockReset();
     mocks.generateSourceImportProposals.mockImplementation(() => {
-      return [proposalSummary()];
+      return proposalSummaries();
     });
     mocks.invalidateQueries.mockReset();
     mocks.patchProposal.mockReset();
     mocks.patchProposal.mockImplementation(
       (_projectId: string, proposalId: string, input: { markdown?: string; status?: string }) => {
-        return proposalDetail({
-          id: proposalId,
+        const detail = proposalDetail(proposalId);
+        return proposalDetail(proposalId, {
           markdown: input.markdown ?? proposalDetail().payload.markdown,
-          status: input.status ?? "pending"
+          status: input.status ?? detail.status
         });
       }
     );
@@ -249,6 +250,24 @@ describe("SourceImportPage", () => {
       proposalIds: ["proposal-1"]
     });
   });
+
+  it("blocks accepting a dirty checked proposal after selecting another clean proposal", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await changeCheckbox(container, "Select DecisionService", true);
+    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nUnsaved.");
+    await clickButton(container, "ReviewPolicy");
+
+    expect(textarea(container, "Proposal markdown").value).toContain("ReviewPolicy");
+    expect(button(container, "Accept selected").disabled).toBe(true);
+    expect(container.textContent).toContain("Save edits before accepting selected proposals.");
+
+    await clickButton(container, "Accept selected");
+
+    expect(mocks.acceptProposals).not.toHaveBeenCalledWith("project-1", {
+      proposalIds: ["proposal-1"]
+    });
+  });
 });
 
 async function renderSourceImportPage() {
@@ -332,17 +351,39 @@ function waitForRender() {
   });
 }
 
-function proposalSummary() {
+function proposalSummaries() {
+  return [
+    proposalSummary("proposal-1"),
+    proposalSummary("proposal-2", {
+      title: "ReviewPolicy",
+      entityId: "domain.review-policy",
+      entityType: "domain_entity",
+      filePath: "domain/review-policy.md",
+      confidence: 0.88
+    })
+  ];
+}
+
+function proposalSummary(
+  id = "proposal-1",
+  overrides: {
+    confidence?: number;
+    entityId?: string;
+    entityType?: string;
+    filePath?: string;
+    title?: string;
+  } = {}
+) {
   return {
-    id: "proposal-1",
+    id,
     projectId: "project-1",
     proposalType: "source_spec_entity",
     status: "pending",
-    title: "DecisionService",
-    entityId: "interfaces.decision-service",
-    entityType: "interface",
-    filePath: "interfaces/decision-service.md",
-    confidence: 0.92,
+    title: overrides.title ?? "DecisionService",
+    entityId: overrides.entityId ?? "interfaces.decision-service",
+    entityType: overrides.entityType ?? "interface",
+    filePath: overrides.filePath ?? "interfaces/decision-service.md",
+    confidence: overrides.confidence ?? 0.92,
     conflict: { status: "none" },
     createdAt: "2026-05-11T10:00:00.000Z",
     reviewedAt: null
@@ -350,29 +391,32 @@ function proposalSummary() {
 }
 
 function proposalDetail(
-  overrides: { id?: string; markdown?: string; status?: string } = {}
+  id = "proposal-1",
+  overrides: { markdown?: string; status?: string } = {}
 ) {
-  const summary = proposalSummary();
+  const summary =
+    proposalSummaries().find((candidate) => candidate.id === id) ?? proposalSummary(id);
+  const title = summary.title;
+  const type = summary.entityType;
 
   return {
     ...summary,
-    id: overrides.id ?? summary.id,
     status: overrides.status ?? summary.status,
     payload: {
-      entityId: "interfaces.decision-service",
-      type: "interface",
-      title: "DecisionService",
+      entityId: summary.entityId,
+      type,
+      title,
       status: "draft",
-      filePath: "interfaces/decision-service.md",
-      generatedMarkdown: "# DecisionService",
-      markdown: overrides.markdown ?? "# DecisionService\n\nCoordinates policy decisions.",
-      sourceFiles: ["apps/api/src/decision-service.ts"],
+      filePath: summary.filePath,
+      generatedMarkdown: `# ${title}`,
+      markdown: overrides.markdown ?? `# ${title}\n\nCoordinates policy decisions.`,
+      sourceFiles: [`apps/api/src/${title.toLowerCase()}.ts`],
       symbols: [
         {
-          name: "DecisionService",
+          name: title,
           kind: "class",
           exported: true,
-          file: "apps/api/src/decision-service.ts",
+          file: `apps/api/src/${title.toLowerCase()}.ts`,
           line: 12
         }
       ]
@@ -381,8 +425,8 @@ function proposalDetail(
       scanner: "typescript",
       sourceFiles: [
         {
-          file: "apps/api/src/decision-service.ts",
-          symbolName: "DecisionService",
+          file: `apps/api/src/${title.toLowerCase()}.ts`,
+          symbolName: title,
           symbolKind: "class",
           exported: true,
           line: 12
