@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import type { Db } from "@specops/db";
 import { projects, specEntities, specFiles, specLinks, validationMessages } from "@specops/db";
@@ -10,6 +12,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createIndexerService } from "../services/indexer-service.js";
+import { readGitStatus } from "../services/git-service.js";
 import { createProjectService } from "../services/project-service.js";
 import { createSpecopsInitializerService } from "../services/specops-initializer.js";
 
@@ -145,6 +148,52 @@ describeWithDb("indexProject", () => {
       errors: 0,
       warnings: 0
     });
+  });
+
+  it("records the current git commit when indexing a git repository", async () => {
+    const { projectId, repoPath, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "tasks/TASK-1.md",
+      specMarkdown({
+        id: "TASK-1",
+        type: "task",
+        title: "Build indexer",
+        status: "draft",
+        body: "Implement the derived cache indexer."
+      })
+    );
+    await git(repoPath, ["init"]);
+    await git(repoPath, ["config", "user.email", "specops@example.test"]);
+    await git(repoPath, ["config", "user.name", "SpecOps Test"]);
+    await git(repoPath, ["add", "."]);
+    await git(repoPath, ["commit", "-m", "initial"]);
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: repoPath });
+    const expectedCommit = stdout.trim();
+
+    const result = await createIndexerService(db).indexProject(projectId);
+
+    expect(result.gitCommit).toBe(expectedCommit);
+  });
+
+  it("keeps indexing successful with null git commit outside git", async () => {
+    const { projectId, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "tasks/TASK-1.md",
+      specMarkdown({
+        id: "TASK-1",
+        type: "task",
+        title: "Build indexer",
+        status: "draft",
+        body: "Implement the derived cache indexer."
+      })
+    );
+
+    const result = await createIndexerService(db).indexProject(projectId);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.gitCommit).toBeNull();
   });
 
   it("waits on the per-project advisory lock before indexing", async () => {
@@ -413,7 +462,7 @@ describeWithDb("indexProject", () => {
     });
     fixtureProjectIds.push(project.id);
 
-    return { projectId: project.id, root, specopsPath };
+    return { projectId: project.id, root, repoPath: root, specopsPath };
   }
 
   async function insertProjectRow(input: {
@@ -452,6 +501,39 @@ describeWithDb("indexProject", () => {
     expect(warnings).toHaveLength(expected.warnings);
   }
 });
+
+describe("readGitStatus", () => {
+  const tempRoots: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  it("includes status entries by default", async () => {
+    const repoPath = await mkdtemp(path.join(os.tmpdir(), "specops-api-git-"));
+    tempRoots.push(repoPath);
+    await git(repoPath, ["init"]);
+    await writeFile(path.join(repoPath, "dirty.txt"), "dirty\n");
+
+    const status = await readGitStatus(repoPath);
+
+    expect(status.isRepo).toBe(true);
+    expect(status.entries).toEqual([
+      {
+        indexStatus: "?",
+        workTreeStatus: "?",
+        path: "dirty.txt",
+        originalPath: null
+      }
+    ]);
+  });
+});
+
+const execFileAsync = promisify(execFile);
+
+async function git(cwd: string, args: string[]) {
+  await execFileAsync("git", args, { cwd });
+}
 
 async function writeSpecFile(specopsPath: string, relativePath: string, content: string) {
   const absolutePath = path.join(specopsPath, relativePath);

@@ -15,6 +15,7 @@ import {
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
+import { readGitHeadCommit } from "./git-service.js";
 import { createProjectService } from "./project-service.js";
 import { createSourceScanService } from "./source-scan-service.js";
 
@@ -40,6 +41,8 @@ export function createIndexerService(db: Db) {
       if (!startedRun) {
         throw new Error("Failed to create index run");
       }
+
+      const gitCommit = await readGitHeadCommit(repoPath).catch(() => null);
 
       try {
         const [finishedRun] = await db.transaction(async (tx) => {
@@ -195,7 +198,8 @@ export function createIndexerService(db: Db) {
               sourceFileCount: sourceCounts.sourceFileCount,
               sourceImportCount: sourceCounts.sourceImportCount,
               sourceExportCount: sourceCounts.sourceExportCount,
-              sourceSymbolCount: sourceCounts.sourceSymbolCount
+              sourceSymbolCount: sourceCounts.sourceSymbolCount,
+              gitCommit
             })
             .where(eq(indexRuns.id, startedRun.id))
             .returning();
