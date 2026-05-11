@@ -4,6 +4,8 @@ import type {
   AcceptProposalsResponse,
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
+  AiPrefillDiagnostic,
+  AiPrefillGenerateRequest,
   ChangeImpactPreviewQuery,
   ChangeImpactPreviewResponseDto,
   CreateEntityRequest,
@@ -24,6 +26,8 @@ import type {
   SaveAgentTaskResponse,
   SpecEntityDto,
   SpecLinkDto,
+  SourceFileListQuery,
+  SourceFileSummaryDto,
   SourceSpecLinkDto,
   ValidationMessageDto
 } from "@specops/contracts";
@@ -68,6 +72,11 @@ export type AdminDatabaseRowsDto = {
   limit: number;
 };
 
+export type AiPrefillGenerateResponse = {
+  proposals: ProposalSummaryDto[];
+  diagnostics: AiPrefillDiagnostic[];
+};
+
 export const queryKeys = {
   adminDatabaseTables: ["admin", "database", "tables"] as const,
   adminDatabaseSchema: (table: string) => ["admin", "database", table, "schema"] as const,
@@ -86,6 +95,8 @@ export const queryKeys = {
     ["projects", projectId, "proposals", input] as const,
   proposal: (projectId: string, proposalId: string) =>
     ["projects", projectId, "proposals", proposalId] as const,
+  sourceFiles: (projectId: string, input: SourceFileListQuery) =>
+    ["projects", projectId, "source-files", input] as const,
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
   entity: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId] as const,
@@ -166,6 +177,34 @@ export function proposalQuery(projectId: string, proposalId: string) {
         `/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(
           proposalId
         )}`
+      )
+  });
+}
+
+export function sourceFilesQuery(projectId: string, input: SourceFileListQuery) {
+  const search = new URLSearchParams();
+  if (input.language) {
+    search.set("language", input.language);
+  }
+  if (input.kind) {
+    search.set("kind", input.kind);
+  }
+  if (input.q) {
+    search.set("q", input.q);
+  }
+  if (input.limit !== undefined) {
+    search.set("limit", String(input.limit));
+  }
+  if (input.offset !== undefined) {
+    search.set("offset", String(input.offset));
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+
+  return queryOptions({
+    queryKey: queryKeys.sourceFiles(projectId, input),
+    queryFn: () =>
+      apiGet<SourceFileSummaryDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/source-files${suffix}`
       )
   });
 }
@@ -396,6 +435,17 @@ export function generateSourceImportProposals(projectId: string) {
   return apiSend<ProposalSummaryDto[]>(
     "POST",
     `/api/projects/${encodeURIComponent(projectId)}/proposals/source-import`
+  );
+}
+
+export function generateAiPrefillProposals(
+  projectId: string,
+  input: AiPrefillGenerateRequest
+) {
+  return apiSend<AiPrefillGenerateResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/proposals/ai-prefill`,
+    input
   );
 }
 

@@ -8,6 +8,7 @@ import {
 
 import { AdminDatabasePage } from "./routes/admin-database.js";
 import type { AdminDatabaseMode } from "./routes/admin-database.js";
+import { AiPrefillPage } from "./routes/ai-prefill.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
 import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
@@ -99,6 +100,15 @@ const sourceImportRoute = createRoute({
   }
 });
 
+const aiPrefillRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/ai-prefill",
+  component: () => {
+    const { projectId } = aiPrefillRoute.useParams();
+    return <AiPrefillPage projectId={projectId} />;
+  }
+});
+
 const impactRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/impact/$entityId",
@@ -143,6 +153,7 @@ const routeTree = rootRoute.addChildren([
   projectRoute,
   entityRoute,
   sourceImportRoute,
+  aiPrefillRoute,
   impactRoute,
   changeImpactRoute
 ]);
