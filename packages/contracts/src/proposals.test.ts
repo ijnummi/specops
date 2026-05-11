@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   acceptProposalsRequestSchema,
   aiPrefillGenerateRequestSchema,
+  aiPrefillGenerateResponseSchema,
   aiSpecEntityProposalEvidenceSchema,
   aiSpecEntityProposalPayloadSchema,
   proposalDetailSchema,
@@ -142,6 +143,30 @@ describe("proposal contracts", () => {
         temperature: 2.1
       })
     ).toThrow();
+  });
+
+  it("parses AI prefill generate responses", () => {
+    const parsed = aiPrefillGenerateResponseSchema.parse({
+      proposals: [
+        {
+          ...proposalSummary(),
+          proposalType: "ai_spec_entity",
+          title: "Manage projects",
+          entityId: "uc.manage-projects",
+          entityType: "use_case",
+          filePath: "use-cases/uc.manage-projects.md"
+        }
+      ],
+      diagnostics: [
+        {
+          level: "warning",
+          message: "Skipped duplicate entity id."
+        }
+      ]
+    });
+
+    expect(parsed.proposals[0]?.proposalType).toBe("ai_spec_entity");
+    expect(parsed.diagnostics[0]?.level).toBe("warning");
   });
 
   it("parses AI spec entity proposal payloads", () => {

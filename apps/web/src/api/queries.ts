@@ -4,8 +4,8 @@ import type {
   AcceptProposalsResponse,
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
-  AiPrefillDiagnostic,
   AiPrefillGenerateRequest,
+  AiPrefillGenerateResponse,
   ChangeImpactPreviewQuery,
   ChangeImpactPreviewResponseDto,
   CreateEntityRequest,
@@ -70,11 +70,6 @@ export type AdminDatabaseRowsDto = {
   table: string;
   rows: Array<Record<string, unknown>>;
   limit: number;
-};
-
-export type AiPrefillGenerateResponse = {
-  proposals: ProposalSummaryDto[];
-  diagnostics: AiPrefillDiagnostic[];
 };
 
 export const queryKeys = {

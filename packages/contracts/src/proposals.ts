@@ -139,6 +139,11 @@ export const proposalSummarySchema = z.discriminatedUnion("proposalType", [
   aiSpecEntityProposalSummarySchema
 ]);
 
+export const aiPrefillGenerateResponseSchema = z.object({
+  proposals: z.array(proposalSummarySchema),
+  diagnostics: z.array(aiPrefillDiagnosticSchema)
+});
+
 export const sourceSpecEntityProposalDetailSchema = sourceSpecEntityProposalSummarySchema.extend({
   payload: sourceSpecEntityProposalPayloadSchema,
   evidence: sourceSpecEntityProposalEvidenceSchema
@@ -197,6 +202,7 @@ export type SourceSpecEntityProposalDetail = z.infer<
 >;
 export type AiSpecEntityProposalDetail = z.infer<typeof aiSpecEntityProposalDetailSchema>;
 export type AiPrefillGenerateRequest = z.infer<typeof aiPrefillGenerateRequestSchema>;
+export type AiPrefillGenerateResponse = z.infer<typeof aiPrefillGenerateResponseSchema>;
 export type AiPrefillDiagnostic = z.infer<typeof aiPrefillDiagnosticSchema>;
 export type ProposalConflictDto = z.infer<typeof proposalConflictSchema>;
 export type ProposalConflict = ProposalConflictDto;
