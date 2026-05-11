@@ -37,6 +37,7 @@ describe("ProjectOverviewDashboard", () => {
     expect(html).toContain("Project Health");
     expect(html).toContain("Latest index");
     expect(html).toContain("Git &amp; Drift");
+    expect(html).toContain("xl:grid-cols-2 2xl:grid-cols-[1.3fr_1fr_1fr]");
     expect(html).toContain("Spec Inventory");
     expect(html).toContain("Source Inventory");
     expect(html).toContain("Source Evidence");

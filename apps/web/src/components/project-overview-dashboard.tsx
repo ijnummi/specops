@@ -30,7 +30,7 @@ export function ProjectOverviewDashboard({
 }: ProjectOverviewDashboardProps) {
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-auto">
-      <section className="grid gap-3 xl:grid-cols-[1.3fr_1fr_1fr]">
+      <section className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-[1.3fr_1fr_1fr]">
         <Panel title="Project Health" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />}>
           <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 xl:grid-cols-4">
             <Metric label="Entities" value={overview.project.entityCount} />
