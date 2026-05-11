@@ -145,13 +145,12 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
       })
     );
 
-    await revalidateSelectedSourceFiles(repoPath, selectedSourceRows);
-
     await db.transaction(async (tx) => {
       const now = new Date();
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:ai_spec_entity`}, 0))`
       );
+      await revalidateSelectedSourceFiles(repoPath, selectedSourceRows);
       await tx
         .update(aiProposals)
         .set({ status: "obsolete", reviewedAt: now })

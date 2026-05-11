@@ -1775,6 +1775,55 @@ describeWithDb("database-backed routes", () => {
     await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
   });
 
+  it("rejects AI generation when selected source file changes while waiting for write lock", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          providerCalled = true;
+          return aiPrefillProviderResult(input.model, "uc.manage-projects", "Manage projects");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    const lockClient = await pool.connect();
+
+    try {
+      await lockClient.query("begin");
+      await lockClient.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `${project.id}:ai_spec_entity`
+      ]);
+
+      const responsePromise = app.inject({
+        method: "POST",
+        url: `/api/projects/${project.id}/proposals/ai-prefill`,
+        payload: {
+          sourceFileIds: [sourceFile.id],
+          provider: "ollama",
+          model: "fake-local-model",
+          temperature: 0.1
+        }
+      });
+
+      await waitForAdvisoryLockWaiter();
+      await writeFile(path.join(project.repoPath, "src", "projects.ts"), "export const changed = true;\n");
+      await lockClient.query("commit");
+
+      const response = await responsePromise;
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.message).toBe(
+        "Selected source file changed since indexing; re-index before AI Prefill"
+      );
+      expect(providerCalled).toBe(true);
+      await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+    } finally {
+      await lockClient.query("rollback").catch(() => undefined);
+      lockClient.release();
+    }
+  });
+
   it("keeps only one pending AI proposal batch when concurrent generations finish together", async () => {
     const entered = createDeferred<void>();
     const release = createDeferred<void>();
@@ -3964,6 +4013,20 @@ describeWithDb("database-backed routes", () => {
       [projectId]
     );
     return result.rows[0].count;
+  }
+
+  async function waitForAdvisoryLockWaiter(): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const result = await pool.query<{ count: number }>(
+        "select count(*)::int as count from pg_locks where locktype = 'advisory' and granted = false"
+      );
+      if (result.rows[0].count > 0) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Timed out waiting for advisory lock waiter");
   }
 
   async function readProposalStatus(proposalId: string): Promise<string | null> {
