@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
     checks: []
   } satisfies EntityReadinessDto,
   invalidateQueries: vi.fn(),
+  navigate: vi.fn(),
   mutationOptions: [] as Array<{
     onSuccess?: (data: unknown, variables: unknown) => unknown;
   }>
@@ -92,7 +93,8 @@ vi.mock("@tanstack/react-router", () => ({
       : "";
 
     return <a href={`${href}${query}`}>{children}</a>;
-  }
+  },
+  useNavigate: () => mocks.navigate
 }));
 
 vi.mock("../api/queries.js", () => ({
@@ -103,6 +105,7 @@ vi.mock("../api/queries.js", () => ({
   outgoingLinksQuery: () => ({ queryKey: ["outgoing-links"] }),
   previewAgentTask: vi.fn(),
   queryKeys: {
+    agentRunsRoot: (projectId: string) => ["agent-runs", projectId],
     backlinks: (projectId: string, entityId: string) => ["backlinks", projectId, entityId],
     entities: (projectId: string) => ["entities", projectId],
     entity: (projectId: string, entityId: string) => ["entity", projectId, entityId],
@@ -121,6 +124,7 @@ vi.mock("../api/queries.js", () => ({
     validation: (projectId: string) => ["validation", projectId]
   },
   saveAgentTask: vi.fn(),
+  startAgentRun: vi.fn(),
   updateEntityMarkdown: vi.fn(),
   validationMessagesQuery: () => ({ queryKey: ["validation"] })
 }));
@@ -146,7 +150,21 @@ import { EntityDetail } from "./entity-detail.js";
 describe("EntityDetail", () => {
   beforeEach(() => {
     mocks.invalidateQueries.mockReset();
+    mocks.navigate.mockReset();
     mocks.mutationOptions = [];
+    mocks.entity = {
+      ...mocks.entity,
+      entityId: "domain.decision",
+      type: "domain_entity",
+      title: "Decision",
+      filePath: "spec/domain/decision.md",
+      frontmatter: {
+        id: "domain.decision",
+        type: "domain_entity",
+        title: "Decision",
+        status: "draft"
+      }
+    };
   });
 
   it("links the loaded entity to the impact views", () => {
@@ -221,6 +239,35 @@ describe("EntityDetail", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["project-readiness", "project-1"]
     });
+  });
+
+  it("renders a start agent run action for loaded agent task entities", () => {
+    mocks.entity = {
+      ...mocks.entity,
+      id: "entity-task-1",
+      entityId: "task.domain-decision",
+      type: "agent_task",
+      title: "Task",
+      filePath: "tasks/domain-decision.md",
+      frontmatter: {
+        id: "task.domain-decision",
+        type: "agent_task",
+        title: "Task",
+        status: "draft"
+      }
+    };
+
+    const html = renderEntityDetail();
+
+    expect(html).toContain("Start Agent Run");
+  });
+
+  it("does not render a start agent run action for loaded non-agent task entities", () => {
+    mocks.entity = { ...mocks.entity, type: "domain_entity" };
+
+    const html = renderEntityDetail();
+
+    expect(html).not.toContain("Start Agent Run");
   });
 });
 

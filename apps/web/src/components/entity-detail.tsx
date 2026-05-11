@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { AgentTaskPreviewRequest, AgentTaskPreviewResponse } from "@specops/contracts";
-import { Bot, Network, Save, Sparkles } from "lucide-react";
+import { Bot, Network, Play, Save, Sparkles } from "lucide-react";
 
 import {
   backlinksQuery,
@@ -13,6 +13,7 @@ import {
   previewAgentTask,
   queryKeys,
   saveAgentTask,
+  startAgentRun,
   updateEntityMarkdown,
   validationMessagesQuery
 } from "../api/queries.js";
@@ -60,6 +61,7 @@ export function EntityDetail({
   onBeforeSelect
 }: EntityDetailProps) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const currentEntityIdRef = useRef(entityId);
   const currentProjectIdRef = useRef(projectId);
   const entity = useQuery(entityQuery(projectId, entityId));
@@ -234,6 +236,21 @@ export function EntityDetail({
     }
   });
 
+  const startRunMutation = useMutation({
+    mutationFn: () =>
+      startAgentRun(projectId, {
+        taskEntityId: entityId,
+        agent: taskTargetAgent.trim() || defaultTargetAgent()
+      }),
+    onSuccess: async (run) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agentRunsRoot(projectId) });
+      await navigate({
+        to: "/projects/$projectId/agent-runs/$runId",
+        params: { projectId, runId: run.id }
+      });
+    }
+  });
+
   function handleSave() {
     const validation = validateEntityMarkdownIdentity(editorMarkdown, entityId);
 
@@ -360,6 +377,17 @@ export function EntityDetail({
                   <Bot className="h-4 w-4" aria-hidden="true" />
                   Generate Task
                 </button>
+                {entity.data.type === "agent_task" ? (
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    disabled={startRunMutation.isPending || isDirty}
+                    onClick={() => startRunMutation.mutate()}
+                  >
+                    <Play className="h-4 w-4" aria-hidden="true" />
+                    Start Agent Run
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="button-primary"
@@ -398,6 +426,9 @@ export function EntityDetail({
       {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
       {mutation.error ? <p className="text-sm text-red-700">{mutation.error.message}</p> : null}
       {taskPreviewError ? <p className="text-sm text-red-700">{taskPreviewError}</p> : null}
+      {startRunMutation.error ? (
+        <p className="text-sm text-red-700">{startRunMutation.error.message}</p>
+      ) : null}
 
       {taskPreview ? (
         <AgentTaskPreview
