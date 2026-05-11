@@ -33,9 +33,6 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     selectedProposalId && pendingProposalIds.has(selectedProposalId)
       ? selectedProposalId
       : (pendingProposals[0]?.id ?? null);
-  const selectedProposal = pendingProposals.find(
-    (proposal) => proposal.id === effectiveSelectedProposalId
-  );
   const selectedDetail = useQuery({
     ...proposalQuery(projectId, effectiveSelectedProposalId ?? ""),
     enabled: effectiveSelectedProposalId !== null
@@ -115,6 +112,20 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     }
   });
   const selectedCount = checkedProposalIds.size;
+  const isSelectedCheckedAndDirty =
+    effectiveSelectedProposalId !== null &&
+    checkedProposalIds.has(effectiveSelectedProposalId) &&
+    isMarkdownDirty;
+  const acceptBlockMessage = isSelectedCheckedAndDirty
+    ? "Save edits before accepting selected proposals."
+    : saveMutation.isPending
+      ? "Waiting for markdown save before accepting selected proposals."
+      : null;
+  const isAcceptDisabled =
+    selectedCount === 0 ||
+    acceptMutation.isPending ||
+    saveMutation.isPending ||
+    isSelectedCheckedAndDirty;
   const isReviewActionPending =
     generateMutation.isPending ||
     acceptMutation.isPending ||
@@ -171,13 +182,21 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
           <button
             type="button"
             className="button-primary"
-            disabled={selectedCount === 0 || acceptMutation.isPending}
-            onClick={() => acceptMutation.mutate()}
+            disabled={isAcceptDisabled}
+            onClick={() => {
+              if (isAcceptDisabled) {
+                return;
+              }
+              acceptMutation.mutate();
+            }}
           >
             <Check className="h-4 w-4" aria-hidden="true" />
             Accept selected
           </button>
         </div>
+        {acceptBlockMessage ? (
+          <p className="basis-full text-xs text-amber-700">{acceptBlockMessage}</p>
+        ) : null}
       </div>
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[380px_minmax(0,1fr)]">
         <aside className="min-h-0 overflow-hidden rounded border border-slate-200 bg-white">

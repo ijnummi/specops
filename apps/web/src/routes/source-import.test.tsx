@@ -1,5 +1,9 @@
+// @vitest-environment happy-dom
+
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acceptProposals: vi.fn(),
@@ -41,34 +45,22 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useMutation: (options: { mutationFn: () => unknown; onSuccess?: () => unknown }) => ({
+  useMutation: (options: {
+    mutationFn: (variables?: unknown) => unknown;
+    onSuccess?: (data: unknown, variables: unknown) => unknown;
+  }) => ({
     error: null,
     isPending: false,
-    mutate: () => {
-      const result = options.mutationFn();
-      void options.onSuccess?.();
+    mutate: (variables?: unknown) => {
+      const result = options.mutationFn(variables);
+      void options.onSuccess?.(result, variables);
       return result;
     }
   }),
   useQuery: (options: { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }) => {
     if (options.queryType === "proposals") {
       return {
-        data: [
-          {
-            id: "proposal-1",
-            projectId: "project-1",
-            proposalType: "source_spec_entity",
-            status: "pending",
-            title: "DecisionService",
-            entityId: "interfaces.decision-service",
-            entityType: "interface",
-            filePath: "interfaces/decision-service.md",
-            confidence: 0.92,
-            conflict: { status: "none" },
-            createdAt: "2026-05-11T10:00:00.000Z",
-            reviewedAt: null
-          }
-        ],
+        data: [proposalSummary()],
         error: null,
         isLoading: false
       };
@@ -78,51 +70,7 @@ vi.mock("@tanstack/react-query", () => ({
       mocks.proposalQueryOptions.push(options);
 
       return {
-        data: {
-          id: "proposal-1",
-          projectId: "project-1",
-          proposalType: "source_spec_entity",
-          status: "pending",
-          title: "DecisionService",
-          entityId: "interfaces.decision-service",
-          entityType: "interface",
-          filePath: "interfaces/decision-service.md",
-          confidence: 0.92,
-          conflict: { status: "none" },
-          createdAt: "2026-05-11T10:00:00.000Z",
-          reviewedAt: null,
-          payload: {
-            entityId: "interfaces.decision-service",
-            type: "interface",
-            title: "DecisionService",
-            status: "draft",
-            filePath: "interfaces/decision-service.md",
-            generatedMarkdown: "# DecisionService",
-            markdown: "# DecisionService\n\nCoordinates policy decisions.",
-            sourceFiles: ["apps/api/src/decision-service.ts"],
-            symbols: [
-              {
-                name: "DecisionService",
-                kind: "class",
-                exported: true,
-                file: "apps/api/src/decision-service.ts",
-                line: 12
-              }
-            ]
-          },
-          evidence: {
-            scanner: "typescript",
-            sourceFiles: [
-              {
-                file: "apps/api/src/decision-service.ts",
-                symbolName: "DecisionService",
-                symbolKind: "class",
-                exported: true,
-                line: 12
-              }
-            ]
-          }
-        },
+        data: proposalDetail(),
         error: null,
         isLoading: false
       };
@@ -164,22 +112,63 @@ vi.mock("../api/queries.js", () => ({
 }));
 
 vi.mock("../components/markdown-editor.js", () => ({
-  MarkdownEditor: ({ value }: { value: string; onChange: (value: string) => void }) => (
-    <textarea readOnly value={value} />
+  MarkdownEditor: ({
+    onChange,
+    value
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+  }) => (
+    <textarea
+      aria-label="Proposal markdown"
+      value={value}
+      onInput={(event) => onChange(event.currentTarget.value)}
+    />
   )
 }));
 
 import { SourceImportPage } from "./source-import.js";
 
+const roots: Root[] = [];
+const containers: HTMLElement[] = [];
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("SourceImportPage", () => {
   beforeEach(() => {
     mocks.acceptProposals.mockReset();
+    mocks.acceptProposals.mockImplementation((projectId: string, input: unknown) => {
+      return { acceptedProposalIds: (input as { proposalIds: string[] }).proposalIds };
+    });
     mocks.generateSourceImportProposals.mockReset();
+    mocks.generateSourceImportProposals.mockImplementation(() => {
+      return [proposalSummary()];
+    });
     mocks.invalidateQueries.mockReset();
     mocks.patchProposal.mockReset();
+    mocks.patchProposal.mockImplementation(
+      (_projectId: string, proposalId: string, input: { markdown?: string; status?: string }) => {
+        return proposalDetail({
+          id: proposalId,
+          markdown: input.markdown ?? proposalDetail().payload.markdown,
+          status: input.status ?? "pending"
+        });
+      }
+    );
     mocks.proposalQuery.mockClear();
     mocks.proposalQueryOptions = [];
     mocks.proposalsQuery.mockClear();
+  });
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      act(() => {
+        root.unmount();
+      });
+    }
+    for (const container of containers.splice(0)) {
+      container.remove();
+    }
   });
 
   it("renders pending proposal review content from cached data", () => {
@@ -204,4 +193,201 @@ describe("SourceImportPage", () => {
       })
     );
   });
+
+  it("accepts checked proposals by id", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await changeCheckbox(container, "Select DecisionService", true);
+    await clickButton(container, "Accept selected");
+
+    expect(mocks.acceptProposals).toHaveBeenCalledWith("project-1", {
+      proposalIds: ["proposal-1"]
+    });
+  });
+
+  it("saves markdown edits through the proposal patch API", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nEdited.");
+    await clickButton(container, "Save markdown");
+
+    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "proposal-1", {
+      markdown: "# DecisionService\n\nEdited."
+    });
+  });
+
+  it("rejects the selected proposal through the proposal patch API", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await clickButton(container, "Reject");
+
+    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "proposal-1", {
+      status: "rejected"
+    });
+  });
+
+  it("generates source import proposals", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await clickButton(container, "Generate proposals");
+
+    expect(mocks.generateSourceImportProposals).toHaveBeenCalledWith("project-1");
+  });
+
+  it("blocks accepting a checked proposal with unsaved editor changes", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await changeCheckbox(container, "Select DecisionService", true);
+    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nUnsaved.");
+
+    expect(button(container, "Accept selected").disabled).toBe(true);
+    expect(container.textContent).toContain("Save edits before accepting selected proposals.");
+
+    await clickButton(container, "Accept selected");
+
+    expect(mocks.acceptProposals).not.toHaveBeenCalledWith("project-1", {
+      proposalIds: ["proposal-1"]
+    });
+  });
 });
+
+async function renderSourceImportPage() {
+  const container = document.createElement("div");
+  document.body.append(container);
+  containers.push(container);
+  const root = createRoot(container);
+  roots.push(root);
+
+  await act(async () => {
+    root.render(<SourceImportPage projectId="project-1" />);
+  });
+
+  await act(async () => {
+    await waitForRender();
+  });
+
+  return { container };
+}
+
+async function clickButton(container: HTMLElement, label: string) {
+  const target = button(container, label);
+
+  await act(async () => {
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await waitForRender();
+  });
+}
+
+async function changeCheckbox(container: HTMLElement, label: string, checked: boolean) {
+  const target = input(container, label);
+
+  await act(async () => {
+    if (target.checked !== checked) {
+      target.click();
+    }
+    await waitForRender();
+  });
+}
+
+async function changeTextarea(container: HTMLElement, label: string, value: string) {
+  const target = textarea(container, label);
+  target.value = value;
+
+  await act(async () => {
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    await waitForRender();
+  });
+}
+
+function button(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("button")).find((candidate) =>
+    candidate.textContent?.includes(label)
+  );
+
+  expect(target).toBeDefined();
+  return target!;
+}
+
+function input(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("input")).find(
+    (candidate) => candidate.getAttribute("aria-label") === label
+  );
+
+  expect(target).toBeDefined();
+  return target!;
+}
+
+function textarea(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("textarea")).find(
+    (candidate) => candidate.getAttribute("aria-label") === label
+  );
+
+  expect(target).toBeDefined();
+  return target!;
+}
+
+function waitForRender() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+function proposalSummary() {
+  return {
+    id: "proposal-1",
+    projectId: "project-1",
+    proposalType: "source_spec_entity",
+    status: "pending",
+    title: "DecisionService",
+    entityId: "interfaces.decision-service",
+    entityType: "interface",
+    filePath: "interfaces/decision-service.md",
+    confidence: 0.92,
+    conflict: { status: "none" },
+    createdAt: "2026-05-11T10:00:00.000Z",
+    reviewedAt: null
+  };
+}
+
+function proposalDetail(
+  overrides: { id?: string; markdown?: string; status?: string } = {}
+) {
+  const summary = proposalSummary();
+
+  return {
+    ...summary,
+    id: overrides.id ?? summary.id,
+    status: overrides.status ?? summary.status,
+    payload: {
+      entityId: "interfaces.decision-service",
+      type: "interface",
+      title: "DecisionService",
+      status: "draft",
+      filePath: "interfaces/decision-service.md",
+      generatedMarkdown: "# DecisionService",
+      markdown: overrides.markdown ?? "# DecisionService\n\nCoordinates policy decisions.",
+      sourceFiles: ["apps/api/src/decision-service.ts"],
+      symbols: [
+        {
+          name: "DecisionService",
+          kind: "class",
+          exported: true,
+          file: "apps/api/src/decision-service.ts",
+          line: 12
+        }
+      ]
+    },
+    evidence: {
+      scanner: "typescript",
+      sourceFiles: [
+        {
+          file: "apps/api/src/decision-service.ts",
+          symbolName: "DecisionService",
+          symbolKind: "class",
+          exported: true,
+          line: 12
+        }
+      ]
+    }
+  };
+}
