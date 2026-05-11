@@ -21,6 +21,24 @@ export async function readGitHeadCommit(repoPath: string): Promise<string | null
   return status.headCommit;
 }
 
+export async function readGitChangedFiles(
+  repoPath: string,
+  fromCommit: string,
+  toCommit: string
+): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["diff", "--name-only", fromCommit, toCommit, "--"],
+    { cwd: repoPath }
+  );
+
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 export async function readGitStatus(
   repoPath: string,
   options: { includeEntries?: boolean } = {}

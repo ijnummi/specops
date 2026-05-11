@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { BadRequestError } from "../lib/http-errors.js";
 import { buildServer } from "../server.js";
+import { createAgentRunService } from "../services/agent-run-service.js";
 import { createAgentTaskService } from "../services/agent-task-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
@@ -259,6 +260,176 @@ describeWithDb("database-backed routes", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("starts and finishes an agent run with deterministic review findings", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSampleSourceProject(project.repoPath);
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'ready'; }\n"
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n\nReview source changes before acceptance."
+      })
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n\nUpdate the review service implementation."
+      })
+    );
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "specops@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "SpecOps Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "Initial state"]);
+    await createIndexerService(db).indexProject(project.id);
+
+    const sourceFileResult = await pool.query<{ id: string }>(
+      "select id from source_files where project_id = $1 and path = 'src/review-service.ts'",
+      [project.id]
+    );
+    expect(sourceFileResult.rows[0]).toBeDefined();
+    await pool.query(
+      "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash) values ($1, $2, 'src/review-service.ts', 'uc.review', 'reviewService', 'function', 1, null, 'review-link-hash')",
+      [project.id, sourceFileResult.rows[0]!.id]
+    );
+
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    expect(started.status).toBe("running");
+    expect(started.taskEntityId).toBe("task.review");
+    expect(started.promptMarkdown).toContain("source_entity: uc.review");
+
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'changed'; }\n"
+    );
+
+    const finished = await service.finishRun(project.id, started.id);
+
+    expect(finished.status).toBe("ready_for_review");
+    expect(finished.changedFiles).toEqual({
+      specs: [],
+      source: ["src/review-service.ts"],
+      tests: [],
+      other: []
+    });
+    expect(finished.changedFileCount).toBe(1);
+    expect(finished.reviewSummary.taskContext).toEqual({
+      sourceEntityId: "uc.review",
+      contextEntityIds: ["uc.review"],
+      missingEntityIds: []
+    });
+    expect(finished.reviewSummary.affectedSpecs).toEqual([
+      {
+        entityId: "uc.review",
+        title: "Review Loop",
+        type: "use_case",
+        filePath: "use-cases/uc.review.md",
+        reason: "linked_source"
+      }
+    ]);
+    expect(finished.reviewSummary.findings.map((finding) => finding.kind)).toEqual(
+      expect.arrayContaining([
+        "source_changed_without_spec",
+        "possible_missing_test_change",
+        "task_not_updated"
+      ])
+    );
+    expect(finished.reviewSummary.findings.map((finding) => finding.id)).toEqual(
+      finished.reviewSummary.findings.map((finding) => `${finding.kind}:${
+        finding.entityId ?? finding.filePath ?? "project"
+      }`)
+    );
+    expect(finished.reviewSummary.suggestedValidationCommands).toEqual([
+      "pnpm typecheck",
+      "pnpm test"
+    ]);
+    expect(finished.findingCounts.review).toBeGreaterThanOrEqual(1);
+  });
+
+  it("rejects starting an agent run from a non-agent-task entity", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n"
+      })
+    );
+    await createIndexerService(db).indexProject(project.id);
+
+    await expect(
+      createAgentRunService(db).startRun(project.id, {
+        taskEntityId: "uc.review",
+        agent: "codex"
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: "Agent run must start from an agent_task entity"
+    });
+  });
+
+  it("rejects accepting an agent run while it is still running", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n"
+      })
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n"
+      })
+    );
+    await createIndexerService(db).indexProject(project.id);
+    const service = createAgentRunService(db);
+    const run = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    await expect(
+      service.updateRunStatus(project.id, run.id, { status: "accepted" })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: "Agent run status can only be accepted from ready_for_review"
+    });
   });
 
   it("returns a populated project overview", async () => {
@@ -4364,6 +4535,12 @@ Let customers buy products and receive confirmation while keeping payment and or
 
   async function git(cwd: string, args: string[]) {
     await execFileAsync("git", args, { cwd });
+  }
+
+  async function writeSpecFile(specopsPath: string, relativePath: string, content: string) {
+    const absolutePath = path.join(specopsPath, relativePath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, content, { flag: "w" });
   }
 
   async function createProjectViaApi(options: { specopsDirectoryName?: string } = {}) {
