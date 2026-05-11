@@ -52,7 +52,7 @@ describe("MarkdownEditor", () => {
     const html = renderToStaticMarkup(<MarkdownEditor value="" onChange={() => undefined} />);
 
     expect(markdownEditorExtensions).toHaveLength(4);
-    expect(html).toContain('data-extension-count="4"');
+    expect(html).toContain('data-extension-count="5"');
   });
 
   it("marks only the opening YAML frontmatter block for calmer styling", () => {

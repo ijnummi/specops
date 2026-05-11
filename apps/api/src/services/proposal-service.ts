@@ -130,12 +130,23 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
       ? await db
           .select()
           .from(aiProposals)
-          .where(and(eq(aiProposals.projectId, projectId), eq(aiProposals.status, status)))
+          .where(
+            and(
+              eq(aiProposals.projectId, projectId),
+              eq(aiProposals.proposalType, sourceSpecEntityProposalType),
+              eq(aiProposals.status, status)
+            )
+          )
           .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id))
       : await db
           .select()
           .from(aiProposals)
-          .where(eq(aiProposals.projectId, projectId))
+          .where(
+            and(
+              eq(aiProposals.projectId, projectId),
+              eq(aiProposals.proposalType, sourceSpecEntityProposalType)
+            )
+          )
           .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id));
 
     return mapSummaries(rows, project);
@@ -273,10 +284,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
           realSpecopsPath,
           path.join(realSpecopsPath, payload.filePath)
         );
-        const targetParent = path.dirname(targetPath);
-        await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
-        await mkdir(targetParent, { recursive: true });
-        await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
+        await assertExistingParentInsideDirectory(realSpecopsPath, path.dirname(targetPath));
 
         try {
           await access(targetPath);
@@ -307,6 +315,9 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
 
     try {
       for (const item of selected) {
+        const targetParent = path.dirname(item.targetPath);
+        await mkdir(targetParent, { recursive: true });
+        await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
         await writeFile(item.targetPath, item.payload.markdown, { flag: "wx" });
         writtenPaths.push(item.targetPath);
       }
@@ -449,12 +460,12 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
       return { status: "entity_exists", entityId: entity.entityId };
     }
 
-    const repoPath = assertAbsolutePath("repoPath", project.repoPath);
-    const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
-    assertInsideDirectory(repoPath, specopsPath);
-    const targetPath = assertInsideDirectory(specopsPath, path.join(specopsPath, payload.filePath));
-
     try {
+      const repoPath = assertAbsolutePath("repoPath", project.repoPath);
+      const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
+      assertInsideDirectory(repoPath, specopsPath);
+      const targetPath = assertInsideDirectory(specopsPath, path.join(specopsPath, payload.filePath));
+
       await stat(targetPath);
       await assertRealPathInsideDirectory(specopsPath, targetPath);
       return { status: "file_exists", filePath: payload.filePath };
@@ -463,7 +474,10 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
         return { status: "none" };
       }
 
-      throw error;
+      return {
+        status: "unavailable",
+        message: error instanceof Error ? error.message : "Conflict check unavailable"
+      };
     }
   }
 

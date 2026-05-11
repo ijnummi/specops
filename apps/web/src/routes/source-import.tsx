@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Check, RefreshCw, Save, XCircle } from "lucide-react";
-import type { ProposalConflictDto, ProposalSummaryDto } from "@specops/contracts";
+import type { ProposalConflictDto, ProposalStatus, ProposalSummaryDto } from "@specops/contracts";
 
 import {
   acceptProposals,
@@ -19,24 +19,63 @@ type ProposalMarkdownDraft = {
   savedMarkdown: string;
 };
 
+type ProposalStatusFilter = "pending" | "accepted" | "rejected" | "obsolete";
+
+const proposalStatusFilters = [
+  "pending",
+  "accepted",
+  "rejected",
+  "obsolete"
+] satisfies ProposalStatusFilter[];
+
 export function SourceImportPage({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<ProposalStatusFilter>("pending");
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [checkedProposalIds, setCheckedProposalIds] = useState<Set<string>>(() => new Set());
   const [markdownDrafts, setMarkdownDrafts] = useState<Record<string, ProposalMarkdownDraft>>(
     () => ({})
   );
+  const [dirtyNavigationBlocked, setDirtyNavigationBlocked] = useState(false);
 
-  const proposals = useQuery(proposalsQuery(projectId, { status: "pending" }));
-  const pendingProposals = useMemo(() => proposals.data ?? [], [proposals.data]);
+  const proposals = useQuery(proposalsQuery(projectId));
+  const allProposals = useMemo(() => proposals.data ?? [], [proposals.data]);
+  const visibleProposals = useMemo(
+    () => allProposals.filter((proposal) => matchesStatusFilter(proposal.status, statusFilter)),
+    [allProposals, statusFilter]
+  );
+  const allProposalIds = useMemo(
+    () => new Set(allProposals.map((proposal) => proposal.id)),
+    [allProposals]
+  );
+  const visibleProposalIds = useMemo(
+    () => new Set(visibleProposals.map((proposal) => proposal.id)),
+    [visibleProposals]
+  );
   const pendingProposalIds = useMemo(
-    () => new Set(pendingProposals.map((proposal) => proposal.id)),
-    [pendingProposals]
+    () =>
+      new Set(
+        allProposals
+          .filter((proposal) => proposal.status === "pending")
+          .map((proposal) => proposal.id)
+      ),
+    [allProposals]
+  );
+  const proposalCounts = useMemo(
+    () => ({
+      pending: allProposals.filter((proposal) => proposal.status === "pending").length,
+      accepted: allProposals.filter((proposal) =>
+        matchesStatusFilter(proposal.status, "accepted")
+      ).length,
+      rejected: allProposals.filter((proposal) => proposal.status === "rejected").length,
+      obsolete: allProposals.filter((proposal) => proposal.status === "obsolete").length
+    }),
+    [allProposals]
   );
   const effectiveSelectedProposalId =
-    selectedProposalId && pendingProposalIds.has(selectedProposalId)
+    selectedProposalId && visibleProposalIds.has(selectedProposalId)
       ? selectedProposalId
-      : (pendingProposals[0]?.id ?? null);
+      : (visibleProposals[0]?.id ?? null);
   const selectedDetail = useQuery({
     ...proposalQuery(projectId, effectiveSelectedProposalId ?? ""),
     enabled: effectiveSelectedProposalId !== null
@@ -49,12 +88,21 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
   const isMarkdownDirty = selectedDraft
     ? selectedDraft.markdown !== selectedDraft.savedMarkdown
     : false;
+  const dirtyProposalIds = useMemo(
+    () =>
+      Object.entries(markdownDrafts)
+        .filter(([_proposalId, draft]) => draft.markdown !== draft.savedMarkdown)
+        .map(([proposalId]) => proposalId),
+    [markdownDrafts]
+  );
+  const hasDirtyDraft = dirtyProposalIds.length > 0;
+  const selectedProposalIsPending = selectedDetail.data?.status === "pending";
 
   useEffect(() => {
-    if (!selectedProposalId && pendingProposals.length > 0) {
-      setSelectedProposalId(pendingProposals[0]!.id);
+    if (!selectedProposalId && visibleProposals.length > 0) {
+      setSelectedProposalId(visibleProposals[0]!.id);
     }
-  }, [pendingProposals, selectedProposalId]);
+  }, [selectedProposalId, visibleProposals]);
 
   useEffect(() => {
     setCheckedProposalIds((current) => {
@@ -63,15 +111,21 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     });
     setMarkdownDrafts((current) => {
       const next = Object.fromEntries(
-        Object.entries(current).filter(([proposalId]) => pendingProposalIds.has(proposalId))
+        Object.entries(current).filter(([proposalId]) => allProposalIds.has(proposalId))
       );
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
-  }, [pendingProposalIds]);
+  }, [allProposalIds, pendingProposalIds]);
+
+  useEffect(() => {
+    if (!hasDirtyDraft) {
+      setDirtyNavigationBlocked(false);
+    }
+  }, [hasDirtyDraft]);
 
   const invalidateSourceImport = async (proposalId?: string | null) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.proposals(projectId, { status: "pending" }) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.proposalsRoot(projectId) }),
       proposalId
         ? queryClient.invalidateQueries({ queryKey: queryKeys.proposal(projectId, proposalId) })
         : Promise.resolve(),
@@ -137,8 +191,8 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     const draft = markdownDrafts[proposalId];
     return draft ? draft.markdown !== draft.savedMarkdown : false;
   });
-  const acceptBlockMessage = hasDirtyCheckedProposal
-    ? "Save edits before accepting selected proposals."
+  const dirtyActionBlockMessage = hasDirtyDraft
+    ? "Save edits before accepting selected proposals. Other review actions are paused until edits are saved."
     : saveMutation.isPending
       ? "Waiting for markdown save before accepting selected proposals."
       : null;
@@ -146,7 +200,11 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
     selectedCount === 0 ||
     acceptMutation.isPending ||
     saveMutation.isPending ||
-    hasDirtyCheckedProposal;
+    hasDirtyCheckedProposal ||
+    hasDirtyDraft;
+  const isGenerateDisabled = generateMutation.isPending || saveMutation.isPending || hasDirtyDraft;
+  const isRejectDisabled =
+    rejectMutation.isPending || saveMutation.isPending || hasDirtyDraft || !selectedProposalIsPending;
   const isReviewActionPending =
     generateMutation.isPending ||
     acceptMutation.isPending ||
@@ -164,6 +222,14 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
       return next;
     });
   };
+  const blockDirtyNavigation = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!hasDirtyDraft) {
+      return;
+    }
+
+    event.preventDefault();
+    setDirtyNavigationBlocked(true);
+  };
 
   return (
     <main className="mx-auto flex h-full max-w-[1600px] flex-col overflow-hidden p-4">
@@ -177,6 +243,7 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
           params={{ projectId }}
           search={{ q: undefined }}
           className="button-secondary"
+          onClick={blockDirtyNavigation}
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Back to project
@@ -184,18 +251,44 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
       </div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2">
         <div className="text-sm text-slate-600">
-          <span className="font-medium text-slate-900">{pendingProposals.length}</span> pending
+          <span className="font-medium text-slate-900">{proposalCounts.pending}</span> pending
           proposals
           {selectedCount > 0 ? (
             <span className="ml-2 text-slate-500">{selectedCount} selected</span>
           ) : null}
         </div>
+        <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Proposal status">
+          {proposalStatusFilters.map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === filter}
+              className={
+                statusFilter === filter
+                  ? "rounded border border-slate-800 bg-slate-900 px-2 py-1 text-xs font-medium text-white"
+                  : "rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              }
+              onClick={() => {
+                setStatusFilter(filter);
+                setSelectedProposalId(null);
+              }}
+            >
+              {statusFilterLabel(filter)} {proposalCounts[filter]}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             className="button-secondary"
-            disabled={generateMutation.isPending}
-            onClick={() => generateMutation.mutate()}
+            disabled={isGenerateDisabled}
+            onClick={() => {
+              if (isGenerateDisabled) {
+                return;
+              }
+              generateMutation.mutate();
+            }}
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             Generate proposals
@@ -215,31 +308,39 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
             Accept selected
           </button>
         </div>
-        {acceptBlockMessage ? (
-          <p className="basis-full text-xs text-amber-700">{acceptBlockMessage}</p>
+        {dirtyActionBlockMessage ? (
+          <p className="basis-full text-xs text-amber-700">{dirtyActionBlockMessage}</p>
+        ) : null}
+        {dirtyNavigationBlocked ? (
+          <p className="basis-full text-xs text-amber-700">Save edits before leaving source import.</p>
         ) : null}
       </div>
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[380px_minmax(0,1fr)]">
         <aside className="min-h-0 overflow-hidden rounded border border-slate-200 bg-white">
           <header className="border-b border-slate-200 px-3 py-2">
-            <h2 className="text-sm font-semibold text-slate-800">Pending proposals</h2>
+            <h2 className="text-sm font-semibold text-slate-800">
+              {statusFilterLabel(statusFilter)} proposals
+            </h2>
             <p className="text-xs text-slate-500">Select proposals for batch acceptance.</p>
           </header>
           {proposals.error ? (
             <div className="p-3 text-sm text-red-700">{proposals.error.message}</div>
           ) : proposals.isLoading ? (
             <p className="p-3 text-sm text-slate-500">Loading proposals...</p>
-          ) : pendingProposals.length === 0 ? (
-            <p className="p-3 text-sm text-slate-500">No pending source import proposals.</p>
+          ) : visibleProposals.length === 0 ? (
+            <p className="p-3 text-sm text-slate-500">
+              No {statusFilterLabel(statusFilter).toLowerCase()} source import proposals.
+            </p>
           ) : (
             <nav className="min-h-0 overflow-auto p-2">
               <div className="grid gap-1">
-                {pendingProposals.map((proposal) => (
+                {visibleProposals.map((proposal) => (
                   <ProposalRow
                     key={proposal.id}
                     proposal={proposal}
-                    checked={checkedProposalIds.has(proposal.id)}
+                    checked={proposal.status === "pending" && checkedProposalIds.has(proposal.id)}
                     selected={proposal.id === effectiveSelectedProposalId}
+                    selectable={proposal.status === "pending"}
                     onCheckedChange={() => toggleCheckedProposal(proposal.id)}
                     onSelect={() => setSelectedProposalId(proposal.id)}
                   />
@@ -278,8 +379,13 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
                     <button
                       type="button"
                       className="button-secondary"
-                      disabled={rejectMutation.isPending}
-                      onClick={() => rejectMutation.mutate(selectedDetail.data.id)}
+                      disabled={isRejectDisabled}
+                      onClick={() => {
+                        if (isRejectDisabled) {
+                          return;
+                        }
+                        rejectMutation.mutate(selectedDetail.data.id);
+                      }}
                     >
                       <XCircle className="h-4 w-4" aria-hidden="true" />
                       Reject
@@ -287,7 +393,7 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
                     <button
                       type="button"
                       className="button-primary"
-                      disabled={!isMarkdownDirty || saveMutation.isPending}
+                      disabled={!isMarkdownDirty || saveMutation.isPending || !selectedProposalIsPending}
                       onClick={() =>
                         saveMutation.mutate({
                           proposalId: selectedDetail.data.id,
@@ -308,7 +414,11 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
                     height="100%"
                     minHeight="0px"
                     className="h-full min-h-0"
-                    onChange={(markdown) =>
+                    editable={selectedProposalIsPending}
+                    onChange={(markdown) => {
+                      if (!selectedProposalIsPending) {
+                        return;
+                      }
                       setMarkdownDrafts((current) => ({
                         ...current,
                         [selectedDetail.data.id]: {
@@ -317,8 +427,8 @@ export function SourceImportPage({ projectId }: { projectId: string }) {
                             current[selectedDetail.data.id]?.savedMarkdown ??
                             selectedDetail.data.payload.markdown
                         }
-                      }))
-                    }
+                      }));
+                    }}
                   />
                 </div>
                 <aside className="min-h-0 overflow-auto">
@@ -367,12 +477,14 @@ function ProposalRow({
   onCheckedChange,
   onSelect,
   proposal,
+  selectable,
   selected
 }: {
   checked: boolean;
   onCheckedChange: () => void;
   onSelect: () => void;
   proposal: ProposalSummaryDto;
+  selectable: boolean;
   selected: boolean;
 }) {
   return (
@@ -388,6 +500,7 @@ function ProposalRow({
         className="mt-1 h-4 w-4 rounded border-slate-300"
         aria-label={`Select ${proposal.title}`}
         checked={checked}
+        disabled={!selectable}
         onChange={onCheckedChange}
       />
       <button type="button" className="min-w-0 text-left" onClick={onSelect}>
@@ -431,6 +544,27 @@ function ConflictBadge({ conflict }: { conflict: ProposalConflictDto }) {
 
 function formatConfidence(confidence: number | null) {
   return confidence === null ? "n/a" : `${Math.round(confidence * 100)}%`;
+}
+
+function matchesStatusFilter(status: ProposalStatus, filter: ProposalStatusFilter) {
+  if (filter === "accepted") {
+    return status === "accepted" || status === "edited_and_accepted";
+  }
+
+  return status === filter;
+}
+
+function statusFilterLabel(status: ProposalStatusFilter) {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "accepted":
+      return "Accepted";
+    case "rejected":
+      return "Rejected";
+    case "obsolete":
+      return "Obsolete";
+  }
 }
 
 function mutationError(error: Error | null, label: string) {

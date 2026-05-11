@@ -81,6 +81,7 @@ export const queryKeys = {
   project: (projectId: string) => ["projects", projectId] as const,
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
+  proposalsRoot: (projectId: string) => ["projects", projectId, "proposals"] as const,
   proposals: (projectId: string, input: ProposalListQuery = {}) =>
     ["projects", projectId, "proposals", input] as const,
   proposal: (projectId: string, proposalId: string) =>

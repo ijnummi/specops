@@ -28,11 +28,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     children,
+    onClick,
     params,
     search,
     to
   }: {
     children: React.ReactNode;
+    onClick?: React.MouseEventHandler<HTMLAnchorElement>;
     params?: Record<string, string>;
     search?: Record<string, string | undefined>;
     to: string;
@@ -40,7 +42,11 @@ vi.mock("@tanstack/react-router", () => ({
     const href = to.replace("$projectId", params?.projectId ?? "");
     const query = search?.q ? `?q=${encodeURIComponent(search.q)}` : "";
 
-    return <a href={`${href}${query}`}>{children}</a>;
+    return (
+      <a href={`${href}${query}`} onClick={onClick}>
+        {children}
+      </a>
+    );
   }
 }));
 
@@ -102,6 +108,7 @@ vi.mock("../api/queries.js", () => ({
       "proposals",
       proposalId
     ],
+    proposalsRoot: (projectId: string) => ["projects", projectId, "proposals"],
     proposals: (projectId: string, input: { status?: string } = {}) => [
       "projects",
       projectId,
@@ -185,7 +192,7 @@ describe("SourceImportPage", () => {
   it("loads pending proposals and enables the first proposal detail query from cached proposals", () => {
     renderToStaticMarkup(<SourceImportPage projectId="project-1" />);
 
-    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1", { status: "pending" });
+    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1");
     expect(mocks.proposalQuery).toHaveBeenCalledWith("project-1", "proposal-1");
     expect(mocks.proposalQueryOptions).toContainEqual(
       expect.objectContaining({
@@ -235,6 +242,22 @@ describe("SourceImportPage", () => {
     expect(mocks.generateSourceImportProposals).toHaveBeenCalledWith("project-1");
   });
 
+  it("shows proposal status counts and filters accepted review history", async () => {
+    const { container } = await renderSourceImportPage();
+
+    expect(container.textContent).toContain("Pending 2");
+    expect(container.textContent).toContain("Accepted 2");
+    expect(container.textContent).toContain("Rejected 1");
+    expect(container.textContent).toContain("Obsolete 1");
+
+    await clickButton(container, "Accepted");
+
+    expect(container.textContent).toContain("AcceptedGateway");
+    expect(container.textContent).toContain("EditedGateway");
+    expect(input(container, "Select AcceptedGateway").disabled).toBe(true);
+    expect(button(container, "Reject").disabled).toBe(true);
+  });
+
   it("blocks accepting a checked proposal with unsaved editor changes", async () => {
     const { container } = await renderSourceImportPage();
 
@@ -246,9 +269,7 @@ describe("SourceImportPage", () => {
 
     await clickButton(container, "Accept selected");
 
-    expect(mocks.acceptProposals).not.toHaveBeenCalledWith("project-1", {
-      proposalIds: ["proposal-1"]
-    });
+    expect(mocks.acceptProposals).not.toHaveBeenCalled();
   });
 
   it("blocks accepting a dirty checked proposal after selecting another clean proposal", async () => {
@@ -264,9 +285,33 @@ describe("SourceImportPage", () => {
 
     await clickButton(container, "Accept selected");
 
-    expect(mocks.acceptProposals).not.toHaveBeenCalledWith("project-1", {
-      proposalIds: ["proposal-1"]
+    expect(mocks.acceptProposals).not.toHaveBeenCalled();
+  });
+
+  it("blocks generate, reject, and back navigation while any draft is dirty", async () => {
+    const { container } = await renderSourceImportPage();
+
+    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nUnsaved.");
+
+    expect(button(container, "Generate proposals").disabled).toBe(true);
+    expect(button(container, "Reject").disabled).toBe(true);
+
+    await clickButton(container, "Generate proposals");
+    await clickButton(container, "Reject");
+
+    expect(mocks.generateSourceImportProposals).not.toHaveBeenCalled();
+    expect(mocks.patchProposal).not.toHaveBeenCalled();
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    let allowed = true;
+    await act(async () => {
+      allowed = link(container, "Back to project").dispatchEvent(event);
+      await waitForRender();
     });
+
+    expect(allowed).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(container.textContent).toContain("Save edits before leaving source import.");
   });
 });
 
@@ -319,7 +364,17 @@ async function changeTextarea(container: HTMLElement, label: string, value: stri
 }
 
 function button(container: HTMLElement, label: string) {
-  const target = Array.from(container.querySelectorAll("button")).find((candidate) =>
+  const candidates = Array.from(container.querySelectorAll("button"));
+  const target =
+    candidates.find((candidate) => candidate.textContent?.trim() === label) ??
+    candidates.find((candidate) => candidate.textContent?.includes(label));
+
+  expect(target).toBeDefined();
+  return target!;
+}
+
+function link(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("a")).find((candidate) =>
     candidate.textContent?.includes(label)
   );
 
@@ -360,6 +415,30 @@ function proposalSummaries() {
       entityType: "domain_entity",
       filePath: "domain/review-policy.md",
       confidence: 0.88
+    }),
+    proposalSummary("proposal-3", {
+      title: "AcceptedGateway",
+      entityId: "interface.accepted-gateway",
+      filePath: "interfaces/accepted-gateway.md",
+      status: "accepted"
+    }),
+    proposalSummary("proposal-4", {
+      title: "EditedGateway",
+      entityId: "interface.edited-gateway",
+      filePath: "interfaces/edited-gateway.md",
+      status: "edited_and_accepted"
+    }),
+    proposalSummary("proposal-5", {
+      title: "RejectedGateway",
+      entityId: "interface.rejected-gateway",
+      filePath: "interfaces/rejected-gateway.md",
+      status: "rejected"
+    }),
+    proposalSummary("proposal-6", {
+      title: "OldGateway",
+      entityId: "interface.old-gateway",
+      filePath: "interfaces/old-gateway.md",
+      status: "obsolete"
     })
   ];
 }
@@ -371,6 +450,7 @@ function proposalSummary(
     entityId?: string;
     entityType?: string;
     filePath?: string;
+    status?: string;
     title?: string;
   } = {}
 ) {
@@ -378,7 +458,7 @@ function proposalSummary(
     id,
     projectId: "project-1",
     proposalType: "source_spec_entity",
-    status: "pending",
+    status: overrides.status ?? "pending",
     title: overrides.title ?? "DecisionService",
     entityId: overrides.entityId ?? "interfaces.decision-service",
     entityType: overrides.entityType ?? "interface",

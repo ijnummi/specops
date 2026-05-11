@@ -8,6 +8,7 @@ type MarkdownEditorProps = {
   height?: string;
   minHeight?: string;
   className?: string;
+  editable?: boolean;
   onChange: (value: string) => void;
 };
 
@@ -70,6 +71,7 @@ export function MarkdownEditor({
   height = "calc(100vh - 294px)",
   minHeight = "420px",
   className,
+  editable = true,
   onChange
 }: MarkdownEditorProps) {
   return (
@@ -78,7 +80,7 @@ export function MarkdownEditor({
       height={height}
       minHeight={minHeight}
       className={className}
-      extensions={markdownEditorExtensions}
+      extensions={[...markdownEditorExtensions, EditorView.editable.of(editable)]}
       basicSetup={{
         lineNumbers: true,
         foldGutter: true,

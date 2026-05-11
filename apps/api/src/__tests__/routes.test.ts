@@ -1567,6 +1567,51 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("keeps source import proposals readable when conflict checks are unavailable", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposal = findProposalByEntityId(
+      generateResponse.json() as ProposalSummaryForTest[],
+      "interface.decision-service"
+    );
+    const outside = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-outside-"));
+    tempRoots.push(outside);
+    await writeFile(path.join(outside, "decision-service.md"), "# Outside\n");
+    await mkdir(path.join(project.specopsPath, "interfaces"), { recursive: true });
+    await symlink(
+      path.join(outside, "decision-service.md"),
+      path.join(project.specopsPath, "interfaces", "decision-service.md")
+    );
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=pending`
+    });
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`
+    });
+    const listProposal = (
+      listResponse.json() as Array<{ entityId: string; conflict: unknown }>
+    ).find((item) => item.entityId === "interface.decision-service");
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(detailResponse.statusCode).toBe(200);
+    expect(listProposal).toMatchObject({
+      conflict: { status: "unavailable" }
+    });
+    expect(detailResponse.json()).toMatchObject({
+      conflict: { status: "unavailable" }
+    });
+  });
+
   it("accepts selected source import proposals, writes markdown, and re-indexes", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
