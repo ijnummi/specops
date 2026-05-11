@@ -526,8 +526,10 @@ describeWithDb("database-backed routes", () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi({ specopsDirectoryName: "specops" });
     await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.specopsPath, "templates"), { recursive: true });
     await mkdir(path.join(project.repoPath, "src"), { recursive: true });
     await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n");
+    await writeFile(path.join(project.specopsPath, "templates", "use-case.template.md"), "# Template\n");
     await writeFile(path.join(project.specopsPath, "project.yaml"), "name: old\n");
     await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 1;\n");
     await writeFile(path.join(project.repoPath, "README.md"), "# Readme\n");
@@ -539,6 +541,8 @@ describeWithDb("database-backed routes", () => {
 
     await mkdir(path.join(project.repoPath, "dist"), { recursive: true });
     await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n\nDirty\n");
+    await writeFile(path.join(project.specopsPath, "templates", "use-case.template.md"), "# Template\n\nDirty\n");
+    await writeFile(path.join(project.specopsPath, "templates", "adr.template.md"), "# ADR Template\n");
     await writeFile(path.join(project.specopsPath, "project.yaml"), "name: dirty\n");
     await writeFile(path.join(project.specopsPath, "notes.txt"), "not a canonical spec\n");
     await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 2;\n");

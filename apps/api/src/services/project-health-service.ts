@@ -130,7 +130,10 @@ function classifyGitEntries(repoPath: string, specopsPath: string, entries: GitS
     const isUntracked = entry.indexStatus === "?" && entry.workTreeStatus === "?";
     const normalizedPath = normalizePath(entry.path);
     const isInsideSpecopsPath = isUnderSpecopsPath(normalizedPath, specopsPrefix);
-    const isSpecFile = isInsideSpecopsPath && normalizedPath.endsWith(".md");
+    const isSpecFile =
+      isInsideSpecopsPath &&
+      normalizedPath.endsWith(".md") &&
+      !normalizedPath.endsWith(".template.md");
     const isSourceFile =
       !isInsideSpecopsPath &&
       isSupportedSourcePath(normalizedPath) &&
