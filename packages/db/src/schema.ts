@@ -315,3 +315,41 @@ export const aiProposals = pgTable(
     projectStatusIdx: index("ai_proposals_project_status_idx").on(table.projectId, table.status),
   }),
 );
+
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    taskEntityId: text("task_entity_id").notNull(),
+    agent: text("agent").notNull(),
+    status: text("status").notNull(),
+    promptMarkdown: text("prompt_markdown").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    startGitCommit: text("start_git_commit"),
+    endGitCommit: text("end_git_commit"),
+    startDirtyFilesJson: jsonb("start_dirty_files_json").notNull().default(sql`'[]'::jsonb`),
+    endDirtyFilesJson: jsonb("end_dirty_files_json").notNull().default(sql`'[]'::jsonb`),
+    changedFilesJson: jsonb("changed_files_json")
+      .notNull()
+      .default(sql`'{"specs":[],"source":[],"tests":[],"other":[]}'::jsonb`),
+    reviewSummaryJson: jsonb("review_summary_json").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    projectIdx: index("agent_runs_project_id_idx").on(table.projectId),
+    projectStatusIdx: index("agent_runs_project_status_idx").on(table.projectId, table.status),
+    projectTaskEntityIdIdx: index("agent_runs_project_task_entity_id_idx").on(
+      table.projectId,
+      table.taskEntityId,
+    ),
+    projectStartedAtIdx: index("agent_runs_project_started_at_idx").on(
+      table.projectId,
+      table.startedAt,
+    ),
+  }),
+);

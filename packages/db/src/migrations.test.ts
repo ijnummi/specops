@@ -33,4 +33,14 @@ describe("initial migration", () => {
       );
     }
   });
+
+  it("creates agent runs storage and lookup indexes", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS agent_runs");
+    expect(migration).toContain("task_entity_id text NOT NULL");
+    expect(migration).toContain("review_summary_json jsonb NOT NULL DEFAULT '{}'::jsonb");
+    expect(migration).toContain("agent_runs_project_id_idx");
+    expect(migration).toContain("agent_runs_project_status_idx");
+  });
 });

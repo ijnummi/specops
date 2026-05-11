@@ -319,3 +319,27 @@ CREATE TABLE IF NOT EXISTS ai_proposals (
 
 CREATE INDEX IF NOT EXISTS ai_proposals_project_id_idx ON ai_proposals(project_id);
 CREATE INDEX IF NOT EXISTS ai_proposals_project_status_idx ON ai_proposals(project_id, status);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_entity_id text NOT NULL,
+  agent text NOT NULL,
+  status text NOT NULL,
+  prompt_markdown text NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  start_git_commit text,
+  end_git_commit text,
+  start_dirty_files_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  end_dirty_files_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  changed_files_json jsonb NOT NULL DEFAULT '{"specs":[],"source":[],"tests":[],"other":[]}'::jsonb,
+  review_summary_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS agent_runs_project_id_idx ON agent_runs(project_id);
+CREATE INDEX IF NOT EXISTS agent_runs_project_status_idx ON agent_runs(project_id, status);
+CREATE INDEX IF NOT EXISTS agent_runs_project_task_entity_id_idx ON agent_runs(project_id, task_entity_id);
+CREATE INDEX IF NOT EXISTS agent_runs_project_started_at_idx ON agent_runs(project_id, started_at);
