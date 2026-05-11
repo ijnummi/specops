@@ -144,6 +144,9 @@ export function proposalsQuery(projectId: string, input: ProposalListQuery = {})
   if (input.status) {
     search.set("status", input.status);
   }
+  if (input.proposalType) {
+    search.set("proposalType", input.proposalType);
+  }
   const suffix = search.toString() ? `?${search.toString()}` : "";
 
   return queryOptions({

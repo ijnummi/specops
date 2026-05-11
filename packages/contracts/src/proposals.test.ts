@@ -32,6 +32,15 @@ describe("proposal contracts", () => {
     );
   });
 
+  it("rejects source spec entity proposal summaries with use case entity type", () => {
+    expect(() =>
+      proposalSummarySchema.parse({
+        ...proposalSummary(),
+        entityType: "use_case"
+      })
+    ).toThrow();
+  });
+
   it("parses proposal list queries", () => {
     expect(proposalListQuerySchema.parse({ status: "pending" })).toEqual({
       status: "pending"
@@ -149,6 +158,22 @@ describe("proposal contracts", () => {
     expect(parsed.provider).toBe("ollama");
     expect(parsed.promptVersion).toBe("ai-prefill-v1");
     expect(parsed.selectedSourceFiles[0]?.excerptEndLine).toBe(80);
+  });
+
+  it("rejects AI spec entity proposal evidence with inverted excerpt lines", () => {
+    expect(() =>
+      aiSpecEntityProposalEvidenceSchema.parse({
+        ...aiEvidence(),
+        selectedSourceFiles: [
+          {
+            file: "apps/api/src/routes/projects.ts",
+            contentHash: "hash-1",
+            excerptStartLine: 80,
+            excerptEndLine: 1
+          }
+        ]
+      })
+    ).toThrow();
   });
 
   it("parses AI spec entity proposal details", () => {

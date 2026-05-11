@@ -554,22 +554,38 @@ function mapSummary(
   row: ProposalRow,
   conflict: ProposalSummaryDto["conflict"]
 ): ProposalSummaryDto {
-  const payload = parsePayload(row);
   const proposalType = proposalTypeSchema.parse(row.proposalType);
-
-  return {
+  const base = {
     id: row.id,
     projectId: row.projectId,
-    proposalType,
     status: row.status as ProposalStatus,
     title: row.title,
-    entityId: payload.entityId,
-    entityType: payload.type,
-    filePath: payload.filePath,
     confidence: row.confidence,
     conflict,
     createdAt: row.createdAt.toISOString(),
     reviewedAt: row.reviewedAt?.toISOString() ?? null
+  };
+
+  if (proposalType === "ai_spec_entity") {
+    const payload = aiSpecEntityProposalPayloadSchema.parse(row.payloadJson);
+
+    return {
+      ...base,
+      proposalType: "ai_spec_entity",
+      entityId: payload.entityId,
+      entityType: payload.type,
+      filePath: payload.filePath
+    };
+  }
+
+  const payload = parseSourcePayload(row);
+
+  return {
+    ...base,
+    proposalType: "source_spec_entity",
+    entityId: payload.entityId,
+    entityType: payload.type,
+    filePath: payload.filePath
   };
 }
 

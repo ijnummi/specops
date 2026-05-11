@@ -66,18 +66,23 @@ export const aiSpecEntityProposalPayloadSchema = z.object({
   )
 });
 
+const aiSpecEntityProposalEvidenceSourceFileSchema = z
+  .object({
+    file: z.string().min(1),
+    contentHash: z.string().min(1),
+    excerptStartLine: z.number().int().min(1),
+    excerptEndLine: z.number().int().min(1)
+  })
+  .refine((value) => value.excerptEndLine >= value.excerptStartLine, {
+    message: "excerptEndLine must be greater than or equal to excerptStartLine",
+    path: ["excerptEndLine"]
+  });
+
 export const aiSpecEntityProposalEvidenceSchema = z.object({
   provider: aiProviderSchema,
   model: z.string().min(1),
   promptVersion: z.literal("ai-prefill-v1"),
-  selectedSourceFiles: z.array(
-    z.object({
-      file: z.string().min(1),
-      contentHash: z.string().min(1),
-      excerptStartLine: z.number().int().min(1),
-      excerptEndLine: z.number().int().min(1)
-    })
-  ),
+  selectedSourceFiles: z.array(aiSpecEntityProposalEvidenceSourceFileSchema),
   claims: z.array(
     z.object({
       text: z.string().min(1),
@@ -109,11 +114,9 @@ export const proposalConflictSchema = z.discriminatedUnion("status", [
 const proposalSummaryBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
-  proposalType: proposalTypeSchema,
   status: proposalStatusSchema,
   title: z.string(),
   entityId: z.string(),
-  entityType: z.enum(["use_case", "domain_entity", "interface"]),
   filePath: z.string(),
   confidence: z.number().nullable(),
   conflict: proposalConflictSchema,
@@ -121,18 +124,27 @@ const proposalSummaryBaseSchema = z.object({
   reviewedAt: z.string().nullable()
 });
 
-export const proposalSummarySchema = proposalSummaryBaseSchema;
-
-export const sourceSpecEntityProposalDetailSchema = proposalSummaryBaseSchema.extend({
+export const sourceSpecEntityProposalSummarySchema = proposalSummaryBaseSchema.extend({
   proposalType: z.literal("source_spec_entity"),
-  entityType: z.enum(["domain_entity", "interface"]),
+  entityType: z.enum(["domain_entity", "interface"])
+});
+
+export const aiSpecEntityProposalSummarySchema = proposalSummaryBaseSchema.extend({
+  proposalType: z.literal("ai_spec_entity"),
+  entityType: z.enum(["use_case", "domain_entity", "interface"])
+});
+
+export const proposalSummarySchema = z.discriminatedUnion("proposalType", [
+  sourceSpecEntityProposalSummarySchema,
+  aiSpecEntityProposalSummarySchema
+]);
+
+export const sourceSpecEntityProposalDetailSchema = sourceSpecEntityProposalSummarySchema.extend({
   payload: sourceSpecEntityProposalPayloadSchema,
   evidence: sourceSpecEntityProposalEvidenceSchema
 });
 
-export const aiSpecEntityProposalDetailSchema = proposalSummaryBaseSchema.extend({
-  proposalType: z.literal("ai_spec_entity"),
-  entityType: z.enum(["use_case", "domain_entity", "interface"]),
+export const aiSpecEntityProposalDetailSchema = aiSpecEntityProposalSummarySchema.extend({
   payload: aiSpecEntityProposalPayloadSchema,
   evidence: aiSpecEntityProposalEvidenceSchema
 });
