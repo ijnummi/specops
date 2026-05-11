@@ -26,7 +26,15 @@ describe("loadConfig", () => {
     ).toEqual({
       databaseUrl: "postgres://specops:specops@localhost:5436/specops",
       host: "127.0.0.1",
-      port: 4004
+      port: 4004,
+      aiPrefill: {
+        ollamaBaseUrl: "http://127.0.0.1:11434",
+        openAiBaseUrl: "https://api.openai.com/v1",
+        openAiApiKey: undefined,
+        timeoutMs: 60_000,
+        maxFiles: 5,
+        maxTotalBytes: 60_000
+      }
     });
   });
 
@@ -51,7 +59,15 @@ describe("loadConfig", () => {
     expect(loadConfig()).toEqual({
       databaseUrl: "postgres://specops:specops@localhost:5436/specops",
       host: "0.0.0.0",
-      port: 4010
+      port: 4010,
+      aiPrefill: {
+        ollamaBaseUrl: "http://127.0.0.1:11434",
+        openAiBaseUrl: "https://api.openai.com/v1",
+        openAiApiKey: undefined,
+        timeoutMs: 60_000,
+        maxFiles: 5,
+        maxTotalBytes: 60_000
+      }
     });
   });
 });

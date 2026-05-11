@@ -12,11 +12,29 @@ import { registerProjectHealthRoutes } from "./routes/project-health.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import { registerSourceRoutes } from "./routes/source.js";
 import { registerValidationRoutes } from "./routes/validation.js";
+import type { ApiConfig } from "./config.js";
+import type { AiPrefillProviderFactory } from "./services/ai-prefill-service.js";
 
-export function buildServer(databaseUrl: string) {
+type BuildServerOptions = {
+  aiPrefillConfig?: ApiConfig["aiPrefill"];
+  aiPrefillProviderFactory?: AiPrefillProviderFactory;
+};
+
+const defaultAiPrefillConfig: ApiConfig["aiPrefill"] = {
+  ollamaBaseUrl: "http://127.0.0.1:11434",
+  openAiBaseUrl: "https://api.openai.com/v1",
+  openAiApiKey: process.env.OPENAI_API_KEY,
+  timeoutMs: 60_000,
+  maxFiles: 5,
+  maxTotalBytes: 60_000
+};
+
+export function buildServer(databaseUrl: string, options: BuildServerOptions = {}) {
   const app = Fastify({ logger: true });
   const db = createDb(databaseUrl);
+  const aiPrefillConfig = options.aiPrefillConfig ?? defaultAiPrefillConfig;
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
@@ -63,11 +81,17 @@ export function buildServer(databaseUrl: string) {
   app.get("/health", async () => ({ ok: true }));
   app.register(registerAdminDatabaseRoutes, { prefix: "/api", db });
   app.register(registerProjectRoutes, { prefix: "/api", db });
-  app.register(registerProposalRoutes, { prefix: "/api", db });
+  app.register(registerProposalRoutes, {
+    prefix: "/api",
+    db,
+    aiPrefillConfig,
+    aiPrefillProviderFactory: options.aiPrefillProviderFactory
+  });
   app.register(registerProjectHealthRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
   app.register(registerAgentTaskRoutes, { prefix: "/api", db });
   app.register(registerSearchRoutes, { prefix: "/api", db });
+  app.register(registerSourceRoutes, { prefix: "/api", db });
   app.register(registerValidationRoutes, { prefix: "/api", db });
   app.register(registerIndexRunRoutes, { prefix: "/api", db });
 

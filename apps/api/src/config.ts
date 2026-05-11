@@ -5,6 +5,14 @@ export type ApiConfig = {
   databaseUrl: string;
   host: string;
   port: number;
+  aiPrefill: {
+    ollamaBaseUrl: string;
+    openAiBaseUrl: string;
+    openAiApiKey?: string;
+    timeoutMs: number;
+    maxFiles: number;
+    maxTotalBytes: number;
+  };
 };
 
 type Env = Record<string, string | undefined>;
@@ -23,8 +31,45 @@ export function loadConfig(env: Env = loadProcessEnvWithDotEnv()): ApiConfig {
   return {
     databaseUrl,
     host: env.API_HOST ?? "127.0.0.1",
-    port
+    port,
+    aiPrefill: {
+      ollamaBaseUrl: env.AI_PREFILL_OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",
+      openAiBaseUrl: env.AI_PREFILL_OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+      openAiApiKey: env.OPENAI_API_KEY,
+      timeoutMs: parseIntegerConfig(env.AI_PREFILL_TIMEOUT_MS, {
+        name: "AI_PREFILL_TIMEOUT_MS",
+        defaultValue: 60_000,
+        min: 1_000
+      }),
+      maxFiles: parseIntegerConfig(env.AI_PREFILL_MAX_FILES, {
+        name: "AI_PREFILL_MAX_FILES",
+        defaultValue: 5,
+        min: 1,
+        max: 20
+      }),
+      maxTotalBytes: parseIntegerConfig(env.AI_PREFILL_MAX_TOTAL_BYTES, {
+        name: "AI_PREFILL_MAX_TOTAL_BYTES",
+        defaultValue: 60_000,
+        min: 1_000
+      })
+    }
   };
+}
+
+function parseIntegerConfig(
+  value: string | undefined,
+  options: { name: string; defaultValue: number; min: number; max?: number }
+): number {
+  const parsed = Number.parseInt(value ?? String(options.defaultValue), 10);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < options.min ||
+    (options.max !== undefined && parsed > options.max)
+  ) {
+    const maxMessage = options.max === undefined ? "" : ` and <= ${options.max}`;
+    throw new Error(`${options.name} must be an integer >= ${options.min}${maxMessage}`);
+  }
+  return parsed;
 }
 
 function loadProcessEnvWithDotEnv(cwd = process.cwd()): Env {

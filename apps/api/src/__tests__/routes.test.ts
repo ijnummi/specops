@@ -1453,6 +1453,272 @@ describeWithDb("database-backed routes", () => {
       .resolves.toBe(false);
   });
 
+  it("generates AI proposals from selected source files without writing markdown", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          return {
+            provider: "ollama",
+            model: input.model,
+            text: JSON.stringify({
+              proposals: [
+                {
+                  entityId: "uc.manage-projects",
+                  type: "use_case",
+                  title: "Manage projects",
+                  summary: "Users can create and inspect local projects.",
+                  sourceFiles: ["src/projects.ts"],
+                  claims: [
+                    {
+                      text: "Project routes create and inspect local projects.",
+                      sourceFiles: ["src/projects.ts"]
+                    }
+                  ],
+                  proposedLinks: [],
+                  confidence: 0.82
+                }
+              ]
+            })
+          };
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+    const body = response.json() as {
+      proposals: ProposalSummaryForTest[];
+      diagnostics: unknown[];
+    };
+
+    expect(response.statusCode).toBe(201);
+    expect(body.diagnostics).toEqual([]);
+    expect(body.proposals).toEqual([
+      expect.objectContaining({
+        proposalType: "ai_spec_entity",
+        status: "pending",
+        title: "Manage projects",
+        entityId: "uc.manage-projects",
+        entityType: "use_case",
+        filePath: "use-cases/uc.manage-projects.md",
+        confidence: 0.82,
+        conflict: { status: "none" }
+      })
+    ]);
+    await expect(fileExists(path.join(project.specopsPath, "use-cases", "uc.manage-projects.md")))
+      .resolves.toBe(false);
+  });
+
+  it("writes no AI proposals when provider generation fails", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          if (input.model === "provider-fails") {
+            throw new Error("provider failed");
+          }
+          throw new Error("unexpected model");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "provider-fails",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(500);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("returns source file summaries from source-files route", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/source-files`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        id: sourceFile.id,
+        projectId: project.id,
+        path: "src/projects.ts",
+        language: "typescript",
+        kind: "source",
+        importCount: 1,
+        exportCount: 1,
+        symbolCount: 1
+      })
+    ]);
+  });
+
+  it("returns source file detail including imports exports and symbols from source-files route", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/source-files/${sourceFile.id}`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: sourceFile.id,
+      projectId: project.id,
+      path: "src/projects.ts",
+      imports: [
+        {
+          specifier: "./db",
+          importKind: "named",
+          importedNames: ["ProjectStore"],
+          isRelative: true,
+          resolvedPath: "src/db.ts"
+        }
+      ],
+      exports: [
+        {
+          exportedName: "ProjectRoutes",
+          exportKind: "class",
+          sourceSpecifier: null
+        }
+      ],
+      symbols: [
+        {
+          name: "ProjectRoutes",
+          symbolKind: "class",
+          isExported: true,
+          line: 3,
+          metadata: { routeCount: 2 }
+        }
+      ]
+    });
+  });
+
+  it("rejects AI generation when selected source file ID does not belong to project", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals() {
+          throw new Error("provider should not be called");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const otherProject = await createProjectViaApi();
+    const otherSourceFile = await insertIndexedSourceFile(otherProject.id, otherProject.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [otherSourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("obsoletes previous pending AI proposals on regeneration while preserving reviewed proposals", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          return {
+            provider: "ollama",
+            model: input.model,
+            text: JSON.stringify({
+              proposals: [
+                {
+                  entityId: "uc.manage-projects",
+                  type: "use_case",
+                  title: "Manage projects",
+                  summary: "Users can create and inspect local projects.",
+                  sourceFiles: ["src/projects.ts"],
+                  claims: [
+                    {
+                      text: "Project routes create and inspect local projects.",
+                      sourceFiles: ["src/projects.ts"]
+                    }
+                  ],
+                  proposedLinks: [],
+                  confidence: 0.82
+                }
+              ]
+            })
+          };
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    const reviewed = await insertPendingAiProposal(project.id, {
+      entityId: "uc.reviewed",
+      title: "Reviewed",
+      filePath: "use-cases/uc.reviewed.md"
+    });
+    await pool.query("update ai_proposals set status = 'rejected' where id = $1", [reviewed.id]);
+
+    const firstResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+    const firstProposalId = (firstResponse.json() as { proposals: ProposalSummaryForTest[] })
+      .proposals[0].id;
+
+    const secondResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(201);
+    await expect(readProposalStatus(firstProposalId)).resolves.toBe("obsolete");
+    await expect(readProposalStatus(reviewed.id)).resolves.toBe("rejected");
+    expect((secondResponse.json() as { proposals: ProposalSummaryForTest[] }).proposals).toEqual([
+      expect.objectContaining({
+        proposalType: "ai_spec_entity",
+        status: "pending",
+        entityId: "uc.manage-projects"
+      })
+    ]);
+  });
+
   it("filters proposal listings by proposal type", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -3423,6 +3689,57 @@ describeWithDb("database-backed routes", () => {
       [projectId, proposal.entityId, proposal.filePath]
     );
     return result.rows[0].count;
+  }
+
+  async function insertIndexedSourceFile(projectId: string, repoPath: string): Promise<{ id: string }> {
+    await mkdir(path.join(repoPath, "src"), { recursive: true });
+    const relativePath = "src/projects.ts";
+    const content = [
+      "import { ProjectStore } from './db';",
+      "",
+      "export class ProjectRoutes {",
+      "  constructor(private readonly store: ProjectStore) {}",
+      "  list() { return this.store.listProjects(); }",
+      "  create(name: string) { return this.store.createProject(name); }",
+      "}",
+      ""
+    ].join("\n");
+    await writeFile(path.join(repoPath, relativePath), content);
+    const sourceFileResult = await pool.query<{ id: string }>(
+      "insert into source_files (project_id, path, language, kind, size_bytes, content_hash, last_seen_at) values ($1, $2, 'typescript', 'source', $3, $4, '2026-05-10T10:00:01Z') returning id",
+      [projectId, relativePath, Buffer.byteLength(content), sha256(content)]
+    );
+    const sourceFileId = sourceFileResult.rows[0].id;
+    await pool.query(
+      "insert into source_imports (project_id, source_file_id, file_path, specifier, import_kind, imported_names, is_relative, resolved_path) values ($1, $2, $3, './db', 'named', array['ProjectStore'], true, 'src/db.ts')",
+      [projectId, sourceFileId, relativePath]
+    );
+    await pool.query(
+      "insert into source_exports (project_id, source_file_id, file_path, exported_name, export_kind) values ($1, $2, $3, 'ProjectRoutes', 'class')",
+      [projectId, sourceFileId, relativePath]
+    );
+    await pool.query(
+      "insert into source_symbols (project_id, source_file_id, file_path, name, symbol_kind, is_exported, line, metadata_json) values ($1, $2, $3, 'ProjectRoutes', 'class', true, 3, $4::jsonb)",
+      [projectId, sourceFileId, relativePath, JSON.stringify({ routeCount: 2 })]
+    );
+
+    return { id: sourceFileId };
+  }
+
+  async function countAiPrefillProposals(projectId: string): Promise<number> {
+    const result = await pool.query<{ count: number }>(
+      "select count(*)::int as count from ai_proposals where project_id = $1 and proposal_type = 'ai_spec_entity'",
+      [projectId]
+    );
+    return result.rows[0].count;
+  }
+
+  async function readProposalStatus(proposalId: string): Promise<string | null> {
+    const result = await pool.query<{ status: string }>(
+      "select status from ai_proposals where id = $1",
+      [proposalId]
+    );
+    return result.rows[0]?.status ?? null;
   }
 
   function createTestDb() {

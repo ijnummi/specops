@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@specops/ai-prefill": "workspace:*",
     "@specops/contracts": "workspace:*",
     "@specops/db": "workspace:*",
     "@specops/domain": "workspace:*",
