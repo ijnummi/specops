@@ -7,6 +7,7 @@ import { isHttpError } from "./lib/http-errors.js";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.js";
 import { registerEntityRoutes } from "./routes/entities.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
+import { registerProjectHealthRoutes } from "./routes/project-health.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerValidationRoutes } from "./routes/validation.js";
@@ -59,6 +60,7 @@ export function buildServer(databaseUrl: string) {
 
   app.get("/health", async () => ({ ok: true }));
   app.register(registerProjectRoutes, { prefix: "/api", db });
+  app.register(registerProjectHealthRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
   app.register(registerAgentTaskRoutes, { prefix: "/api", db });
   app.register(registerSearchRoutes, { prefix: "/api", db });

@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { createDb } from "@specops/db";
 import pg from "pg";
@@ -15,6 +17,7 @@ import { createProjectService } from "../services/project-service.js";
 import { createSourceBootstrapService } from "../services/source-bootstrap-service.js";
 import { createSourceScanService } from "../services/source-scan-service.js";
 
+const execFileAsync = promisify(execFile);
 const testDatabaseUrl = readTestDatabaseUrl();
 const describeWithDb = testDatabaseUrl ? describe : describe.skip;
 const { Pool } = pg;
@@ -371,6 +374,199 @@ describeWithDb("database-backed routes", () => {
     expect(body.project.entityCount).toBe(
       body.entityCountsByType.reduce((total, row) => total + row.count, 0)
     );
+  });
+
+  it("returns zero project health drift for a non-Git project", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      git: {
+        isRepo: false,
+        headCommit: null,
+        indexedCommit: null,
+        hasUncommittedChanges: false,
+        changedSpecFiles: [],
+        changedSourceFiles: [],
+        untrackedSpecFiles: [],
+        untrackedSourceFiles: []
+      },
+      drift: {
+        indexIsBehindHead: false,
+        currentSpecFileChangeCount: 0,
+        currentSourceFileChangeCount: 0
+      },
+      staleTasks: {
+        count: 0,
+        samples: []
+      },
+      attentionItems: []
+    });
+  });
+
+  it("reports stale agent tasks when tracked spec hashes mismatch", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, frontmatter_json, body_markdown, body_text, content_hash, created_at, updated_at) values " +
+        "($1, 'domain.customer', 'domain_entity', 'Customer', 'draft', 'domain/customer.md', '{}'::jsonb, '# Customer', 'Customer', 'hash-current', '2026-05-10T09:00:00Z', '2026-05-10T09:00:00Z')," +
+        "($1, 'task.customer', 'agent_task', 'Update Customer', 'open', 'agent-tasks/task.customer.md', $2::jsonb, '# Update Customer', 'Update Customer', 'task-hash', '2026-05-10T10:00:00Z', '2026-05-10T10:00:00Z')",
+      [
+        project.id,
+        JSON.stringify({
+          source_entity: "domain.customer",
+          links: {
+            generated_from: ["domain.customer"],
+            uses: ["domain.customer"]
+          },
+          tracked_spec_hashes: {
+            "domain.customer": "hash-old"
+          }
+        })
+      ]
+    );
+    await pool.query(
+      "insert into spec_links (project_id, from_entity_id, to_entity_id, link_type, source) values " +
+        "($1, 'task.customer', 'domain.customer', 'generated_from', 'frontmatter')," +
+        "($1, 'task.customer', 'domain.customer', 'uses', 'frontmatter')",
+      [project.id]
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      staleTasks: {
+        count: 1,
+        samples: [
+          {
+            entityId: "task.customer",
+            title: "Update Customer",
+            sourceEntityId: "domain.customer",
+            reason: "tracked_hash_mismatch"
+          }
+        ]
+      },
+      attentionItems: [
+        expect.objectContaining({
+          kind: "stale_agent_task",
+          entityId: "task.customer"
+        })
+      ]
+    });
+  });
+
+  it("reports Git commit drift and dirty spec and source files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi({ specopsDirectoryName: "specops" });
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n");
+    await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 1;\n");
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "routes@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "Routes Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "initial"]);
+    const { stdout: indexedCommitStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: project.repoPath
+    });
+    const indexedCommit = indexedCommitStdout.trim();
+    await writeFile(path.join(project.repoPath, "README.md"), "# Readme\n");
+    await git(project.repoPath, ["add", "README.md"]);
+    await git(project.repoPath, ["commit", "-m", "readme"]);
+    const { stdout: headCommitStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: project.repoPath
+    });
+    const headCommit = headCommitStdout.trim();
+    await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n\nDirty\n");
+    await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 2;\n");
+    await writeFile(path.join(project.specopsPath, "domain", "new.md"), "# New\n");
+    await pool.query(
+      "insert into index_runs (project_id, started_at, finished_at, status, git_commit) values ($1, '2026-05-10T10:00:00Z', '2026-05-10T10:00:03Z', 'succeeded', $2)",
+      [project.id, indexedCommit]
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      git: {
+        isRepo: true,
+        headCommit,
+        indexedCommit,
+        hasUncommittedChanges: true,
+        changedSpecFiles: ["specops/domain/customer.md"],
+        changedSourceFiles: ["src/customer.ts"],
+        untrackedSpecFiles: ["specops/domain/new.md"],
+        untrackedSourceFiles: []
+      },
+      drift: {
+        indexIsBehindHead: true,
+        currentSpecFileChangeCount: 2,
+        currentSourceFileChangeCount: 1
+      }
+    });
+  });
+
+  it("reports missing source tasks before timestamp fallback stale tasks", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, frontmatter_json, body_markdown, body_text, content_hash, created_at, updated_at) values " +
+        "($1, 'domain.changed', 'domain_entity', 'Changed', 'draft', 'domain/changed.md', '{}'::jsonb, '# Changed', 'Changed', 'hash-changed', '2026-05-10T10:00:00Z', '2026-05-10T12:00:00Z')," +
+        "($1, 'task.old', 'agent_task', 'Old Task', 'open', 'agent-tasks/task.old.md', $2::jsonb, '# Old Task', 'Old Task', 'task-old-hash', '2026-05-10T09:00:00Z', '2026-05-10T09:00:00Z')," +
+        "($1, 'task.missing', 'agent_task', 'Missing Task', 'open', 'agent-tasks/task.missing.md', $3::jsonb, '# Missing Task', 'Missing Task', 'task-missing-hash', '2026-05-10T11:00:00Z', '2026-05-10T11:00:00Z')",
+      [
+        project.id,
+        JSON.stringify({ source_entity: "domain.changed", links: { generated_from: ["domain.changed"] } }),
+        JSON.stringify({ source_entity: "domain.missing", links: { generated_from: ["domain.missing"] } })
+      ]
+    );
+    await pool.query(
+      "insert into spec_links (project_id, from_entity_id, to_entity_id, link_type, source) values " +
+        "($1, 'task.old', 'domain.changed', 'generated_from', 'frontmatter')," +
+        "($1, 'task.missing', 'domain.missing', 'generated_from', 'frontmatter')",
+      [project.id]
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      staleTasks: {
+        count: 2,
+        samples: [
+          {
+            entityId: "task.missing",
+            sourceEntityId: "domain.missing",
+            reason: "missing_source_entity"
+          },
+          {
+            entityId: "task.old",
+            sourceEntityId: "domain.changed",
+            reason: "source_spec_changed"
+          }
+        ]
+      }
+    });
   });
 
   it("returns an empty project overview before indexing", async () => {
@@ -2050,7 +2246,11 @@ describeWithDb("database-backed routes", () => {
     return project;
   }
 
-  async function createProjectViaApi() {
+  async function git(cwd: string, args: string[]) {
+    await execFileAsync("git", args, { cwd });
+  }
+
+  async function createProjectViaApi(options: { specopsDirectoryName?: string } = {}) {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-"));
     tempRoots.push(root);
 
@@ -2058,7 +2258,7 @@ describeWithDb("database-backed routes", () => {
       name: `Routes ${Date.now()} ${Math.random()}`,
       slug: `routes-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       repoPath: root,
-      specopsPath: path.join(root, ".specops")
+      specopsPath: path.join(root, options.specopsDirectoryName ?? ".specops")
     };
     const response = await app.inject({
       method: "POST",
