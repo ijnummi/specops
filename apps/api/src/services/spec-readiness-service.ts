@@ -577,7 +577,6 @@ function hasNewerLinkedEntity(
 
 function hasLinkedContext(input: ReadinessEntityInput, acceptedTypes: Set<string>): boolean {
   const knownEntityIds = entityIdSet(input);
-  const sourceBackedEntityIds = sourceBackedEntityIdSet(input);
   return [...input.incomingLinks, ...input.outgoingLinks].some((link) => {
     if (!knownEntityIds.has(link.fromEntityId) || !knownEntityIds.has(link.toEntityId)) {
       return false;
@@ -585,7 +584,7 @@ function hasLinkedContext(input: ReadinessEntityInput, acceptedTypes: Set<string
 
     const otherEntityId = link.fromEntityId === input.entityId ? link.toEntityId : link.fromEntityId;
     const otherType = input.entityTypesById[otherEntityId] ?? "";
-    return acceptedTypes.has(otherType) || sourceBackedEntityIds.has(otherEntityId);
+    return acceptedTypes.has(otherType);
   });
 }
 
