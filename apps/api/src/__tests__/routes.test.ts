@@ -1681,6 +1681,51 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
+  it("refuses accept when unindexed markdown already has the target entity id", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+    await mkdir(path.join(project.specopsPath, "legacy"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "legacy", "decision-service-copy.md"),
+      "---\n" +
+        "id: interface.decision-service\n" +
+        "type: interface\n" +
+        "title: Existing Decision Service\n" +
+        "status: draft\n" +
+        "---\n\n" +
+        "# Existing Decision Service\n"
+    );
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposal = findProposalByEntityId(
+      generateResponse.json() as ProposalSummaryForTest[],
+      "interface.decision-service"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [proposal.id] }
+    });
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe("Target entity already exists");
+    await expect(fileExists(path.join(project.specopsPath, proposal.filePath))).resolves.toBe(
+      false
+    );
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json()).toMatchObject({ status: "pending" });
+  });
+
   it("returns source import proposal detail and persists edited markdown", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

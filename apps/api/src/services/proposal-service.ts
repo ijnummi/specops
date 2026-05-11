@@ -1,4 +1,4 @@
-import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -19,7 +19,7 @@ import {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import { aiProposals, specEntities } from "@specops/db";
-import { parseSpecMarkdown } from "@specops/markdown";
+import { discoverMarkdownFiles, parseSpecMarkdown } from "@specops/markdown";
 import { scanRepository } from "@specops/repo-scanner";
 import { generateBootstrapSpecProposals } from "@specops/source-bootstrap";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -303,6 +303,7 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
 
     assertNoDuplicateSelectedTargets(selected);
     await assertNoExistingIndexedEntities(projectId, selected.map(({ payload }) => payload.entityId));
+    await assertNoExistingCanonicalEntities(realSpecopsPath, selected);
 
     try {
       for (const item of selected) {
@@ -372,6 +373,37 @@ export function createProposalService(db: Db, options: ProposalServiceOptions = 
     if (rows.length > 0) {
       throw new ConflictError("Proposal target entity already exists", {
         entityId: rows[0].entityId
+      });
+    }
+  }
+
+  async function assertNoExistingCanonicalEntities(
+    specopsPath: string,
+    selected: Array<{
+      payload: SourceSpecEntityProposalPayload;
+      targetPath: string;
+    }>
+  ): Promise<void> {
+    const selectedByEntityId = new Map(selected.map((item) => [item.payload.entityId, item]));
+    const markdownPaths = await discoverMarkdownFiles(specopsPath);
+
+    for (const relativePath of markdownPaths) {
+      const absolutePath = assertInsideDirectory(specopsPath, path.join(specopsPath, relativePath));
+      const content = await readFile(absolutePath, "utf8");
+      const parsed = parseSpecMarkdown(relativePath, content);
+
+      if (!parsed.entity) {
+        continue;
+      }
+
+      const selectedItem = selectedByEntityId.get(parsed.entity.entityId);
+      if (!selectedItem || absolutePath === selectedItem.targetPath) {
+        continue;
+      }
+
+      throw new ConflictError("Target entity already exists", {
+        entityId: parsed.entity.entityId,
+        filePath: relativePath
       });
     }
   }
