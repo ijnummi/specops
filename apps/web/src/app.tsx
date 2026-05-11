@@ -8,6 +8,8 @@ import {
 
 import { AdminDatabasePage } from "./routes/admin-database.js";
 import type { AdminDatabaseMode } from "./routes/admin-database.js";
+import { AgentRunDetailPage } from "./routes/agent-run-detail.js";
+import { AgentRunsPage } from "./routes/agent-runs.js";
 import { AiPrefillPage } from "./routes/ai-prefill.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
 import { ImpactPage } from "./routes/impact.js";
@@ -101,6 +103,24 @@ const readinessRoute = createRoute({
   }
 });
 
+const agentRunsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/agent-runs",
+  component: () => {
+    const { projectId } = agentRunsRoute.useParams();
+    return <AgentRunsPage projectId={projectId} />;
+  }
+});
+
+const agentRunDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/agent-runs/$runId",
+  component: () => {
+    const { projectId, runId } = agentRunDetailRoute.useParams();
+    return <AgentRunDetailPage projectId={projectId} runId={runId} />;
+  }
+});
+
 const sourceImportRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/import/source",
@@ -163,6 +183,8 @@ const routeTree = rootRoute.addChildren([
   projectRoute,
   entityRoute,
   readinessRoute,
+  agentRunsRoute,
+  agentRunDetailRoute,
   sourceImportRoute,
   aiPrefillRoute,
   impactRoute,

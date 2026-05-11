@@ -2,6 +2,8 @@ import { queryOptions } from "@tanstack/react-query";
 import type {
   AcceptProposalsRequest,
   AcceptProposalsResponse,
+  AgentRunDetail as AgentRunDetailDto,
+  AgentRunSummary as AgentRunSummaryDto,
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
   AiPrefillGenerateRequest,
@@ -31,6 +33,8 @@ import type {
   SourceFileListQuery,
   SourceFileSummaryDto,
   SourceSpecLinkDto,
+  StartAgentRunRequest,
+  UpdateAgentRunStatusRequest,
   ValidationMessageDto
 } from "@specops/contracts";
 
@@ -93,6 +97,10 @@ export const queryKeys = {
     ["projects", projectId, "proposals", input] as const,
   proposal: (projectId: string, proposalId: string) =>
     ["projects", projectId, "proposals", proposalId] as const,
+  agentRunsRoot: (projectId: string) => ["projects", projectId, "agent-runs"] as const,
+  agentRuns: (projectId: string) => ["projects", projectId, "agent-runs", "list"] as const,
+  agentRun: (projectId: string, runId: string) =>
+    ["projects", projectId, "agent-runs", runId] as const,
   sourceFiles: (projectId: string, input: SourceFileListQuery) =>
     ["projects", projectId, "source-files", input] as const,
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
@@ -185,6 +193,26 @@ export function proposalQuery(projectId: string, proposalId: string) {
         `/api/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(
           proposalId
         )}`
+      )
+  });
+}
+
+export function agentRunsQuery(projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.agentRuns(projectId),
+    queryFn: () =>
+      apiGet<AgentRunSummaryDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/agent-runs`
+      )
+  });
+}
+
+export function agentRunQuery(projectId: string, runId: string) {
+  return queryOptions({
+    queryKey: queryKeys.agentRun(projectId, runId),
+    queryFn: () =>
+      apiGet<AgentRunDetailDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}`
       )
   });
 }
@@ -524,6 +552,33 @@ export function saveAgentTask(projectId: string, input: SaveAgentTaskRequest) {
   return apiSend<SaveAgentTaskResponse>(
     "POST",
     `/api/projects/${encodeURIComponent(projectId)}/agent-tasks`,
+    input
+  );
+}
+
+export function startAgentRun(projectId: string, input: StartAgentRunRequest) {
+  return apiSend<AgentRunDetailDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/agent-runs`,
+    input
+  );
+}
+
+export function finishAgentRun(projectId: string, runId: string) {
+  return apiSend<AgentRunDetailDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}/finish`
+  );
+}
+
+export function updateAgentRunStatus(
+  projectId: string,
+  runId: string,
+  input: UpdateAgentRunStatusRequest
+) {
+  return apiSend<AgentRunDetailDto>(
+    "PATCH",
+    `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}`,
     input
   );
 }
