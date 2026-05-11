@@ -46,10 +46,24 @@ export function AdminDatabasePage({ tableName, mode, rowId }: AdminDatabasePageP
     ...adminDatabaseRowQuery(selectedTableName, rowId ?? ""),
     enabled: selectedTableName.length > 0 && mode === "row" && Boolean(rowId)
   });
+  const firstRow = useQuery({
+    ...adminDatabaseRowsQuery(selectedTableName, 1),
+    enabled: selectedTableName.length > 0 && mode === "row" && !rowId
+  });
   const rows = useQuery({
     ...adminDatabaseRowsQuery(selectedTableName, rowLimit),
     enabled: selectedTableName.length > 0 && mode === "rows"
   });
+  const displayedRow = rowId ? selectedRow.data?.row : firstRow.data?.rows[0] ?? null;
+  const displayedRowError = rowId ? selectedRow.error : firstRow.error;
+  const isDisplayedRowLoading = rowId ? selectedRow.isLoading : firstRow.isLoading;
+  const effectiveRowId = rowId ?? readRowId(displayedRow) ?? undefined;
+
+  useEffect(() => {
+    if (!rowId && mode === "row") {
+      setRowIdInput(readRowId(displayedRow) ?? "");
+    }
+  }, [displayedRow, mode, rowId]);
 
   const navigateTo = (next: {
     table?: string;
@@ -68,12 +82,12 @@ export function AdminDatabasePage({ tableName, mode, rowId }: AdminDatabasePageP
   const showRowId = rowIdInput.trim();
 
   async function navigateToNeighbor(direction: "prev" | "next") {
-    if (!selectedTableName || !rowId) {
+    if (!selectedTableName || !effectiveRowId) {
       return;
     }
 
     const response = await queryClient.fetchQuery(
-      adminDatabaseRowNeighborQuery(selectedTableName, rowId, direction)
+      adminDatabaseRowNeighborQuery(selectedTableName, effectiveRowId, direction)
     );
     const nextRowId = readRowId(response.row);
 
@@ -172,7 +186,7 @@ export function AdminDatabasePage({ tableName, mode, rowId }: AdminDatabasePageP
                   <button
                     className="button-secondary"
                     type="button"
-                    disabled={!rowId}
+                    disabled={!effectiveRowId}
                     onClick={() => void navigateToNeighbor("prev")}
                   >
                     <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -192,25 +206,21 @@ export function AdminDatabasePage({ tableName, mode, rowId }: AdminDatabasePageP
                   <button
                     className="button-secondary"
                     type="button"
-                    disabled={!rowId}
+                    disabled={!effectiveRowId}
                     onClick={() => void navigateToNeighbor("next")}
                   >
                     Next row
                     <ChevronRight className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </form>
-                {!rowId ? (
-                  <div className="rounded border border-slate-200 p-4 text-sm text-slate-600">
-                    Enter a row id to inspect JSON.
-                  </div>
-                ) : selectedRow.error ? (
-                  <ErrorPanel message={selectedRow.error.message} />
-                ) : selectedRow.isLoading ? (
+                {displayedRowError ? (
+                  <ErrorPanel message={displayedRowError.message} />
+                ) : isDisplayedRowLoading ? (
                   <div className="rounded border border-slate-200 p-4 text-sm text-slate-600">
                     Loading row...
                   </div>
-                ) : selectedRow.data?.row ? (
-                  <JsonBlock value={selectedRow.data.row} />
+                ) : displayedRow ? (
+                  <JsonBlock value={displayedRow} />
                 ) : (
                   <div className="rounded border border-slate-200 p-4 text-sm text-slate-600">
                     No row found.
@@ -331,6 +341,7 @@ function RowsPanel({
   rows: UseQueryResult<AdminDatabaseRowsDto, Error>;
 }) {
   const rowList = rows.data?.rows ?? [];
+  const columns = useMemo(() => readTableColumns(rowList), [rowList]);
 
   if (rows.error) {
     return <ErrorPanel message={rows.error.message} />;
@@ -353,20 +364,36 @@ function RowsPanel({
   return (
     <div className="grid gap-3">
       <p className="text-xs text-slate-500">{rowList.length} rows shown</p>
-      {rowList.map((row, index) => (
-        <article
-          key={readRowId(row) ?? index}
-          className="min-w-0 rounded border border-slate-200 p-3"
-        >
-          <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
-            <code className="truncate text-xs font-semibold text-slate-800">
-              {readRowId(row) ?? `row-${index + 1}`}
-            </code>
-            <span className="shrink-0 text-xs text-slate-500">#{index + 1}</span>
-          </div>
-          <JsonBlock value={row} compact />
-        </article>
-      ))}
+      <div className="min-w-0 overflow-auto rounded border border-slate-200">
+        <table className="min-w-full border-collapse text-left text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              {columns.map((column) => (
+                <th
+                  key={column}
+                  className="border-b border-slate-200 px-3 py-2 font-semibold uppercase"
+                  scope="col"
+                >
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rowList.map((row, index) => (
+              <tr key={readRowId(row) ?? index} className="align-top">
+                {columns.map((column) => (
+                  <td key={column} className="max-w-[360px] px-3 py-2 text-slate-700">
+                    <span className="block truncate" title={formatCellValue(row[column])}>
+                      {formatCellValue(row[column])}
+                    </span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -401,4 +428,33 @@ function ErrorPanel({ message, compact = false }: { message: string; compact?: b
 
 function readRowId(row: Record<string, unknown> | null | undefined) {
   return typeof row?.id === "string" ? row.id : null;
+}
+
+function readTableColumns(rows: Array<Record<string, unknown>>) {
+  const columns = new Set<string>();
+
+  for (const row of rows) {
+    for (const column of Object.keys(row)) {
+      columns.add(column);
+    }
+  }
+
+  return [...columns];
+}
+
+function formatCellValue(value: unknown) {
+  if (value === null) {
+    return "null";
+  }
+  if (value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return JSON.stringify(value);
 }

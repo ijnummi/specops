@@ -32,8 +32,8 @@ const mocks = vi.hoisted(() => ({
   rows: {
     table: "projects",
     rows: [
-      { id: "00000000-0000-4000-8000-000000000101", name: "Sample" },
-      { id: "00000000-0000-4000-8000-000000000102", name: "Second" }
+      { id: "00000000-0000-4000-8000-000000000101", name: "Sample", created_at: "2026-05-11" },
+      { id: "00000000-0000-4000-8000-000000000102", name: "Second", created_at: "2026-05-12" }
     ],
     limit: 50
   },
@@ -132,6 +132,15 @@ describe("AdminDatabasePage", () => {
     expect(container.textContent).toContain("Next row");
   });
 
+  it("renders the first row as JSON when no row id is selected", async () => {
+    const { container } = await renderAdminDatabasePage({ mode: "row" });
+
+    expect(container.textContent).toContain('"name": "Sample"');
+    expect((container.querySelector('input[aria-label="Row id"]') as HTMLInputElement).value).toBe(
+      "00000000-0000-4000-8000-000000000101"
+    );
+  });
+
   it("navigates to the previous and next row ids returned by the API", async () => {
     const { container } = await renderAdminDatabasePage({
       mode: "row",
@@ -159,10 +168,13 @@ describe("AdminDatabasePage", () => {
     });
   });
 
-  it("renders table data as a list", async () => {
+  it("renders table data as a table", async () => {
     const { container } = await renderAdminDatabasePage({ mode: "rows" });
+    const table = container.querySelector("table");
 
+    expect(table).not.toBeNull();
     expect(container.textContent).toContain("2 rows shown");
+    expect(container.textContent).toContain("created_at");
     expect(container.textContent).toContain("Sample");
     expect(container.textContent).toContain("Second");
   });
