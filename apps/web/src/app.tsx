@@ -6,6 +6,8 @@ import {
   RouterProvider
 } from "@tanstack/react-router";
 
+import { AdminDatabasePage } from "./routes/admin-database.js";
+import type { AdminDatabaseMode } from "./routes/admin-database.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
 import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
@@ -45,6 +47,20 @@ const projectsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: ProjectsPage
+});
+
+const adminDatabaseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/database",
+  validateSearch: (search: Record<string, unknown>) => ({
+    table: typeof search.table === "string" ? search.table : undefined,
+    mode: readAdminDatabaseMode(search.mode),
+    rowId: typeof search.rowId === "string" ? search.rowId : undefined
+  }),
+  component: () => {
+    const { table, mode, rowId } = adminDatabaseRoute.useSearch();
+    return <AdminDatabasePage tableName={table} mode={mode} rowId={rowId} />;
+  }
 });
 
 const projectRoute = createRoute({
@@ -113,6 +129,7 @@ const changeImpactRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   projectsRoute,
+  adminDatabaseRoute,
   projectRoute,
   entityRoute,
   impactRoute,
@@ -132,4 +149,8 @@ export function App() {
       <RouterProvider router={router} />
     </QueryClientProvider>
   );
+}
+
+function readAdminDatabaseMode(value: unknown): AdminDatabaseMode {
+  return value === "row" || value === "rows" ? value : "schema";
 }

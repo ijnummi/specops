@@ -115,6 +115,107 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("lists known admin database tables without exposing arbitrary database tables", async () => {
+    app = buildServer(testDatabaseUrl!);
+    await createProjectViaApi();
+
+    const response = await app.inject({ method: "GET", url: "/api/admin/database/tables" });
+    const body = response.json() as Array<{
+      name: string;
+      label: string;
+      rowCount: number;
+      supportsRowId: boolean;
+    }>;
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "projects",
+          label: "projects",
+          rowCount: expect.any(Number),
+          supportsRowId: true
+        }),
+        expect.objectContaining({
+          name: "spec_entities",
+          label: "spec_entities",
+          rowCount: expect.any(Number),
+          supportsRowId: true
+        })
+      ])
+    );
+    expect(body).not.toContainEqual(expect.objectContaining({ name: "pg_catalog" }));
+  });
+
+  it("returns schema metadata for a known admin database table", async () => {
+    app = buildServer(testDatabaseUrl!);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/admin/database/tables/projects/schema"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      table: "projects",
+      primaryKey: "id",
+      columns: expect.arrayContaining([
+        { name: "id", dataType: "uuid", notNull: true },
+        { name: "name", dataType: "text", notNull: true },
+        { name: "description", dataType: "text", notNull: false }
+      ])
+    });
+  });
+
+  it("reads an admin database row by id and navigates neighboring rows", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const first = await createProjectDirectlyWithId("00000000-0000-4000-8000-000000000101");
+    const second = await createProjectDirectlyWithId("00000000-0000-4000-8000-000000000102");
+
+    const rowResponse = await app.inject({
+      method: "GET",
+      url: `/api/admin/database/tables/projects/row?id=${first.id}`
+    });
+    const nextResponse = await app.inject({
+      method: "GET",
+      url: `/api/admin/database/tables/projects/row-neighbor?id=${first.id}&direction=next`
+    });
+    const prevResponse = await app.inject({
+      method: "GET",
+      url: `/api/admin/database/tables/projects/row-neighbor?id=${second.id}&direction=prev`
+    });
+
+    expect(rowResponse.statusCode).toBe(200);
+    expect(rowResponse.json()).toMatchObject({ table: "projects", row: { id: first.id } });
+    expect(nextResponse.statusCode).toBe(200);
+    expect(nextResponse.json()).toMatchObject({ table: "projects", row: { id: second.id } });
+    expect(prevResponse.statusCode).toBe(200);
+    expect(prevResponse.json()).toMatchObject({ table: "projects", row: { id: first.id } });
+  });
+
+  it("returns capped admin database rows and rejects unknown tables", async () => {
+    app = buildServer(testDatabaseUrl!);
+    await createProjectViaApi();
+
+    const rowsResponse = await app.inject({
+      method: "GET",
+      url: "/api/admin/database/tables/projects/rows?limit=1"
+    });
+    const unknownResponse = await app.inject({
+      method: "GET",
+      url: "/api/admin/database/tables/not_allowed/rows"
+    });
+
+    expect(rowsResponse.statusCode).toBe(200);
+    expect(rowsResponse.json()).toMatchObject({
+      table: "projects",
+      rows: [expect.objectContaining({ id: expect.any(String) })],
+      limit: 1
+    });
+    expect(unknownResponse.statusCode).toBe(404);
+    expect(unknownResponse.json().error.message).toBe("Unknown admin database table");
+  });
+
   it("deletes project metadata without deleting repository or spec files", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -2430,6 +2531,26 @@ describeWithDb("database-backed routes", () => {
     projectIds.push(project.id);
 
     return project;
+  }
+
+  async function createProjectDirectlyWithId(id: string) {
+    const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-routes-"));
+    tempRoots.push(root);
+    const slug = `routes-${id.slice(-6)}`;
+
+    await pool.query(
+      "insert into projects (id, name, slug, repo_path, specops_path) values ($1, $2, $3, $4, $5)",
+      [id, `Routes ${id}`, slug, root, path.join(root, ".specops")]
+    );
+    projectIds.push(id);
+
+    return {
+      id,
+      name: `Routes ${id}`,
+      slug,
+      repoPath: root,
+      specopsPath: path.join(root, ".specops")
+    };
   }
 
   async function git(cwd: string, args: string[]) {

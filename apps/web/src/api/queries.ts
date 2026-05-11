@@ -32,7 +32,45 @@ export type ProjectSummaryDto = ProjectDto & {
   lastIndexedAt: string | null;
 };
 
+export type AdminDatabaseTableDto = {
+  name: string;
+  label: string;
+  rowCount: number;
+  supportsRowId: boolean;
+};
+
+export type AdminDatabaseColumnDto = {
+  name: string;
+  dataType: string;
+  notNull: boolean;
+};
+
+export type AdminDatabaseSchemaDto = {
+  table: string;
+  primaryKey: string | null;
+  columns: AdminDatabaseColumnDto[];
+};
+
+export type AdminDatabaseRowDto = {
+  table: string;
+  row: Record<string, unknown> | null;
+};
+
+export type AdminDatabaseRowsDto = {
+  table: string;
+  rows: Array<Record<string, unknown>>;
+  limit: number;
+};
+
 export const queryKeys = {
+  adminDatabaseTables: ["admin", "database", "tables"] as const,
+  adminDatabaseSchema: (table: string) => ["admin", "database", table, "schema"] as const,
+  adminDatabaseRow: (table: string, rowId: string) =>
+    ["admin", "database", table, "row", rowId] as const,
+  adminDatabaseRowNeighbor: (table: string, rowId: string, direction: "prev" | "next") =>
+    ["admin", "database", table, "row-neighbor", rowId, direction] as const,
+  adminDatabaseRows: (table: string, limit: number) =>
+    ["admin", "database", table, "rows", limit] as const,
   projects: ["projects"] as const,
   project: (projectId: string) => ["projects", projectId] as const,
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
@@ -223,6 +261,65 @@ export function searchQuery(projectId: string, input: EntitySearchQuery) {
     queryFn: () =>
       apiGet<EntitySearchResultDto[]>(
         `/api/projects/${encodeURIComponent(projectId)}/search?${search.toString()}`
+      )
+  });
+}
+
+export function adminDatabaseTablesQuery() {
+  return queryOptions({
+    queryKey: queryKeys.adminDatabaseTables,
+    queryFn: () => apiGet<AdminDatabaseTableDto[]>("/api/admin/database/tables")
+  });
+}
+
+export function adminDatabaseSchemaQuery(table: string) {
+  return queryOptions({
+    queryKey: queryKeys.adminDatabaseSchema(table),
+    queryFn: () =>
+      apiGet<AdminDatabaseSchemaDto>(
+        `/api/admin/database/tables/${encodeURIComponent(table)}/schema`
+      )
+  });
+}
+
+export function adminDatabaseRowQuery(table: string, rowId: string) {
+  const search = new URLSearchParams({ id: rowId });
+
+  return queryOptions({
+    queryKey: queryKeys.adminDatabaseRow(table, rowId),
+    queryFn: () =>
+      apiGet<AdminDatabaseRowDto>(
+        `/api/admin/database/tables/${encodeURIComponent(table)}/row?${search.toString()}`
+      )
+  });
+}
+
+export function adminDatabaseRowNeighborQuery(
+  table: string,
+  rowId: string,
+  direction: "prev" | "next"
+) {
+  const search = new URLSearchParams({ id: rowId, direction });
+
+  return queryOptions({
+    queryKey: queryKeys.adminDatabaseRowNeighbor(table, rowId, direction),
+    queryFn: () =>
+      apiGet<AdminDatabaseRowDto>(
+        `/api/admin/database/tables/${encodeURIComponent(
+          table
+        )}/row-neighbor?${search.toString()}`
+      )
+  });
+}
+
+export function adminDatabaseRowsQuery(table: string, limit = 50) {
+  const search = new URLSearchParams({ limit: String(limit) });
+
+  return queryOptions({
+    queryKey: queryKeys.adminDatabaseRows(table, limit),
+    queryFn: () =>
+      apiGet<AdminDatabaseRowsDto>(
+        `/api/admin/database/tables/${encodeURIComponent(table)}/rows?${search.toString()}`
       )
   });
 }
