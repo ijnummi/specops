@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { ScanRepositoryResult, SourceSymbolFact } from "@specops/repo-scanner";
 
-import { generateBootstrapSpecFiles, slugifySourceSymbol } from "./generate.js";
+import {
+  generateBootstrapSpecFiles,
+  generateBootstrapSpecProposals,
+  slugifySourceSymbol
+} from "./generate.js";
 
 describe("generateBootstrapSpecFiles", () => {
   it("generates domain and interface specs from exported source symbols", () => {
@@ -212,6 +216,48 @@ describe("generateBootstrapSpecFiles", () => {
     expect(slugifySourceSymbol("DecisionService")).toBe("decision-service");
     expect(slugifySourceSymbol("workspace_record")).toBe("workspace-record");
     expect(slugifySourceSymbol("HTTPClient")).toBe("http-client");
+  });
+});
+
+describe("generateBootstrapSpecProposals", () => {
+  it("generates source spec entity proposals from bootstrap spec files", () => {
+    const proposals = generateBootstrapSpecProposals(scanResult());
+
+    expect(proposals.map((proposal) => proposal.payload.filePath)).toEqual([
+      "domain/decision-link.md",
+      "domain/decision.md",
+      "domain/workspace.md",
+      "interfaces/decision-service.md",
+      "interfaces/reminder-scheduler.md"
+    ]);
+
+    const decisionService = proposals.find(
+      (proposal) => proposal.payload.filePath === "interfaces/decision-service.md"
+    );
+
+    expect(decisionService).toMatchObject({
+      proposalType: "source_spec_entity",
+      title: "DecisionService",
+      confidence: 0.7,
+      payload: {
+        entityId: "interface.decision-service",
+        type: "interface",
+        filePath: "interfaces/decision-service.md",
+        sourceFiles: ["src/services/decision-service.ts"]
+      },
+      evidence: {
+        scanner: "typescript",
+        sourceFiles: [
+          {
+            file: "src/services/decision-service.ts",
+            symbolName: "DecisionService",
+            symbolKind: "class",
+            exported: true,
+            line: 4
+          }
+        ]
+      }
+    });
   });
 });
 

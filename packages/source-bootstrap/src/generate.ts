@@ -18,6 +18,39 @@ export type BootstrapGeneratedSpecFile = {
   evidence: BootstrapSourceEvidence[];
 };
 
+export type BootstrapSpecProposal = {
+  proposalType: "source_spec_entity";
+  title: string;
+  confidence: number;
+  payload: {
+    entityId: string;
+    type: "domain_entity" | "interface";
+    title: string;
+    status: "draft";
+    filePath: string;
+    generatedMarkdown: string;
+    markdown: string;
+    sourceFiles: string[];
+    symbols: {
+      name: string;
+      kind: string;
+      exported: boolean;
+      file: string;
+      line: number | null;
+    }[];
+  };
+  evidence: {
+    scanner: "typescript";
+    sourceFiles: {
+      file: string;
+      symbolName: string;
+      symbolKind: string;
+      exported: boolean;
+      line: number | null;
+    }[];
+  };
+};
+
 type Candidate = {
   entityId: string;
   type: "domain_entity" | "interface";
@@ -91,6 +124,41 @@ export function generateBootstrapSpecFiles(
         content: renderMarkdown({ ...candidate, evidence })
       };
     });
+}
+
+export function generateBootstrapSpecProposals(scan: ScanRepositoryResult): BootstrapSpecProposal[] {
+  return generateBootstrapSpecFiles(scan).map((file) => ({
+    proposalType: "source_spec_entity",
+    title: file.title,
+    confidence: 0.7,
+    payload: {
+      entityId: file.entityId,
+      type: file.type,
+      title: file.title,
+      status: "draft",
+      filePath: file.path,
+      generatedMarkdown: file.content,
+      markdown: file.content,
+      sourceFiles: [...new Set(file.evidence.map((item) => item.sourceFile))],
+      symbols: file.evidence.map((item) => ({
+        name: item.symbolName,
+        kind: item.symbolKind,
+        exported: item.exported,
+        file: item.sourceFile,
+        line: item.line
+      }))
+    },
+    evidence: {
+      scanner: "typescript",
+      sourceFiles: file.evidence.map((item) => ({
+        file: item.sourceFile,
+        symbolName: item.symbolName,
+        symbolKind: item.symbolKind,
+        exported: item.exported,
+        line: item.line
+      }))
+    }
+  }));
 }
 
 export function slugifySourceSymbol(value: string): string {
