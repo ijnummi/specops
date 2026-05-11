@@ -485,6 +485,56 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it.each([
+    { mode: "non-Git", initializeGit: false },
+    { mode: "Git repo with no HEAD", initializeGit: true }
+  ])("reports git comparison unavailable for $mode agent runs", async ({ initializeGit }) => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n"
+      })
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n"
+      })
+    );
+    if (initializeGit) {
+      await git(project.repoPath, ["init"]);
+    }
+    await createIndexerService(db).indexProject(project.id);
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    const finished = await service.finishRun(project.id, started.id);
+    const gitFinding = finished.reviewSummary.findings.find(
+      (finding) => finding.kind === "git_comparison_unavailable"
+    );
+
+    expect(gitFinding).toMatchObject({
+      severity: "info",
+      kind: "git_comparison_unavailable",
+      entityId: null,
+      filePath: null
+    });
+  });
+
   it("rejects starting an agent run from a non-agent-task entity", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);

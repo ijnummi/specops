@@ -7,7 +7,7 @@ import type {
   AgentRunFindingSeverity,
   AgentRunReview,
   AgentRunStatus,
-  EntityReadinessDto,
+  ProjectReadinessQueueItemDto,
   AgentRunSummary,
   StartAgentRunRequest,
   UpdateAgentRunStatusRequest
@@ -132,6 +132,7 @@ export function createAgentRunService(db: Db) {
     const comparison = await collectChangedPaths(
       project.repoPath,
       row,
+      endStatus.isRepo,
       endStatus.headCommit,
       endStatus.entries
     );
@@ -306,9 +307,7 @@ export function createAgentRunService(db: Db) {
               )
             )
         : Promise.resolve([]),
-      Promise.all(
-        affectedSpecs.map((spec) => readinessService.getEntityReadiness(input.project.id, spec.entityId))
-      )
+      readinessService.getProjectReadiness(input.project.id)
     ]);
     const findings = collectFindings({
       project: input.project,
@@ -318,7 +317,9 @@ export function createAgentRunService(db: Db) {
       taskContext,
       affectedSpecs,
       validationMessages: affectedValidationMessages,
-      readinessByEntityId: new Map(affectedReadiness.map((readiness) => [readiness.entityId, readiness])),
+      readinessByEntityId: new Map(
+        affectedReadiness.queue.map((readiness) => [readiness.entityId, readiness])
+      ),
       gitComparisonUnavailable: input.gitComparisonUnavailable
     });
 
@@ -343,11 +344,12 @@ export function createAgentRunService(db: Db) {
 async function collectChangedPaths(
   repoPath: string,
   run: AgentRunRow,
+  endIsRepo: boolean,
   endGitCommit: string | null,
   endDirtyEntries: GitStatusEntry[]
 ): Promise<{ paths: string[]; gitComparisonUnavailable: boolean }> {
   const paths = new Set<string>();
-  let gitComparisonUnavailable = false;
+  let gitComparisonUnavailable = !endIsRepo || !run.startGitCommit || !endGitCommit;
 
   if (run.startGitCommit && endGitCommit && run.startGitCommit !== endGitCommit) {
     try {
@@ -458,7 +460,7 @@ function collectFindings(input: {
   taskContext: AgentRunReview["taskContext"];
   affectedSpecs: AgentRunReview["affectedSpecs"];
   validationMessages: Array<typeof validationMessages.$inferSelect>;
-  readinessByEntityId: Map<string, EntityReadinessDto>;
+  readinessByEntityId: Map<string, ProjectReadinessQueueItemDto>;
   gitComparisonUnavailable: boolean;
 }): AgentRunFinding[] {
   const findings: AgentRunFinding[] = [];
@@ -485,7 +487,7 @@ function collectFindings(input: {
   if (input.gitComparisonUnavailable) {
     addFinding(
       "git_comparison_unavailable",
-      "context",
+      "info",
       "Git comparison was unavailable for this run.",
       "Review the dirty file list and rerun from a clean Git state if needed.",
       null,
