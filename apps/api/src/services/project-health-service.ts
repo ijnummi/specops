@@ -1,6 +1,7 @@
 import type { ProjectHealthDto } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import { indexRuns, projects, specEntities, specLinks } from "@specops/db";
+import { isSupportedSourcePath, shouldExcludePath } from "@specops/repo-scanner";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import path from "node:path";
 
@@ -127,12 +128,18 @@ function classifyGitEntries(repoPath: string, specopsPath: string, entries: GitS
 
   for (const entry of entries) {
     const isUntracked = entry.indexStatus === "?" && entry.workTreeStatus === "?";
-    const isSpecFile = isUnderSpecopsPath(entry.path, specopsPrefix);
+    const normalizedPath = normalizePath(entry.path);
+    const isInsideSpecopsPath = isUnderSpecopsPath(normalizedPath, specopsPrefix);
+    const isSpecFile = isInsideSpecopsPath && normalizedPath.endsWith(".md");
+    const isSourceFile =
+      !isInsideSpecopsPath &&
+      isSupportedSourcePath(normalizedPath) &&
+      !shouldExcludePath(normalizedPath);
 
     if (isUntracked && isSpecFile) result.untrackedSpecFiles.push(entry.path);
-    if (isUntracked && !isSpecFile) result.untrackedSourceFiles.push(entry.path);
+    if (isUntracked && isSourceFile) result.untrackedSourceFiles.push(entry.path);
     if (!isUntracked && isSpecFile) result.changedSpecFiles.push(entry.path);
-    if (!isUntracked && !isSpecFile) result.changedSourceFiles.push(entry.path);
+    if (!isUntracked && isSourceFile) result.changedSourceFiles.push(entry.path);
   }
 
   result.changedSpecFiles.sort();

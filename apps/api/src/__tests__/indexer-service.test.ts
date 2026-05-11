@@ -150,6 +150,57 @@ describeWithDb("indexProject", () => {
     });
   });
 
+  it("preserves unchanged entity timestamps and refreshes changed entity timestamps", async () => {
+    const { projectId, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "domain/customer.md",
+      specMarkdown({
+        id: "domain.customer",
+        type: "domain_entity",
+        title: "Customer",
+        status: "draft",
+        body: "Customers can manage their account profile."
+      })
+    );
+    await writeSpecFile(
+      specopsPath,
+      "agent-tasks/task.customer.md",
+      agentTaskMarkdown({
+        id: "task.customer",
+        title: "Update Customer Task",
+        sourceEntity: "domain.customer",
+        body: "Review customer profile changes."
+      })
+    );
+    const service = createIndexerService(db);
+
+    await service.indexProject(projectId);
+    const initialTask = await readEntity(projectId, "task.customer");
+    const initialSource = await readEntity(projectId, "domain.customer");
+    await delay(20);
+    await writeSpecFile(
+      specopsPath,
+      "domain/customer.md",
+      specMarkdown({
+        id: "domain.customer",
+        type: "domain_entity",
+        title: "Customer",
+        status: "draft",
+        body: "Customers can manage their account profile and notification settings."
+      })
+    );
+
+    await service.indexProject(projectId);
+
+    const reindexedTask = await readEntity(projectId, "task.customer");
+    const reindexedSource = await readEntity(projectId, "domain.customer");
+    expect(reindexedTask.createdAt.getTime()).toBe(initialTask.createdAt.getTime());
+    expect(reindexedTask.updatedAt.getTime()).toBe(initialTask.updatedAt.getTime());
+    expect(reindexedSource.createdAt.getTime()).toBe(initialSource.createdAt.getTime());
+    expect(reindexedSource.updatedAt.getTime()).toBeGreaterThan(reindexedTask.updatedAt.getTime());
+  });
+
   it("records the current git commit when indexing a git repository", async () => {
     const { projectId, repoPath, specopsPath } = await createProjectFixture();
     await writeSpecFile(
@@ -559,6 +610,16 @@ describeWithDb("indexProject", () => {
     expect(errors).toHaveLength(expected.errors);
     expect(warnings).toHaveLength(expected.warnings);
   }
+
+  async function readEntity(projectId: string, entityId: string) {
+    const [entity] = await db
+      .select()
+      .from(specEntities)
+      .where(and(eq(specEntities.projectId, projectId), eq(specEntities.entityId, entityId)));
+
+    expect(entity).toBeDefined();
+    return entity!;
+  }
 });
 
 describe("readGitStatus", () => {
@@ -660,6 +721,28 @@ function specMarkdown(input: {
     `title: ${input.title}`,
     `status: ${input.status}`,
     ...links,
+    "---",
+    "",
+    input.body,
+    ""
+  ].join("\n");
+}
+
+function agentTaskMarkdown(input: {
+  id: string;
+  title: string;
+  sourceEntity: string;
+  body: string;
+}) {
+  return [
+    "---",
+    `id: ${input.id}`,
+    "type: agent_task",
+    `title: ${input.title}`,
+    "status: open",
+    `source_entity: ${input.sourceEntity}`,
+    "links:",
+    `  generated_from: [${input.sourceEntity}]`,
     "---",
     "",
     input.body,

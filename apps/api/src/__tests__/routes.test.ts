@@ -522,6 +522,50 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("filters project health Git drift to canonical specs and supported source paths", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi({ specopsDirectoryName: "specops" });
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n");
+    await writeFile(path.join(project.specopsPath, "project.yaml"), "name: old\n");
+    await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 1;\n");
+    await writeFile(path.join(project.repoPath, "README.md"), "# Readme\n");
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "routes@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "Routes Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "initial"]);
+
+    await mkdir(path.join(project.repoPath, "dist"), { recursive: true });
+    await writeFile(path.join(project.specopsPath, "domain", "customer.md"), "# Customer\n\nDirty\n");
+    await writeFile(path.join(project.specopsPath, "project.yaml"), "name: dirty\n");
+    await writeFile(path.join(project.specopsPath, "notes.txt"), "not a canonical spec\n");
+    await writeFile(path.join(project.repoPath, "src", "customer.ts"), "export const customer = 2;\n");
+    await writeFile(path.join(project.repoPath, "README.md"), "# Readme\n\nDirty\n");
+    await writeFile(path.join(project.repoPath, ".env"), "SECRET=value\n");
+    await writeFile(path.join(project.repoPath, "dist", "generated.ts"), "export const generated = 1;\n");
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      git: {
+        changedSpecFiles: ["specops/domain/customer.md"],
+        changedSourceFiles: ["src/customer.ts"],
+        untrackedSpecFiles: [],
+        untrackedSourceFiles: []
+      },
+      drift: {
+        currentSpecFileChangeCount: 1,
+        currentSourceFileChangeCount: 1
+      }
+    });
+  });
+
   it("reports nested untracked spec and source files instead of directory placeholders", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi({ specopsDirectoryName: "specops" });
@@ -641,6 +685,66 @@ describeWithDb("database-backed routes", () => {
             entityId: "task.context",
             sourceEntityId: "domain.source",
             reason: "context_spec_changed"
+          }
+        ]
+      }
+    });
+  });
+
+  it("reports no-tracked-hash tasks as stale after a source spec changes and reindexes", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await mkdir(path.join(project.specopsPath, "agent-tasks"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "customer.md"),
+      specEntityMarkdown({
+        id: "domain.customer",
+        type: "domain_entity",
+        title: "Customer",
+        status: "draft",
+        body: "Customers manage profile settings."
+      })
+    );
+    await writeFile(
+      path.join(project.specopsPath, "agent-tasks", "task.customer.md"),
+      agentTaskMarkdown({
+        id: "task.customer",
+        title: "Update Customer Task",
+        sourceEntity: "domain.customer",
+        body: "Review customer profile work."
+      })
+    );
+    const indexer = createIndexerService(db);
+    await indexer.indexProject(project.id);
+    await delay(20);
+    await writeFile(
+      path.join(project.specopsPath, "domain", "customer.md"),
+      specEntityMarkdown({
+        id: "domain.customer",
+        type: "domain_entity",
+        title: "Customer",
+        status: "draft",
+        body: "Customers manage profile settings and notifications."
+      })
+    );
+    await indexer.indexProject(project.id);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      staleTasks: {
+        count: 1,
+        samples: [
+          {
+            entityId: "task.customer",
+            sourceEntityId: "domain.customer",
+            reason: "source_spec_changed"
           }
         ]
       }
@@ -2461,4 +2565,50 @@ function assertSafeTestDatabaseUrl(connectionString: string) {
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function specEntityMarkdown(input: {
+  id: string;
+  type: string;
+  title: string;
+  status: string;
+  body: string;
+}) {
+  return [
+    "---",
+    `id: ${input.id}`,
+    `type: ${input.type}`,
+    `title: ${input.title}`,
+    `status: ${input.status}`,
+    "---",
+    "",
+    input.body,
+    ""
+  ].join("\n");
+}
+
+function agentTaskMarkdown(input: {
+  id: string;
+  title: string;
+  sourceEntity: string;
+  body: string;
+}) {
+  return [
+    "---",
+    `id: ${input.id}`,
+    "type: agent_task",
+    `title: ${input.title}`,
+    "status: open",
+    `source_entity: ${input.sourceEntity}`,
+    "links:",
+    `  generated_from: [${input.sourceEntity}]`,
+    "---",
+    "",
+    input.body,
+    ""
+  ].join("\n");
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

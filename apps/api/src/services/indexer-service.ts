@@ -118,6 +118,14 @@ export function createIndexerService(db: Db) {
           const links = dedupeLinks(sourceValidLinks.filter((link) => !brokenLinkKeys.has(linkKey(link))));
           const errorCount = messages.filter((message) => message.level === "error").length;
           const warningCount = messages.filter((message) => message.level === "warning").length;
+          const indexedAt = new Date();
+          const existingEntities = await tx
+            .select()
+            .from(specEntities)
+            .where(eq(specEntities.projectId, projectId));
+          const existingEntityById = new Map(
+            existingEntities.map((entity) => [entity.entityId, entity])
+          );
 
           await tx.delete(validationMessages).where(eq(validationMessages.projectId, projectId));
           await tx.delete(specLinks).where(eq(specLinks.projectId, projectId));
@@ -138,18 +146,32 @@ export function createIndexerService(db: Db) {
 
           if (entities.length > 0) {
             await tx.insert(specEntities).values(
-              entities.map((entity) => ({
-                projectId,
-                entityId: entity.entityId,
-                type: entity.type,
-                title: entity.title,
-                status: entity.status,
-                filePath: entity.filePath,
-                frontmatterJson: entity.frontmatter,
-                bodyMarkdown: entity.bodyMarkdown,
-                bodyText: entity.bodyText,
-                contentHash: parsedFiles.find(({ parseResult }) => parseResult.entity === entity)?.indexedFile.contentHash ?? sha256(entity.bodyMarkdown)
-              }))
+              entities.map((entity) => {
+                const contentHash =
+                  parsedFiles.find(({ parseResult }) => parseResult.entity === entity)?.indexedFile
+                    .contentHash ?? sha256(entity.bodyMarkdown);
+                const existingEntity = existingEntityById.get(entity.entityId);
+                const entityCreatedAt = existingEntity?.createdAt ?? indexedAt;
+                const entityUpdatedAt =
+                  existingEntity && existingEntity.contentHash === contentHash
+                    ? existingEntity.updatedAt
+                    : indexedAt;
+
+                return {
+                  projectId,
+                  entityId: entity.entityId,
+                  type: entity.type,
+                  title: entity.title,
+                  status: entity.status,
+                  filePath: entity.filePath,
+                  frontmatterJson: entity.frontmatter,
+                  bodyMarkdown: entity.bodyMarkdown,
+                  bodyText: entity.bodyText,
+                  contentHash,
+                  createdAt: entityCreatedAt,
+                  updatedAt: entityUpdatedAt
+                };
+              })
             );
           }
 
