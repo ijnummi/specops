@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type { Db } from "@specops/db";
-import { projects, specEntities, specFiles, specLinks, validationMessages } from "@specops/db";
+import { indexRuns, projects, specEntities, specFiles, specLinks, validationMessages } from "@specops/db";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -174,6 +174,65 @@ describeWithDb("indexProject", () => {
     const result = await createIndexerService(db).indexProject(projectId);
 
     expect(result.gitCommit).toBe(expectedCommit);
+  });
+
+  it("records the git commit after waiting for the per-project advisory lock", async () => {
+    const { projectId, repoPath, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "tasks/TASK-1.md",
+      specMarkdown({
+        id: "TASK-1",
+        type: "task",
+        title: "Build indexer",
+        status: "draft",
+        body: "Implement the derived cache indexer."
+      })
+    );
+    await git(repoPath, ["init"]);
+    await git(repoPath, ["config", "user.email", "specops@example.test"]);
+    await git(repoPath, ["config", "user.name", "SpecOps Test"]);
+    await git(repoPath, ["add", "."]);
+    await git(repoPath, ["commit", "-m", "initial"]);
+    const lockClient = await pool.connect();
+
+    try {
+      await lockClient.query("begin");
+      await lockClient.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        projectId
+      ]);
+
+      const indexPromise = createIndexerService(db).indexProject(projectId);
+      const pending = Symbol("pending");
+      const earlyResult = await Promise.race([indexPromise, delay(100).then(() => pending)]);
+      expect(earlyResult).toBe(pending);
+
+      await writeSpecFile(
+        specopsPath,
+        "notes/NOTE-1.md",
+        specMarkdown({
+          id: "NOTE-1",
+          type: "note",
+          title: "Later note",
+          status: "draft",
+          body: "This change is committed while indexing waits on the lock."
+        })
+      );
+      await git(repoPath, ["add", "."]);
+      await git(repoPath, ["commit", "-m", "later"]);
+      const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: repoPath });
+      const laterCommit = stdout.trim();
+
+      await lockClient.query("commit");
+      const result = await indexPromise;
+
+      expect(result.gitCommit).toBe(laterCommit);
+      const [storedRun] = await db.select().from(indexRuns).where(eq(indexRuns.id, result.id));
+      expect(storedRun?.gitCommit).toBe(laterCommit);
+    } finally {
+      await lockClient.query("rollback").catch(() => undefined);
+      lockClient.release();
+    }
   });
 
   it("keeps indexing successful with null git commit outside git", async () => {

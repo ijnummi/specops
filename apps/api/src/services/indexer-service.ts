@@ -42,14 +42,13 @@ export function createIndexerService(db: Db) {
         throw new Error("Failed to create index run");
       }
 
-      const gitCommit = await readGitHeadCommit(repoPath).catch(() => null);
-
       try {
         const [finishedRun] = await db.transaction(async (tx) => {
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
 
           assertInsideDirectory(repoPath, persistedSpecopsPath);
           const specopsPath = await assertRealPathInsideDirectory(repoPath, persistedSpecopsPath);
+          const gitCommit = await readGitHeadCommit(repoPath).catch(() => null);
           const relativePaths = await discoverMarkdownFiles(specopsPath);
           const parsedFiles = await Promise.all(
             relativePaths.map(async (relativePath) => {
