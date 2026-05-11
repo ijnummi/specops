@@ -1,4 +1,4 @@
-import type { ProjectOverviewDto } from "@specops/contracts";
+import type { ProjectHealthDto, ProjectOverviewDto } from "@specops/contracts";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -31,11 +31,12 @@ import { ProjectOverviewDashboard } from "./project-overview-dashboard.js";
 describe("ProjectOverviewDashboard", () => {
   it("renders health, index, inventory, source evidence, tasks, attention, and entity links", () => {
     const html = renderToStaticMarkup(
-      <ProjectOverviewDashboard projectId="project-1" overview={overview} />
+      <ProjectOverviewDashboard projectId="project-1" overview={overview} health={health} />
     );
 
     expect(html).toContain("Project Health");
     expect(html).toContain("Latest index");
+    expect(html).toContain("Git &amp; Drift");
     expect(html).toContain("Spec Inventory");
     expect(html).toContain("Source Inventory");
     expect(html).toContain("Source Evidence");
@@ -46,10 +47,31 @@ describe("ProjectOverviewDashboard", () => {
     expect(html).toContain("Validation sample needs routing");
     expect(html).toContain("Update Customer");
     expect(html).toContain("Broken link");
+    expect(html).toContain("abc1234");
+    expect(html).toContain("def5678");
+    expect(html).toContain("Index behind HEAD");
+    expect(html).toContain("Stale tasks");
+    expect(html).toContain("Refresh Customer");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.customer:");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.order:");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:task.customer:");
+    expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:task.refresh-customer:");
     expect(html).toContain("/projects/$projectId:project-1::domain_entity");
+  });
+
+  it("renders health errors without replacing the overview dashboard", () => {
+    const html = renderToStaticMarkup(
+      <ProjectOverviewDashboard
+        projectId="project-1"
+        overview={overview}
+        healthError={new Error("Git command failed")}
+      />
+    );
+
+    expect(html).toContain("Project Health");
+    expect(html).toContain("Latest index");
+    expect(html).toContain("Git health unavailable");
+    expect(html).toContain("Git command failed");
   });
 
   it("renders no-index and no-source-facts empty states", () => {
@@ -149,6 +171,49 @@ const overview: ProjectOverviewDto = {
       label: "Broken link",
       entityId: "domain.customer",
       filePath: "domain/customer.md"
+    }
+  ]
+};
+
+const health: ProjectHealthDto = {
+  git: {
+    isRepo: true,
+    headCommit: "abc123456789",
+    indexedCommit: "def567812345",
+    hasUncommittedChanges: true,
+    changedSpecFiles: ["specops/domain/customer.md"],
+    changedSourceFiles: ["src/customer.ts"],
+    untrackedSpecFiles: [],
+    untrackedSourceFiles: []
+  },
+  drift: {
+    indexIsBehindHead: true,
+    currentSpecFileChangeCount: 1,
+    currentSourceFileChangeCount: 1
+  },
+  staleTasks: {
+    count: 1,
+    samples: [
+      {
+        entityId: "task.refresh-customer",
+        title: "Refresh Customer",
+        sourceEntityId: "domain.customer",
+        reason: "source_spec_changed"
+      }
+    ]
+  },
+  attentionItems: [
+    {
+      kind: "index_behind_head",
+      label: "Index is behind the current Git HEAD.",
+      entityId: null,
+      filePath: null
+    },
+    {
+      kind: "stale_agent_task",
+      label: "Refresh Customer may need to be refreshed.",
+      entityId: "task.refresh-customer",
+      filePath: null
     }
   ]
 };

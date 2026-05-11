@@ -7,6 +7,7 @@ import {
   entitiesQuery,
   indexRunsQuery,
   initializeSpecops,
+  projectHealthQuery,
   projectOverviewQuery,
   projectQuery,
   queryKeys,
@@ -54,6 +55,10 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const project = useQuery(projectQuery(projectId));
   const overview = useQuery({
     ...projectOverviewQuery(projectId),
+    enabled: entityId === null && !hasActiveQuery
+  });
+  const health = useQuery({
+    ...projectHealthQuery(projectId),
     enabled: entityId === null && !hasActiveQuery
   });
   const searchResults = useQuery({
@@ -139,6 +144,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   const invalidateProject = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
@@ -298,7 +304,13 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           Loading project overview...
         </div>
       ) : overview.data ? (
-        <ProjectOverviewDashboard projectId={projectId} overview={overview.data} />
+        <ProjectOverviewDashboard
+          projectId={projectId}
+          overview={overview.data}
+          health={health.data}
+          healthError={health.error}
+          isHealthLoading={health.isLoading}
+        />
       ) : (
         <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">
           Project overview is unavailable.

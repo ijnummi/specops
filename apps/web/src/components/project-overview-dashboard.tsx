@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import type { ProjectOverviewDto } from "@specops/contracts";
+import type { ProjectHealthDto, ProjectOverviewDto } from "@specops/contracts";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
@@ -7,6 +7,7 @@ import {
   Database,
   FileCode2,
   FileText,
+  GitBranch,
   ListChecks,
   Network,
   ShieldCheck
@@ -15,12 +16,21 @@ import {
 type ProjectOverviewDashboardProps = {
   projectId: string;
   overview: ProjectOverviewDto;
+  health?: ProjectHealthDto;
+  healthError?: Error | null;
+  isHealthLoading?: boolean;
 };
 
-export function ProjectOverviewDashboard({ projectId, overview }: ProjectOverviewDashboardProps) {
+export function ProjectOverviewDashboard({
+  projectId,
+  overview,
+  health,
+  healthError,
+  isHealthLoading = false
+}: ProjectOverviewDashboardProps) {
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-auto">
-      <section className="grid gap-3 xl:grid-cols-[1.3fr_1fr]">
+      <section className="grid gap-3 xl:grid-cols-[1.3fr_1fr_1fr]">
         <Panel title="Project Health" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />}>
           <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 xl:grid-cols-4">
             <Metric label="Entities" value={overview.project.entityCount} />
@@ -50,6 +60,15 @@ export function ProjectOverviewDashboard({ projectId, overview }: ProjectOvervie
           ) : (
             <EmptyState title="No index runs yet" body="Run indexing to populate dashboard metrics." />
           )}
+        </Panel>
+
+        <Panel title="Git & Drift" icon={<GitBranch className="h-4 w-4" aria-hidden="true" />}>
+          <GitDriftPanel
+            projectId={projectId}
+            health={health}
+            healthError={healthError}
+            isHealthLoading={isHealthLoading}
+          />
         </Panel>
       </section>
 
@@ -200,6 +219,113 @@ function StatusRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function GitDriftPanel({
+  projectId,
+  health,
+  healthError,
+  isHealthLoading
+}: {
+  projectId: string;
+  health?: ProjectHealthDto;
+  healthError?: Error | null;
+  isHealthLoading: boolean;
+}) {
+  if (isHealthLoading) {
+    return (
+      <EmptyState title="Loading Git health" body="Checking local repository state." />
+    );
+  }
+
+  if (healthError) {
+    return <EmptyState title="Git health unavailable" body={healthError.message} />;
+  }
+
+  if (!health) {
+    return <EmptyState title="Git health unavailable" body="Health data has not loaded." />;
+  }
+
+  if (!health.git.isRepo) {
+    return (
+      <EmptyState
+        title="Git unavailable"
+        body="This project path is not inside a Git repository."
+      />
+    );
+  }
+
+  return (
+    <div className="grid gap-3">
+      <dl className="grid gap-2 text-sm text-slate-700">
+        <StatusRow label="HEAD" value={shortCommit(health.git.headCommit)} />
+        <StatusRow label="Indexed" value={shortCommit(health.git.indexedCommit)} />
+        <StatusRow
+          label="State"
+          value={health.drift.indexIsBehindHead ? "Index behind HEAD" : "Index matches HEAD"}
+        />
+      </dl>
+      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-3">
+        <Metric label="Spec changes" value={health.drift.currentSpecFileChangeCount} />
+        <Metric label="Source changes" value={health.drift.currentSourceFileChangeCount} />
+        <Metric label="Stale tasks" value={health.staleTasks.count} tone="warning" />
+      </div>
+      <HealthAttentionList projectId={projectId} items={health.attentionItems.slice(0, 5)} />
+    </div>
+  );
+}
+
+function HealthAttentionList({
+  projectId,
+  items
+}: {
+  projectId: string;
+  items: ProjectHealthDto["attentionItems"];
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="flex items-center gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500">
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">No Git health attention items.</span>
+      </div>
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-slate-200 border-t border-slate-200">
+      {items.map((item, index) => (
+        <li key={`${item.kind}-${item.entityId ?? item.filePath ?? index}`} className="py-2">
+          {item.entityId ? (
+            <Link
+              to="/projects/$projectId/entities/$entityId"
+              params={{ projectId, entityId: item.entityId }}
+              search={{ q: undefined }}
+              className="block min-w-0 text-xs text-slate-700 underline-offset-2 hover:text-slate-950 hover:underline"
+            >
+              <HealthAttentionContent item={item} />
+            </Link>
+          ) : (
+            <div className="min-w-0 text-xs text-slate-700">
+              <HealthAttentionContent item={item} />
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function HealthAttentionContent({
+  item
+}: {
+  item: ProjectHealthDto["attentionItems"][number];
+}) {
+  return (
+    <>
+      <span className="block truncate font-medium">{healthAttentionKindLabel(item.kind)}</span>
+      <span className="mt-0.5 block truncate text-slate-500">{item.label}</span>
+    </>
+  );
+}
+
 function GroupedCounts({
   projectId,
   groups
@@ -342,6 +468,18 @@ function attentionKindLabel(kind: ProjectOverviewDto["attentionItems"][number]["
   if (kind === "validation_error") return "Error";
   if (kind === "validation_warning") return "Warning";
   return "Missing source evidence";
+}
+
+function healthAttentionKindLabel(kind: ProjectHealthDto["attentionItems"][number]["kind"]) {
+  if (kind === "index_behind_head") return "Index behind HEAD";
+  if (kind === "changed_spec_files") return "Spec changes";
+  if (kind === "changed_source_files") return "Source changes";
+  if (kind === "stale_agent_task") return "Stale task";
+  return "Missing task source";
+}
+
+function shortCommit(value: string | null) {
+  return value ? value.slice(0, 7) : "Unknown";
 }
 
 function formatDate(value: string | null) {

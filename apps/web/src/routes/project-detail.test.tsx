@@ -8,7 +8,12 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   invalidateQueries: vi.fn(),
   debouncedValueOverride: null as string | null,
+  healthQueryOptions: [] as Array<{ enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }>,
   overviewQueryOptions: [] as Array<{ enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }>,
+  projectHealthQuery: vi.fn((projectId: string) => ({
+    queryKey: ["projects", projectId, "health"],
+    queryType: "health"
+  })),
   searchQuery: vi.fn((projectId: string, input: { q: string; limit: number }) => ({
     queryKey: ["projects", projectId, "search", input],
     queryType: "search"
@@ -32,6 +37,11 @@ const mocks = vi.hoisted(() => ({
     data: { project: { id: "project-1", name: "SpecOps" } },
     error: null,
     isLoading: false
+  } as { data: unknown; error: Error | null; isLoading: boolean },
+  healthState: {
+    data: { git: { isRepo: true } },
+    error: null,
+    isLoading: false
   } as { data: unknown; error: Error | null; isLoading: boolean }
 }));
 
@@ -50,6 +60,7 @@ vi.mock("../api/queries.js", () => ({
     queryKey: ["projects", projectId, "overview"],
     queryType: "overview"
   })),
+  projectHealthQuery: mocks.projectHealthQuery,
   projectQuery: vi.fn((projectId: string) => ({
     queryKey: ["projects", projectId],
     queryType: "project"
@@ -58,6 +69,7 @@ vi.mock("../api/queries.js", () => ({
     entities: (projectId: string) => ["projects", projectId, "entities"],
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
     project: (projectId: string) => ["projects", projectId],
+    projectHealth: (projectId: string) => ["projects", projectId, "health"],
     projectOverview: (projectId: string) => ["projects", projectId, "overview"],
     search: (projectId: string, input: { q: string; limit: number }) => [
       "projects",
@@ -112,6 +124,11 @@ vi.mock("@tanstack/react-query", () => ({
     { data: [], error: null }
   ],
   useQuery: (options: { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }) => {
+    if (options.queryType === "health") {
+      mocks.healthQueryOptions.push(options);
+      return mocks.healthState;
+    }
+
     if (options.queryType === "overview") {
       mocks.overviewQueryOptions.push(options);
       return mocks.overviewState;
@@ -183,8 +200,17 @@ vi.mock("../components/project-actions.js", () => ({
 }));
 
 vi.mock("../components/project-overview-dashboard.js", () => ({
-  ProjectOverviewDashboard: ({ projectId }: { projectId: string }) => (
-    <div>Project overview dashboard: {projectId}</div>
+  ProjectOverviewDashboard: ({
+    projectId,
+    healthError
+  }: {
+    projectId: string;
+    healthError?: Error | null;
+  }) => (
+    <div>
+      Project overview dashboard: {projectId}
+      {healthError ? <span>{healthError.message}</span> : null}
+    </div>
   )
 }));
 
@@ -201,10 +227,12 @@ import { ProjectDetailPage } from "./project-detail.js";
 describe("ProjectDetailPage actions", () => {
   beforeEach(() => {
     mocks.bootstrapFromSource.mockReset();
+    mocks.projectHealthQuery.mockClear();
     mocks.searchQuery.mockClear();
     mocks.projectActionsProps = null;
     mocks.invalidateQueries.mockReset();
     mocks.debouncedValueOverride = null;
+    mocks.healthQueryOptions = [];
     mocks.overviewQueryOptions = [];
     mocks.searchQueryOptions = [];
     mocks.searchState = {
@@ -222,6 +250,11 @@ describe("ProjectDetailPage actions", () => {
     };
     mocks.overviewState = {
       data: { project: { id: "project-1", name: "SpecOps" } },
+      error: null,
+      isLoading: false
+    };
+    mocks.healthState = {
+      data: { git: { isRepo: true } },
       error: null,
       isLoading: false
     };
@@ -380,6 +413,42 @@ describe("ProjectDetailPage actions", () => {
     );
   });
 
+  it("enables project health only for the overview route", () => {
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId="entity-1" query="" />);
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="customer" />);
+
+    expect(mocks.healthQueryOptions).toEqual([
+      expect.objectContaining({
+        enabled: true,
+        queryKey: ["projects", "project-1", "health"]
+      }),
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "health"]
+      }),
+      expect.objectContaining({
+        enabled: false,
+        queryKey: ["projects", "project-1", "health"]
+      })
+    ]);
+  });
+
+  it("passes project health errors to the overview dashboard", () => {
+    mocks.healthState = {
+      data: undefined,
+      error: new Error("Git health failed"),
+      isLoading: false
+    };
+
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="" />
+    );
+
+    expect(html).toContain("Project overview dashboard: project-1");
+    expect(html).toContain("Git health failed");
+  });
+
   it("wires the bootstrap action to bootstrap the current project from source", () => {
     renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
 
@@ -395,6 +464,9 @@ describe("ProjectDetailPage actions", () => {
 
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "overview"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "health"]
     });
   });
 
