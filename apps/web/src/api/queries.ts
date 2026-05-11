@@ -14,6 +14,7 @@ import type {
   EntitySearchResultDto,
   EntityImpactQuery,
   EntityImpactResponseDto,
+  EntityReadinessDto,
   IndexRunDto,
   ProposalDetailDto,
   ProposalListQuery,
@@ -22,6 +23,7 @@ import type {
   ProjectDto,
   ProjectHealthDto,
   ProjectOverviewDto,
+  ProjectReadinessDto,
   SaveAgentTaskRequest,
   SaveAgentTaskResponse,
   SpecEntityDto,
@@ -85,6 +87,7 @@ export const queryKeys = {
   project: (projectId: string) => ["projects", projectId] as const,
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
+  projectReadiness: (projectId: string) => ["projects", projectId, "readiness"] as const,
   proposalsRoot: (projectId: string) => ["projects", projectId, "proposals"] as const,
   proposals: (projectId: string, input: ProposalListQuery = {}) =>
     ["projects", projectId, "proposals", input] as const,
@@ -95,6 +98,8 @@ export const queryKeys = {
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
   entity: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId] as const,
+  entityReadiness: (projectId: string, entityId: string) =>
+    ["projects", projectId, "entities", entityId, "readiness"] as const,
   outgoingLinks: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId, "outgoing-links"] as const,
   backlinks: (projectId: string, entityId: string) =>
@@ -142,6 +147,14 @@ export function projectHealthQuery(projectId: string) {
   return queryOptions({
     queryKey: queryKeys.projectHealth(projectId),
     queryFn: () => apiGet<ProjectHealthDto>(`/api/projects/${encodeURIComponent(projectId)}/health`)
+  });
+}
+
+export function projectReadinessQuery(projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.projectReadiness(projectId),
+    queryFn: () =>
+      apiGet<ProjectReadinessDto>(`/api/projects/${encodeURIComponent(projectId)}/readiness`)
   });
 }
 
@@ -217,6 +230,18 @@ export function entityQuery(projectId: string, entityId: string) {
     queryFn: () =>
       apiGet<SpecEntityDto>(
         `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(entityId)}`
+      )
+  });
+}
+
+export function entityReadinessQuery(projectId: string, entityId: string) {
+  return queryOptions({
+    queryKey: queryKeys.entityReadiness(projectId, entityId),
+    queryFn: () =>
+      apiGet<EntityReadinessDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
+          entityId
+        )}/readiness`
       )
   });
 }

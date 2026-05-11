@@ -6,6 +6,7 @@ import { Bot, Network, Save, Sparkles } from "lucide-react";
 
 import {
   backlinksQuery,
+  entityReadinessQuery,
   entityQuery,
   entitySourceLinksQuery,
   outgoingLinksQuery,
@@ -23,6 +24,7 @@ import { entityMarkdownForEditing } from "./entity-editor-markdown.js";
 import { validateEntityMarkdownIdentity } from "./entity-markdown.js";
 import { LinkPanels } from "./link-panels.js";
 import { MarkdownEditor } from "./markdown-editor.js";
+import { ReadinessPanel } from "./readiness-panel.js";
 import { SourceLinkTabs } from "./source-link-tabs.js";
 
 type EntityDetailProps = {
@@ -61,6 +63,7 @@ export function EntityDetail({
   const currentEntityIdRef = useRef(entityId);
   const currentProjectIdRef = useRef(projectId);
   const entity = useQuery(entityQuery(projectId, entityId));
+  const readiness = useQuery(entityReadinessQuery(projectId, entityId));
   const sourceLinks = useQuery({
     ...entitySourceLinksQuery(projectId, entityId),
     enabled: Boolean(entityId)
@@ -125,6 +128,8 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.outgoingLinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.backlinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sourceLinks(projectId, entityId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.entityReadiness(projectId, entityId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
@@ -199,6 +204,10 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(request.projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(request.projectId) }),
         queryClient.invalidateQueries({
+          queryKey: queryKeys.entityReadiness(request.projectId, request.sourceEntityId)
+        }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(request.projectId) }),
+        queryClient.invalidateQueries({
           queryKey: queryKeys.outgoingLinks(request.projectId, request.sourceEntityId)
         }),
         queryClient.invalidateQueries({
@@ -206,6 +215,9 @@ export function EntityDetail({
         }),
         queryClient.invalidateQueries({
           queryKey: queryKeys.entity(request.projectId, savedTask.entityId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.entityReadiness(request.projectId, savedTask.entityId)
         }),
         ...contextBacklinkInvalidations
       ]);
@@ -419,6 +431,12 @@ export function EntityDetail({
         backlinks={backlinks.data ?? []}
         onBeforeSelect={onBeforeSelect}
       />
+      {readiness.error ? (
+        <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          {readiness.error.message}
+        </div>
+      ) : null}
+      {readiness.data ? <ReadinessPanel readiness={readiness.data} /> : null}
       <EntityValidation projectId={projectId} entityId={entityId} />
     </div>
   );

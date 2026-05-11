@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { SpecEntityDto } from "@specops/contracts";
+import type { EntityReadinessDto, SpecEntityDto } from "@specops/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -26,6 +26,15 @@ const mocks = vi.hoisted(() => ({
     createdAt: "2026-05-09T12:00:00.000Z",
     updatedAt: "2026-05-09T12:00:00.000Z"
   } satisfies SpecEntityDto,
+  readiness: {
+    entityId: "domain.decision",
+    title: "Decision",
+    type: "domain_entity",
+    status: "draft",
+    filePath: "spec/domain/decision.md",
+    readiness: "ready",
+    checks: []
+  } satisfies EntityReadinessDto,
   invalidateQueries: vi.fn(),
   mutationOptions: [] as Array<{
     onSuccess?: (data: unknown, variables: unknown) => unknown;
@@ -49,6 +58,9 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: readonly string[] }) => {
     if (options.queryKey[0] === "entity") {
       return { data: mocks.entity, error: null, isLoading: false };
+    }
+    if (options.queryKey[0] === "entity-readiness") {
+      return { data: mocks.readiness, error: null, isLoading: false };
     }
 
     return { data: [], error: null, isLoading: false };
@@ -85,6 +97,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("../api/queries.js", () => ({
   backlinksQuery: () => ({ queryKey: ["backlinks"] }),
+  entityReadinessQuery: () => ({ queryKey: ["entity-readiness"] }),
   entityQuery: () => ({ queryKey: ["entity"] }),
   entitySourceLinksQuery: () => ({ queryKey: ["source-links"] }),
   outgoingLinksQuery: () => ({ queryKey: ["outgoing-links"] }),
@@ -93,11 +106,17 @@ vi.mock("../api/queries.js", () => ({
     backlinks: (projectId: string, entityId: string) => ["backlinks", projectId, entityId],
     entities: (projectId: string) => ["entities", projectId],
     entity: (projectId: string, entityId: string) => ["entity", projectId, entityId],
+    entityReadiness: (projectId: string, entityId: string) => [
+      "entity-readiness",
+      projectId,
+      entityId
+    ],
     indexRuns: (projectId: string) => ["index-runs", projectId],
     outgoingLinks: (projectId: string, entityId: string) => ["outgoing-links", projectId, entityId],
     project: (projectId: string) => ["project", projectId],
     projectHealth: (projectId: string) => ["project-health", projectId],
     projectOverview: (projectId: string) => ["project-overview", projectId],
+    projectReadiness: (projectId: string) => ["project-readiness", projectId],
     sourceLinks: (projectId: string, entityId: string) => ["source-links", projectId, entityId],
     validation: (projectId: string) => ["validation", projectId]
   },
@@ -165,6 +184,12 @@ describe("EntityDetail", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["project-health", "project-1"]
     });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["entity-readiness", "project-1", "domain.decision"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["project-readiness", "project-1"]
+    });
   });
 
   it("invalidates the project overview after saving a generated task", async () => {
@@ -189,6 +214,12 @@ describe("EntityDetail", () => {
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["project-health", "project-1"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["entity-readiness", "project-1", "domain.decision"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["project-readiness", "project-1"]
     });
   });
 });
