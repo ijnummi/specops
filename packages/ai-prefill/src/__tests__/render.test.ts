@@ -82,6 +82,82 @@ describe("renderAiSpecEntityProposal", () => {
       "- implemented_by -> interface.project-service: Project service handles persistence."
     );
   });
+
+  it("renders exact markdown for a simple use case candidate", () => {
+    const proposal = renderAiSpecEntityProposal({
+      candidate: {
+        entityId: "uc.manage-projects",
+        type: "use_case",
+        title: "Manage projects",
+        summary: "Users can create, list, and update projects.",
+        sourceFiles: ["apps/api/src/routes/projects.ts"],
+        claims: [
+          {
+            text: "The route lists project records for authenticated users.",
+            sourceFiles: ["apps/api/src/routes/projects.ts"]
+          }
+        ],
+        proposedLinks: [],
+        confidence: null
+      },
+      provider: "ollama",
+      model: "qwen2.5-coder:7b",
+      packet: promptPacket()
+    });
+
+    expect(proposal.payload.generatedMarkdown).toBe(`---
+id: uc.manage-projects
+type: use_case
+title: Manage projects
+status: draft
+links: {}
+source_files:
+  - apps/api/src/routes/projects.ts
+---
+
+# Manage projects
+
+Users can create, list, and update projects.
+
+## Source Evidence
+
+- The route lists project records for authenticated users. (apps/api/src/routes/projects.ts)
+
+## Proposed Links
+
+- None
+`);
+  });
+
+  it("maps domain entity and interface candidates to their directories", () => {
+    expect(
+      renderAiSpecEntityProposal({
+        candidate: {
+          ...candidate(),
+          entityId: "domain.project",
+          type: "domain_entity",
+          title: "Project"
+        },
+        provider: "ollama",
+        model: "qwen2.5-coder:7b",
+        packet: promptPacket()
+      }).payload.filePath
+    ).toBe("domain/domain.project.md");
+
+    expect(
+      renderAiSpecEntityProposal({
+        candidate: {
+          ...candidate(),
+          entityId: "interface.project-service",
+          type: "interface",
+          title: "Project service"
+        },
+        provider: "ollama",
+        model: "qwen2.5-coder:7b",
+        packet: promptPacket()
+      }).payload.filePath
+    ).toBe("interfaces/interface.project-service.md");
+  });
 });
 
 function candidate(): AiPrefillCandidate {

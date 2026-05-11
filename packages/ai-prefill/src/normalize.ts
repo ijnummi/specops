@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type {
   AiPrefillCandidate,
+  AiPrefillEntityType,
   NormalizeProviderResponseInput,
   NormalizeProviderResponseResult
 } from "./types.js";
@@ -33,6 +34,12 @@ const proposalSchema = z.object({
   confidence: z.number().min(0).max(1).nullable().default(null)
 });
 
+const entityIdPatternByType: Record<AiPrefillEntityType, RegExp> = {
+  use_case: /^uc\.[a-z0-9]+(?:-[a-z0-9]+)*$/,
+  domain_entity: /^domain\.[a-z0-9]+(?:-[a-z0-9]+)*$/,
+  interface: /^interface\.[a-z0-9]+(?:-[a-z0-9]+)*$/
+};
+
 export function normalizeProviderResponse(
   input: NormalizeProviderResponseInput
 ): NormalizeProviderResponseResult {
@@ -62,6 +69,14 @@ export function normalizeProviderResponse(
       diagnostics.push({
         level: "warning",
         message: `Rejected proposal ${proposalNumber}: invalid shape`
+      });
+      return;
+    }
+
+    if (!entityIdPatternByType[candidate.data.type].test(candidate.data.entityId)) {
+      diagnostics.push({
+        level: "warning",
+        message: `Rejected proposal ${proposalNumber}: invalid entity id`
       });
       return;
     }

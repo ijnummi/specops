@@ -159,6 +159,30 @@ describe("normalizeProviderResponse", () => {
     ]);
   });
 
+  it("rejects unsafe and type-mismatched entity ids with warning diagnostics", () => {
+    const result = normalizeProviderResponse({
+      text: JSON.stringify({
+        proposals: [
+          validProposal({ entityId: "../../outside", type: "use_case" }),
+          validProposal({ entityId: "domain/foo", type: "domain_entity" }),
+          validProposal({ entityId: "domain.project", type: "use_case" }),
+          validProposal({ entityId: "uc.manage-projects", type: "use_case" })
+        ]
+      }),
+      selectedSourceFiles: ["apps/api/src/routes/projects.ts"],
+      existingEntityIds: new Set()
+    });
+
+    expect(result.candidates.map((candidate) => candidate.entityId)).toEqual([
+      "uc.manage-projects"
+    ]);
+    expect(result.diagnostics).toEqual([
+      { level: "warning", message: "Rejected proposal 1: invalid entity id" },
+      { level: "warning", message: "Rejected proposal 2: invalid entity id" },
+      { level: "warning", message: "Rejected proposal 3: invalid entity id" }
+    ]);
+  });
+
   it("throws a clear error for non-JSON responses", () => {
     expect(() =>
       normalizeProviderResponse({
@@ -169,3 +193,19 @@ describe("normalizeProviderResponse", () => {
     ).toThrow("AI provider returned invalid JSON");
   });
 });
+
+function validProposal(input: { entityId: string; type: string }) {
+  return {
+    entityId: input.entityId,
+    type: input.type,
+    title: "Manage projects",
+    summary: "Users can create and review project records.",
+    sourceFiles: ["apps/api/src/routes/projects.ts"],
+    claims: [
+      {
+        text: "The route exposes project listing behavior.",
+        sourceFiles: ["apps/api/src/routes/projects.ts"]
+      }
+    ]
+  };
+}

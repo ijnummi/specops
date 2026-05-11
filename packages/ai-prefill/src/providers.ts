@@ -12,16 +12,20 @@ export type CreateAiPrefillProviderInput = {
   timeoutMs?: number;
 };
 
+const defaultTimeoutMs = 60_000;
+
 export function createAiPrefillProvider(
   input: CreateAiPrefillProviderInput
 ): AiPrefillProvider {
+  const timeoutMs = input.timeoutMs ?? defaultTimeoutMs;
+
   if (input.provider === "ollama") {
     const baseUrl = trimTrailingSlash(input.ollamaBaseUrl ?? "http://127.0.0.1:11434");
     return {
       async generateSpecProposals(providerInput) {
         const json = await postJson({
           url: `${baseUrl}/api/chat`,
-          timeoutMs: input.timeoutMs,
+          timeoutMs,
           body: {
             model: providerInput.model,
             messages: providerInput.packet.messages,
@@ -30,7 +34,8 @@ export function createAiPrefillProvider(
           }
         });
 
-        return result(input.provider, providerInput.model, json.message?.content ?? "");
+        const text = readOllamaMessageContent(json);
+        return result(input.provider, providerInput.model, text);
       }
     };
   }
@@ -45,7 +50,7 @@ export function createAiPrefillProvider(
     async generateSpecProposals(providerInput) {
       const json = await postJson({
         url: `${baseUrl}/chat/completions`,
-        timeoutMs: input.timeoutMs,
+        timeoutMs,
         headers: { Authorization: `Bearer ${apiKey}` },
         body: {
           model: providerInput.model,
@@ -55,11 +60,8 @@ export function createAiPrefillProvider(
         }
       });
 
-      return result(
-        input.provider,
-        providerInput.model,
-        json.choices?.[0]?.message?.content ?? ""
-      );
+      const text = readOpenAiMessageContent(json);
+      return result(input.provider, providerInput.model, text);
     }
   };
 }
@@ -69,7 +71,7 @@ async function postJson(input: {
   body: unknown;
   timeoutMs?: number;
   headers?: Record<string, string>;
-}): Promise<any> {
+}): Promise<unknown> {
   const controller = new AbortController();
   const timeout =
     input.timeoutMs === undefined
@@ -91,7 +93,7 @@ async function postJson(input: {
       throw new Error(`AI provider request failed with status ${response.status}`);
     }
 
-    return response.json();
+    return response.json() as Promise<unknown>;
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);
@@ -105,6 +107,41 @@ function result(
   text: string
 ): AiPrefillProviderResult {
   return { provider, model, text };
+}
+
+function readOllamaMessageContent(json: unknown): string {
+  if (!isRecord(json)) {
+    throw new Error("Ollama response did not include message content");
+  }
+
+  const message = json.message;
+  if (!isRecord(message) || typeof message.content !== "string") {
+    throw new Error("Ollama response did not include message content");
+  }
+
+  return message.content;
+}
+
+function readOpenAiMessageContent(json: unknown): string {
+  if (!isRecord(json) || !Array.isArray(json.choices)) {
+    throw new Error("OpenAI response did not include message content");
+  }
+
+  const firstChoice = json.choices[0];
+  if (!isRecord(firstChoice) || !isRecord(firstChoice.message)) {
+    throw new Error("OpenAI response did not include message content");
+  }
+
+  const { content } = firstChoice.message;
+  if (typeof content !== "string") {
+    throw new Error("OpenAI response did not include message content");
+  }
+
+  return content;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function trimTrailingSlash(value: string): string {
