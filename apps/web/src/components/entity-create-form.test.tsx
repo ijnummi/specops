@@ -36,6 +36,7 @@ vi.mock("../api/queries.js", () => ({
     entities: (projectId: string) => ["projects", projectId, "entities"],
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
     project: (projectId: string) => ["projects", projectId],
+    projectHealth: (projectId: string) => ["projects", projectId, "health"],
     projectOverview: (projectId: string) => ["projects", projectId, "overview"],
     validation: (projectId: string) => ["projects", projectId, "validation-messages"]
   }
@@ -76,6 +77,9 @@ describe("EntityCreateForm", () => {
 
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "overview"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "health"]
     });
   });
 });

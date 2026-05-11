@@ -33,6 +33,7 @@ export function EntityCreateForm({ projectId }: { projectId: string }) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) })

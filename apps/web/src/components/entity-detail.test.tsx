@@ -96,6 +96,7 @@ vi.mock("../api/queries.js", () => ({
     indexRuns: (projectId: string) => ["index-runs", projectId],
     outgoingLinks: (projectId: string, entityId: string) => ["outgoing-links", projectId, entityId],
     project: (projectId: string) => ["project", projectId],
+    projectHealth: (projectId: string) => ["project-health", projectId],
     projectOverview: (projectId: string) => ["project-overview", projectId],
     sourceLinks: (projectId: string, entityId: string) => ["source-links", projectId, entityId],
     validation: (projectId: string) => ["validation", projectId]
@@ -161,6 +162,9 @@ describe("EntityDetail", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["project-overview", "project-1"]
     });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["project-health", "project-1"]
+    });
   });
 
   it("invalidates the project overview after saving a generated task", async () => {
@@ -182,6 +186,9 @@ describe("EntityDetail", () => {
 
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["project-overview", "project-1"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["project-health", "project-1"]
     });
   });
 });

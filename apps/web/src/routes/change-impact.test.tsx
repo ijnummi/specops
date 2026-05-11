@@ -44,6 +44,10 @@ vi.mock("../api/queries.js", async () => {
       queryFn: async () => changeImpactPreviewResponse()
     }),
     previewAgentTask: mocks.previewAgentTask,
+    queryKeys: {
+      ...actual.queryKeys,
+      projectHealth: (projectId: string) => ["projects", projectId, "health"] as const
+    },
     saveAgentTask: mocks.saveAgentTask
   };
 });
@@ -137,6 +141,9 @@ describe("ChangeImpactPage", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "overview"]
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "health"]
     });
   });
 
