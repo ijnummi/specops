@@ -45,11 +45,11 @@ export const sourceSpecEntityProposalEvidenceSchema = z.object({
   )
 });
 
-export const proposalConflictSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("none") }),
-  z.object({ type: z.literal("file_exists"), filePath: z.string().min(1) }),
-  z.object({ type: z.literal("entity_exists"), entityId: z.string().min(1) }),
-  z.object({ type: z.literal("unavailable"), message: z.string().min(1) })
+export const proposalConflictSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("none") }),
+  z.object({ status: z.literal("file_exists"), filePath: z.string().min(1) }),
+  z.object({ status: z.literal("entity_exists"), entityId: z.string().min(1) }),
+  z.object({ status: z.literal("unavailable"), message: z.string().min(1) })
 ]);
 
 export const proposalSummarySchema = z.object({
@@ -61,7 +61,7 @@ export const proposalSummarySchema = z.object({
   entityId: z.string(),
   entityType: z.enum(["domain_entity", "interface"]),
   filePath: z.string(),
-  confidence: z.number(),
+  confidence: z.number().nullable(),
   conflict: proposalConflictSchema,
   createdAt: z.string(),
   reviewedAt: z.string().nullable()
@@ -102,7 +102,8 @@ export type SourceSpecEntityProposalPayload = z.infer<
 export type SourceSpecEntityProposalEvidence = z.infer<
   typeof sourceSpecEntityProposalEvidenceSchema
 >;
-export type ProposalConflict = z.infer<typeof proposalConflictSchema>;
+export type ProposalConflictDto = z.infer<typeof proposalConflictSchema>;
+export type ProposalConflict = ProposalConflictDto;
 export type ProposalSummaryDto = z.infer<typeof proposalSummarySchema>;
 export type ProposalDetailDto = z.infer<typeof proposalDetailSchema>;
 export type ProposalListQuery = z.infer<typeof proposalListQuerySchema>;

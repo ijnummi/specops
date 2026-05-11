@@ -23,7 +23,10 @@ describe("proposal contracts", () => {
 
     expect(parsed.proposalType).toBe("source_spec_entity");
     expect(parsed.status).toBe("pending");
-    expect(parsed.conflict.type).toBe("none");
+    expect(parsed.conflict.status).toBe("none");
+    expect(proposalSummarySchema.parse({ ...proposalSummary(), confidence: null }).confidence).toBe(
+      null
+    );
   });
 
   it("parses proposal list queries", () => {
@@ -81,7 +84,7 @@ function proposalSummary() {
     entityType: "interface",
     filePath: "interfaces/decision-service.md",
     confidence: 0.7,
-    conflict: { type: "none" },
+    conflict: { status: "none" },
     createdAt: "2026-05-11T10:00:00.000Z",
     reviewedAt: null
   };

@@ -221,7 +221,9 @@ describe("generateBootstrapSpecFiles", () => {
 
 describe("generateBootstrapSpecProposals", () => {
   it("generates source spec entity proposals from bootstrap spec files", () => {
-    const proposals = generateBootstrapSpecProposals(scanResult());
+    const scan = scanResult();
+    const files = generateBootstrapSpecFiles(scan);
+    const proposals = generateBootstrapSpecProposals(scan);
 
     expect(proposals.map((proposal) => proposal.payload.filePath)).toEqual([
       "domain/decision-link.md",
@@ -233,6 +235,9 @@ describe("generateBootstrapSpecProposals", () => {
 
     const decisionService = proposals.find(
       (proposal) => proposal.payload.filePath === "interfaces/decision-service.md"
+    );
+    const decisionServiceFile = files.find(
+      (file) => file.path === "interfaces/decision-service.md"
     );
 
     expect(decisionService).toMatchObject({
@@ -258,6 +263,8 @@ describe("generateBootstrapSpecProposals", () => {
         ]
       }
     });
+    expect(decisionService?.payload.generatedMarkdown).toBe(decisionService?.payload.markdown);
+    expect(decisionService?.payload.generatedMarkdown).toBe(decisionServiceFile?.content);
   });
 });
 
