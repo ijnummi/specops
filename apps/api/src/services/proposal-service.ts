@@ -1,7 +1,8 @@
-import { stat } from "node:fs/promises";
+import { access, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  AcceptProposalsResponse,
   AcceptProposalsRequest,
   ProposalDetailDto,
   ProposalPatchRequest,
@@ -18,9 +19,10 @@ import {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import { aiProposals, specEntities } from "@specops/db";
+import { parseSpecMarkdown } from "@specops/markdown";
 import { scanRepository } from "@specops/repo-scanner";
 import { generateBootstrapSpecProposals } from "@specops/source-bootstrap";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
 import {
@@ -29,6 +31,7 @@ import {
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
+import { createIndexerService } from "./indexer-service.js";
 import { createProjectService } from "./project-service.js";
 
 type ProposalRow = typeof aiProposals.$inferSelect;
@@ -182,10 +185,156 @@ export function createProposalService(db: Db) {
   }
 
   async function acceptProposals(
-    _projectId: string,
-    _input: AcceptProposalsRequest
-  ): Promise<never> {
-    throw new BadRequestError("Proposal acceptance is not implemented");
+    projectId: string,
+    input: AcceptProposalsRequest
+  ): Promise<AcceptProposalsResponse> {
+    const project = await projectService.getProject(projectId);
+    const repoPath = assertAbsolutePath("repoPath", project.repoPath);
+    const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
+    const writtenPaths: string[] = [];
+
+    assertInsideDirectory(repoPath, specopsPath);
+    await assertRealPathInsideDirectory(repoPath, repoPath);
+    await assertExistingParentInsideDirectory(repoPath, specopsPath);
+    await mkdir(specopsPath, { recursive: true });
+    const realSpecopsPath = await assertRealPathInsideDirectory(repoPath, specopsPath);
+
+    const uniqueProposalIds = [...new Set(input.proposalIds)];
+    const rows = await db
+      .select()
+      .from(aiProposals)
+      .where(
+        and(
+          eq(aiProposals.projectId, projectId),
+          eq(aiProposals.proposalType, sourceSpecEntityProposalType),
+          inArray(aiProposals.id, uniqueProposalIds)
+        )
+      );
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+    const selectedRows = input.proposalIds.map((proposalId) => {
+      const row = rowById.get(proposalId);
+      if (!row) {
+        throw new NotFoundError("Proposal not found", { projectId, proposalId });
+      }
+      return row;
+    });
+
+    const selected = await Promise.all(
+      selectedRows.map(async (row) => {
+        if (row.status !== "pending") {
+          throw new ConflictError("Only pending proposals can be accepted", {
+            proposalId: row.id,
+            status: row.status
+          });
+        }
+
+        const payload = parsePayload(row);
+        const parsed = parseSpecMarkdown(payload.filePath, payload.markdown);
+        const errorMessages = parsed.messages.filter((message) => message.level === "error");
+        if (errorMessages.length > 0 || !parsed.entity) {
+          throw new BadRequestError("Invalid proposal markdown", {
+            proposalId: row.id,
+            messages: parsed.messages
+          });
+        }
+
+        if (parsed.entity.entityId !== payload.entityId) {
+          throw new BadRequestError("Proposal markdown entity id mismatch", {
+            proposalId: row.id,
+            expectedEntityId: payload.entityId,
+            receivedEntityId: parsed.entity.entityId
+          });
+        }
+
+        if (parsed.entity.type !== payload.type) {
+          throw new BadRequestError("Proposal markdown entity type mismatch", {
+            proposalId: row.id,
+            expectedEntityType: payload.type,
+            receivedEntityType: parsed.entity.type
+          });
+        }
+
+        const targetPath = assertInsideDirectory(
+          realSpecopsPath,
+          path.join(realSpecopsPath, payload.filePath)
+        );
+        const targetParent = path.dirname(targetPath);
+        await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
+        await mkdir(targetParent, { recursive: true });
+        await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
+
+        try {
+          await access(targetPath);
+          throw new ConflictError("Proposal target markdown file already exists", {
+            proposalId: row.id,
+            filePath: payload.filePath
+          });
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+        }
+
+        return {
+          row,
+          payload,
+          targetPath,
+          acceptedStatus:
+            payload.markdown === payload.generatedMarkdown ? "accepted" : "edited_and_accepted"
+        };
+      })
+    );
+
+    assertNoDuplicateSelectedTargets(selected);
+    await assertNoExistingIndexedEntities(projectId, selected.map(({ payload }) => payload.entityId));
+
+    try {
+      for (const item of selected) {
+        await writeFile(item.targetPath, item.payload.markdown, { flag: "wx" });
+        writtenPaths.push(item.targetPath);
+      }
+
+      const indexRun = await createIndexerService(db).indexProject(projectId);
+      const reviewedAt = new Date();
+
+      await db.transaction(async (tx) => {
+        for (const item of selected) {
+          await tx
+            .update(aiProposals)
+            .set({ status: item.acceptedStatus, reviewedAt })
+            .where(
+              and(
+                eq(aiProposals.projectId, projectId),
+                eq(aiProposals.id, item.row.id)
+              )
+            );
+        }
+      });
+
+      return { acceptedProposalIds: input.proposalIds, indexRun };
+    } catch (error) {
+      await Promise.all(writtenPaths.map((writtenPath) => rm(writtenPath, { force: true })));
+      if (isFileExistsError(error)) {
+        throw new ConflictError("Proposal target markdown file already exists");
+      }
+      throw error;
+    }
+  }
+
+  async function assertNoExistingIndexedEntities(
+    projectId: string,
+    entityIds: string[]
+  ): Promise<void> {
+    const rows = await db
+      .select({ entityId: specEntities.entityId })
+      .from(specEntities)
+      .where(and(eq(specEntities.projectId, projectId), inArray(specEntities.entityId, entityIds)));
+
+    if (rows.length > 0) {
+      throw new ConflictError("Proposal target entity already exists", {
+        entityId: rows[0].entityId
+      });
+    }
   }
 
   async function getProposalRow(projectId: string, proposalId: string): Promise<ProposalRow> {
@@ -256,6 +405,33 @@ export function createProposalService(db: Db) {
   };
 }
 
+function assertNoDuplicateSelectedTargets(
+  selected: Array<{ row: ProposalRow; payload: SourceSpecEntityProposalPayload }>
+): void {
+  const entityIds = new Map<string, string>();
+  const filePaths = new Map<string, string>();
+
+  for (const item of selected) {
+    const existingEntityProposalId = entityIds.get(item.payload.entityId);
+    if (existingEntityProposalId) {
+      throw new ConflictError("Selected proposals target the same entity", {
+        entityId: item.payload.entityId,
+        proposalIds: [existingEntityProposalId, item.row.id]
+      });
+    }
+    entityIds.set(item.payload.entityId, item.row.id);
+
+    const existingFileProposalId = filePaths.get(item.payload.filePath);
+    if (existingFileProposalId) {
+      throw new ConflictError("Selected proposals target the same file", {
+        filePath: item.payload.filePath,
+        proposalIds: [existingFileProposalId, item.row.id]
+      });
+    }
+    filePaths.set(item.payload.filePath, item.row.id);
+  }
+}
+
 function parsePayload(row: ProposalRow): SourceSpecEntityProposalPayload {
   return sourceSpecEntityProposalPayloadSchema.parse(row.payloadJson);
 }
@@ -303,5 +479,14 @@ function isNotFoundError(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     error.code === "ENOENT"
+  );
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "EEXIST"
   );
 }

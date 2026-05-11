@@ -1566,6 +1566,120 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("accepts selected source import proposals, writes markdown, and re-indexes", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposal = findProposalByEntityId(
+      generateResponse.json() as ProposalSummaryForTest[],
+      "interface.decision-service"
+    );
+
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [proposal.id] }
+    });
+    const targetPath = path.join(project.specopsPath, "interfaces", "decision-service.md");
+    const writtenMarkdown = await readFile(targetPath, "utf8");
+
+    expect(acceptResponse.statusCode).toBe(200);
+    expect(acceptResponse.json()).toMatchObject({
+      acceptedProposalIds: [proposal.id],
+      indexRun: { status: "succeeded" }
+    });
+    expect(writtenMarkdown).toContain("id: interface.decision-service");
+  });
+
+  it("marks edited accepted proposals as edited_and_accepted", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposal = findProposalByEntityId(
+      generateResponse.json() as ProposalSummaryForTest[],
+      "interface.decision-service"
+    );
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detail = detailResponse.json() as {
+      payload: { markdown: string };
+    };
+    const editedMarkdown = detail.payload.markdown.replace(
+      "Initial spec generated from exported source symbol",
+      "Reviewed content generated from exported source symbol"
+    );
+
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`,
+      payload: { markdown: editedMarkdown }
+    });
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [proposal.id] }
+    });
+    const acceptedDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`
+    });
+
+    expect(patchResponse.statusCode).toBe(200);
+    expect(acceptResponse.statusCode).toBe(200);
+    expect(acceptedDetailResponse.statusCode).toBe(200);
+    expect(acceptedDetailResponse.json()).toMatchObject({
+      status: "edited_and_accepted",
+      reviewedAt: expect.any(String)
+    });
+  });
+
+  it("refuses accept when the target file exists without writing any selected files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposals = generateResponse.json() as ProposalSummaryForTest[];
+    const conflictingProposal = findProposalByEntityId(proposals, "interface.decision-service");
+    const otherProposal = findProposalOtherThan(proposals, conflictingProposal.id);
+
+    await mkdir(path.join(project.specopsPath, "interfaces"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "interfaces", "decision-service.md"),
+      "---\nid: interface.existing\n---\n\n# Existing\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [conflictingProposal.id, otherProposal.id] }
+    });
+
+    expect(response.statusCode).toBe(409);
+    await expect(fileExists(path.join(project.specopsPath, otherProposal.filePath))).resolves.toBe(
+      false
+    );
+  });
+
   it("returns source import proposal detail and persists edited markdown", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -1701,6 +1815,113 @@ describeWithDb("database-backed routes", () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.json().error.message).toBe("Only pending proposals can be edited or rejected");
+  });
+
+  it("returns conflict when accepting a non-pending source import proposal", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposal = findProposalByEntityId(
+      generateResponse.json() as ProposalSummaryForTest[],
+      "interface.decision-service"
+    );
+    const rejectResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/proposals/${proposal.id}`,
+      payload: { status: "rejected" }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [proposal.id] }
+    });
+
+    expect(rejectResponse.statusCode).toBe(200);
+    expect(response.statusCode).toBe(409);
+    await expect(fileExists(path.join(project.specopsPath, proposal.filePath))).resolves.toBe(
+      false
+    );
+  });
+
+  it("refuses duplicate selected source import proposal targets without writing files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposals = generateResponse.json() as ProposalSummaryForTest[];
+    const firstProposal = findProposalByEntityId(proposals, "interface.decision-service");
+    const secondProposal = findProposalOtherThan(proposals, firstProposal.id);
+    const firstDetailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${firstProposal.id}`
+    });
+    expect(firstDetailResponse.statusCode).toBe(200);
+
+    await pool.query("update ai_proposals set payload_json = $1 where id = $2", [
+      (firstDetailResponse.json() as { payload: unknown }).payload,
+      secondProposal.id
+    ]);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [firstProposal.id, secondProposal.id] }
+    });
+
+    expect(response.statusCode).toBe(409);
+    await expect(fileExists(path.join(project.specopsPath, firstProposal.filePath))).resolves.toBe(
+      false
+    );
+    await expect(fileExists(path.join(project.specopsPath, secondProposal.filePath))).resolves.toBe(
+      false
+    );
+  });
+
+  it("refuses invalid accepted proposal markdown without writing any selected files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposals = generateResponse.json() as ProposalSummaryForTest[];
+    const invalidProposal = findProposalByEntityId(proposals, "interface.decision-service");
+    const otherProposal = findProposalOtherThan(proposals, invalidProposal.id);
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/proposals/${invalidProposal.id}`,
+      payload: { markdown: "# Missing frontmatter\n" }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/accept`,
+      payload: { proposalIds: [invalidProposal.id, otherProposal.id] }
+    });
+
+    expect(patchResponse.statusCode).toBe(200);
+    expect(response.statusCode).toBe(400);
+    await expect(fileExists(path.join(project.specopsPath, invalidProposal.filePath))).resolves.toBe(
+      false
+    );
+    await expect(fileExists(path.join(project.specopsPath, otherProposal.filePath))).resolves.toBe(
+      false
+    );
   });
 
   it("returns entity impact with spec links and source evidence", async () => {
@@ -2791,6 +3012,30 @@ describeWithDb("database-backed routes", () => {
       }
     });
   });
+
+  type ProposalSummaryForTest = {
+    id: string;
+    entityId: string;
+    filePath: string;
+  };
+
+  function findProposalByEntityId(
+    proposals: ProposalSummaryForTest[],
+    entityId: string
+  ): ProposalSummaryForTest {
+    const proposal = proposals.find((item) => item.entityId === entityId);
+    expect(proposal).toBeDefined();
+    return proposal!;
+  }
+
+  function findProposalOtherThan(
+    proposals: ProposalSummaryForTest[],
+    proposalId: string
+  ): ProposalSummaryForTest {
+    const proposal = proposals.find((item) => item.id !== proposalId);
+    expect(proposal).toBeDefined();
+    return proposal!;
+  }
 
   function createTestDb() {
     const db = createDb(testDatabaseUrl!);
