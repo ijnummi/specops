@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -26,10 +27,10 @@ import type {
   AiPrefillProviderName,
   CreateAiPrefillProviderInput
 } from "@specops/ai-prefill";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import type { ApiConfig } from "../config.js";
-import { BadRequestError } from "../lib/http-errors.js";
+import { BadRequestError, ConflictError } from "../lib/http-errors.js";
 import {
   assertAbsolutePath,
   assertInsideDirectory,
@@ -145,6 +146,9 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
 
     await db.transaction(async (tx) => {
       const now = new Date();
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:ai_spec_entity`}, 0))`
+      );
       await tx
         .update(aiProposals)
         .set({ status: "obsolete", reviewedAt: now })
@@ -194,8 +198,30 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
 
   async function loadSourceFileForPrompt(repoPath: string, row: SourceFileRow) {
     const targetPath = assertInsideDirectory(repoPath, path.join(repoPath, row.path));
-    const safePath = await assertRealPathInsideDirectory(repoPath, targetPath);
-    const text = await readFile(safePath, "utf8");
+    let text: string;
+    try {
+      const safePath = await assertRealPathInsideDirectory(repoPath, targetPath);
+      text = await readFile(safePath, "utf8");
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        throw new ConflictError("Selected source file is missing; re-index before AI Prefill", {
+          sourceFileId: row.id,
+          path: row.path
+        });
+      }
+      throw error;
+    }
+
+    if (sha256(text) !== row.contentHash) {
+      throw new ConflictError(
+        "Selected source file changed since indexing; re-index before AI Prefill",
+        {
+          sourceFileId: row.id,
+          path: row.path
+        }
+      );
+    }
+
     const [imports, exports, symbols] = await Promise.all([
       db
         .select()
@@ -259,4 +285,17 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
   return {
     generateAiPrefillProposals
   };
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }

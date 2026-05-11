@@ -1643,6 +1643,138 @@ describeWithDb("database-backed routes", () => {
     await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
   });
 
+  it("rejects AI generation when selected source file changed since indexing", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals() {
+          providerCalled = true;
+          throw new Error("provider should not be called");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    await writeFile(path.join(project.repoPath, "src", "projects.ts"), "export const changed = true;\n");
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe(
+      "Selected source file changed since indexing; re-index before AI Prefill"
+    );
+    expect(providerCalled).toBe(false);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("rejects AI generation when selected source file is missing", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals() {
+          providerCalled = true;
+          throw new Error("provider should not be called");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    await rm(path.join(project.repoPath, "src", "projects.ts"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe(
+      "Selected source file is missing; re-index before AI Prefill"
+    );
+    expect(providerCalled).toBe(false);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("keeps only one pending AI proposal batch when concurrent generations finish together", async () => {
+    const entered = createDeferred<void>();
+    const release = createDeferred<void>();
+    let providerCallCount = 0;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          providerCallCount += 1;
+          if (providerCallCount === 2) {
+            entered.resolve();
+          }
+          await release.promise;
+          return {
+            provider: "ollama",
+            model: input.model,
+            text: JSON.stringify({
+              proposals: [
+                {
+                  entityId:
+                    input.model === "batch-one" ? "uc.manage-projects" : "uc.inspect-projects",
+                  type: "use_case",
+                  title: input.model === "batch-one" ? "Manage projects" : "Inspect projects",
+                  summary: "Users can create and inspect local projects.",
+                  sourceFiles: ["src/projects.ts"],
+                  claims: [
+                    {
+                      text: "Project routes create and inspect local projects.",
+                      sourceFiles: ["src/projects.ts"]
+                    }
+                  ],
+                  proposedLinks: [],
+                  confidence: 0.82
+                }
+              ]
+            })
+          };
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+    const payload = {
+      sourceFileIds: [sourceFile.id],
+      provider: "ollama",
+      temperature: 0.1
+    };
+
+    const first = app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: { ...payload, model: "batch-one" }
+    });
+    const second = app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: { ...payload, model: "batch-two" }
+    });
+    await entered.promise;
+    release.resolve();
+    const responses = await Promise.all([first, second]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([201, 201]);
+    expect(providerCallCount).toBe(2);
+    await expect(countPendingAiPrefillProposals(project.id)).resolves.toBe(1);
+  });
+
   it("obsoletes previous pending AI proposals on regeneration while preserving reviewed proposals", async () => {
     app = buildServer(testDatabaseUrl!, {
       aiPrefillProviderFactory: () => ({
@@ -3734,12 +3866,30 @@ describeWithDb("database-backed routes", () => {
     return result.rows[0].count;
   }
 
+  async function countPendingAiPrefillProposals(projectId: string): Promise<number> {
+    const result = await pool.query<{ count: number }>(
+      "select count(*)::int as count from ai_proposals where project_id = $1 and proposal_type = 'ai_spec_entity' and status = 'pending'",
+      [projectId]
+    );
+    return result.rows[0].count;
+  }
+
   async function readProposalStatus(proposalId: string): Promise<string | null> {
     const result = await pool.query<{ status: string }>(
       "select status from ai_proposals where id = $1",
       [proposalId]
     );
     return result.rows[0]?.status ?? null;
+  }
+
+  function createDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
   }
 
   function createTestDb() {
