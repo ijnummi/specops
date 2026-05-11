@@ -17,6 +17,7 @@ import type {
   EntityImpactQuery,
   EntityImpactResponseDto,
   EntityReadinessDto,
+  FinishAgentRunResponse,
   IndexRunDto,
   ProposalDetailDto,
   ProposalListQuery,
@@ -34,7 +35,9 @@ import type {
   SourceFileSummaryDto,
   SourceSpecLinkDto,
   StartAgentRunRequest,
+  StartAgentRunResponse,
   UpdateAgentRunStatusRequest,
+  UpdateAgentRunStatusResponse,
   ValidationMessageDto
 } from "@specops/contracts";
 
@@ -557,7 +560,7 @@ export function saveAgentTask(projectId: string, input: SaveAgentTaskRequest) {
 }
 
 export function startAgentRun(projectId: string, input: StartAgentRunRequest) {
-  return apiSend<AgentRunDetailDto>(
+  return apiSend<StartAgentRunResponse>(
     "POST",
     `/api/projects/${encodeURIComponent(projectId)}/agent-runs`,
     input
@@ -565,7 +568,7 @@ export function startAgentRun(projectId: string, input: StartAgentRunRequest) {
 }
 
 export function finishAgentRun(projectId: string, runId: string) {
-  return apiSend<AgentRunDetailDto>(
+  return apiSend<FinishAgentRunResponse>(
     "POST",
     `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}/finish`
   );
@@ -576,7 +579,7 @@ export function updateAgentRunStatus(
   runId: string,
   input: UpdateAgentRunStatusRequest
 ) {
-  return apiSend<AgentRunDetailDto>(
+  return apiSend<UpdateAgentRunStatusResponse>(
     "PATCH",
     `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}`,
     input
