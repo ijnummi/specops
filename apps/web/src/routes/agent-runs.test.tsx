@@ -1,7 +1,11 @@
+// @vitest-environment happy-dom
+
 import type { AgentRunDetail, AgentRunSummary } from "@specops/contracts";
+import { act } from "react";
 import type { ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   listState: {
@@ -76,7 +80,23 @@ vi.mock("../api/queries.js", () => ({
 import { AgentRunDetailPage } from "./agent-run-detail.js";
 import { AgentRunsPage } from "./agent-runs.js";
 
+const roots: Root[] = [];
+const containers: HTMLElement[] = [];
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("AgentRunsPage", () => {
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      act(() => {
+        root.unmount();
+      });
+    }
+    for (const container of containers.splice(0)) {
+      container.remove();
+    }
+  });
+
   it("renders header, task summary fields, finding counts, and detail link", () => {
     mocks.listState = {
       data: [agentRunSummary],
@@ -96,7 +116,45 @@ describe("AgentRunsPage", () => {
     expect(html).toContain("2 review");
     expect(html).toContain("abc1234");
     expect(html).toContain("fedcba9");
+    expect(html).toContain("Started");
+    expect(html).toContain("May 12, 2026");
+    expect(html).toContain("Finished");
     expect(html).toContain("/projects/project-1/agent-runs/run-1");
+  });
+
+  it("filters runs by status, agent, and task text", async () => {
+    mocks.listState = {
+      data: [
+        agentRunSummary,
+        {
+          ...agentRunSummary,
+          id: "run-2",
+          taskEntityId: "task.billing",
+          taskTitle: "Review billing flow",
+          agent: "cursor",
+          status: "running",
+          finishedAt: null
+        }
+      ],
+      error: null,
+      isLoading: false
+    };
+
+    const { container } = await renderAgentRunsPage();
+
+    await changeInput(container, "Search task id or title", "checkout");
+    expect(container.textContent).toContain("Review checkout validation");
+    expect(container.textContent).not.toContain("Review billing flow");
+
+    await changeInput(container, "Search task id or title", "");
+    await changeSelect(container, "Status", "running");
+    expect(container.textContent).not.toContain("Review checkout validation");
+    expect(container.textContent).toContain("Review billing flow");
+
+    await changeSelect(container, "Status", "all");
+    await changeSelect(container, "Agent", "codex");
+    expect(container.textContent).toContain("Review checkout validation");
+    expect(container.textContent).not.toContain("Review billing flow");
   });
 });
 
@@ -121,6 +179,11 @@ describe("AgentRunDetailPage", () => {
     expect(html).toContain("apps/api/src/checkout.test.ts");
     expect(html).toContain("Checkout source changed without a linked spec update.");
     expect(html).toContain("Update the checkout spec.");
+    expect(html).toContain("Task Context");
+    expect(html).toContain("Source entity");
+    expect(html).toContain("Context entities");
+    expect(html).toContain("Missing entity ids");
+    expect(html).toContain("use.missing");
     expect(html).toContain("pnpm test -- checkout");
     expect(html).toContain("pnpm typecheck");
   });
@@ -176,8 +239,8 @@ const agentRunDetail: AgentRunDetail = {
     ],
     taskContext: {
       sourceEntityId: "task.checkout",
-      contextEntityIds: ["use.checkout"],
-      missingEntityIds: []
+      contextEntityIds: ["use.checkout", "use.missing"],
+      missingEntityIds: ["use.missing"]
     },
     findings: [
       {
@@ -193,3 +256,46 @@ const agentRunDetail: AgentRunDetail = {
     suggestedValidationCommands: ["pnpm test -- checkout", "pnpm typecheck"]
   }
 };
+
+async function renderAgentRunsPage() {
+  const container = document.createElement("div");
+  document.body.append(container);
+  containers.push(container);
+  const root = createRoot(container);
+  roots.push(root);
+
+  await act(async () => {
+    root.render(<AgentRunsPage projectId="project-1" />);
+  });
+
+  return { container };
+}
+
+async function changeInput(container: HTMLElement, label: string, value: string) {
+  const target = labelledControl<HTMLInputElement>(container, label, "input");
+  await act(async () => {
+    target.value = value;
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+  });
+}
+
+async function changeSelect(container: HTMLElement, label: string, value: string) {
+  const target = labelledControl<HTMLSelectElement>(container, label, "select");
+  await act(async () => {
+    target.value = value;
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function labelledControl<T extends HTMLInputElement | HTMLSelectElement>(
+  container: HTMLElement,
+  label: string,
+  selector: "input" | "select"
+): T {
+  const labelled = [...container.querySelectorAll(`${selector}[aria-label="${label}"]`)].at(0);
+  if (!labelled) {
+    throw new Error(`Missing ${selector} labelled ${label}`);
+  }
+
+  return labelled as T;
+}

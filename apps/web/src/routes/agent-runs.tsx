@@ -1,11 +1,39 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { AgentRunSummary, AgentRunStatus } from "@specops/contracts";
+import { useMemo, useState } from "react";
 
 import { agentRunsQuery } from "../api/queries.js";
 
+const statusFilters = [
+  "running",
+  "ready_for_review",
+  "accepted",
+  "needs_followup",
+  "superseded"
+] satisfies AgentRunStatus[];
+
 export function AgentRunsPage({ projectId }: { projectId: string }) {
   const runs = useQuery(agentRunsQuery(projectId));
+  const [statusFilter, setStatusFilter] = useState<AgentRunStatus | "all">("all");
+  const [agentFilter, setAgentFilter] = useState("all");
+  const [textFilter, setTextFilter] = useState("");
+  const data = runs.data ?? [];
+  const agents = useMemo(
+    () => [...new Set(data.map((run) => run.agent))].sort((left, right) => left.localeCompare(right)),
+    [data]
+  );
+  const normalizedTextFilter = textFilter.trim().toLowerCase();
+  const filteredRuns = data.filter((run) => {
+    const statusMatches = statusFilter === "all" || run.status === statusFilter;
+    const agentMatches = agentFilter === "all" || run.agent === agentFilter;
+    const textMatches =
+      normalizedTextFilter.length === 0 ||
+      run.taskEntityId.toLowerCase().includes(normalizedTextFilter) ||
+      run.taskTitle.toLowerCase().includes(normalizedTextFilter);
+
+    return statusMatches && agentMatches && textMatches;
+  });
 
   if (runs.isLoading) {
     return <div className="p-4 text-sm text-slate-600">Loading agent runs...</div>;
@@ -15,25 +43,75 @@ export function AgentRunsPage({ projectId }: { projectId: string }) {
     return <div className="p-4 text-sm text-red-700">{runs.error.message}</div>;
   }
 
-  const data = runs.data ?? [];
-
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-auto p-4">
       <header className="flex min-w-0 items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-base font-semibold text-slate-950">Agent Runs</h1>
-          <p className="mt-1 text-sm text-slate-500">{data.length} review runs</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {filteredRuns.length} of {data.length} review runs
+          </p>
         </div>
       </header>
+
+      <section className="grid gap-3 rounded border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-[minmax(12rem,1fr)_minmax(10rem,0.35fr)_minmax(10rem,0.35fr)]">
+        <label className="field">
+          <span>Search</span>
+          <input
+            aria-label="Search task id or title"
+            className="input h-9"
+            type="search"
+            value={textFilter}
+            onInput={(event) => setTextFilter(event.currentTarget.value)}
+            placeholder="Task id or title"
+          />
+        </label>
+        <label className="field">
+          <span>Status</span>
+          <select
+            aria-label="Status"
+            className="input h-9 py-1"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.currentTarget.value as AgentRunStatus | "all")}
+          >
+            <option value="all">All statuses</option>
+            {statusFilters.map((status) => (
+              <option key={status} value={status}>
+                {formatStatus(status)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Agent</span>
+          <select
+            aria-label="Agent"
+            className="input h-9 py-1"
+            value={agentFilter}
+            onChange={(event) => setAgentFilter(event.currentTarget.value)}
+          >
+            <option value="all">All agents</option>
+            {agents.map((agent) => (
+              <option key={agent} value={agent}>
+                {agent}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
 
       {data.length === 0 ? (
         <section className="rounded border border-slate-200 bg-white p-3 text-sm text-slate-500 shadow-sm">
           No agent runs yet.
         </section>
+      ) : filteredRuns.length === 0 ? (
+        <section className="rounded border border-slate-200 bg-white p-3 text-sm text-slate-500 shadow-sm">
+          No agent runs match the current filters.
+        </section>
       ) : (
         <section className="rounded border border-slate-200 bg-white shadow-sm">
           <ul className="divide-y divide-slate-200">
-            {data.map((run) => (
+            {filteredRuns.map((run) => (
               <li key={run.id}>
                 <Link
                   to="/projects/$projectId/agent-runs/$runId"
@@ -56,6 +134,10 @@ export function AgentRunsPage({ projectId }: { projectId: string }) {
                       <span>{formatFindingCounts(run.findingCounts)}</span>
                       <span>
                         {shortSha(run.startGitCommit)}...{shortSha(run.endGitCommit)}
+                      </span>
+                      <span>Started {formatDateTime(run.startedAt)}</span>
+                      <span>
+                        Finished {run.finishedAt ? formatDateTime(run.finishedAt) : "in progress"}
                       </span>
                     </div>
                   </div>
@@ -91,6 +173,14 @@ function formatFindingCounts(counts: AgentRunSummary["findingCounts"]) {
   }
 
   return visible.map(([label, count]) => `${count} ${label}`).join(" / ");
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC"
+  }).format(new Date(value));
 }
 
 function shortSha(value: string | null) {

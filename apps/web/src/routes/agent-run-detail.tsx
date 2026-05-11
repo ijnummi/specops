@@ -117,6 +117,7 @@ function AgentRunDetailContent({
           <FindingsPanel findings={run.reviewSummary.findings} />
         </div>
         <div className="grid content-start gap-3">
+          <TaskContextPanel taskContext={run.reviewSummary.taskContext} />
           <AffectedSpecsPanel specs={run.reviewSummary.affectedSpecs} />
           <ValidationCommandsPanel commands={run.reviewSummary.suggestedValidationCommands} />
         </div>
@@ -236,6 +237,49 @@ function FindingsPanel({ findings }: { findings: AgentRunFinding[] }) {
         </ul>
       )}
     </section>
+  );
+}
+
+function TaskContextPanel({
+  taskContext
+}: {
+  taskContext: AgentRunDetail["reviewSummary"]["taskContext"];
+}) {
+  return (
+    <section className="rounded border border-slate-200 bg-white p-3 shadow-sm">
+      <h2 className="section-heading">Task Context</h2>
+      <dl className="mt-3 grid gap-3 text-sm">
+        <div className="min-w-0">
+          <dt className="text-xs font-semibold uppercase text-slate-500">Source entity</dt>
+          <dd className="mt-1 truncate font-mono text-xs text-slate-700">
+            {taskContext.sourceEntityId ?? "No source entity."}
+          </dd>
+        </div>
+        <EntityIdList title="Context entities" entityIds={taskContext.contextEntityIds} />
+        <EntityIdList title="Missing entity ids" entityIds={taskContext.missingEntityIds} />
+      </dl>
+    </section>
+  );
+}
+
+function EntityIdList({ title, entityIds }: { title: string; entityIds: string[] }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-semibold uppercase text-slate-500">{title}</dt>
+      <dd className="mt-1">
+        {entityIds.length === 0 ? (
+          <span className="text-sm text-slate-500">None.</span>
+        ) : (
+          <ul className="grid gap-1">
+            {entityIds.map((entityId) => (
+              <li key={entityId} className="truncate rounded bg-slate-50 px-2 py-1 font-mono text-xs">
+                {entityId}
+              </li>
+            ))}
+          </ul>
+        )}
+      </dd>
+    </div>
   );
 }
 

@@ -25,6 +25,7 @@ import { classifySourceFile, isSupportedSourcePath, shouldExcludePath } from "@s
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { BadRequestError, NotFoundError } from "../lib/http-errors.js";
+import { readValidationCommands } from "./agent-task-defaults.js";
 import { readGitChangedFiles, readGitStatus, type GitStatusEntry } from "./git-service.js";
 import { createSpecReadinessService } from "./spec-readiness-service.js";
 
@@ -295,7 +296,7 @@ export function createAgentRunService(db: Db) {
     });
     const affectedEntityIds = affectedSpecs.map((spec) => spec.entityId);
     const readinessService = createSpecReadinessService(db);
-    const [affectedValidationMessages, affectedReadiness] = await Promise.all([
+    const [affectedValidationMessages, affectedReadiness, suggestedValidationCommands] = await Promise.all([
       affectedEntityIds.length > 0
         ? db
             .select()
@@ -307,7 +308,8 @@ export function createAgentRunService(db: Db) {
               )
             )
         : Promise.resolve([]),
-      readinessService.getProjectReadiness(input.project.id)
+      readinessService.getProjectReadiness(input.project.id),
+      readValidationCommands(input.project)
     ]);
     const findings = collectFindings({
       project: input.project,
@@ -328,7 +330,7 @@ export function createAgentRunService(db: Db) {
       affectedSpecs,
       taskContext,
       findings,
-      suggestedValidationCommands: ["pnpm typecheck", "pnpm test"]
+      suggestedValidationCommands
     };
   }
 
@@ -495,7 +497,11 @@ function collectFindings(input: {
     );
   }
 
-  if (input.changedFiles.source.length > 0 && input.changedFiles.specs.length === 0) {
+  if (
+    input.changedFiles.source.length > 0 &&
+    input.sourceLinks.length > 0 &&
+    input.changedFiles.specs.length === 0
+  ) {
     addFinding(
       "source_changed_without_spec",
       "review",

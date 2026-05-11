@@ -560,6 +560,94 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("uses project.yaml validation commands for agent run review suggestions", async () => {
+    const db = createTestDb();
+    const project = await createLinkedReviewProject(db, {
+      useCaseBody: "# Review Loop\n\n## Goal\n\nReview changes.\n"
+    });
+    await writeSpecFile(
+      project.specopsPath,
+      "project.yaml",
+      [
+        "agent_task_defaults:",
+        "  validation_commands:",
+        "    - pnpm lint",
+        "    - pnpm test -- review-service",
+        ""
+      ].join("\n")
+    );
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'changed'; }\n"
+    );
+
+    const finished = await service.finishRun(project.id, started.id);
+
+    expect(finished.reviewSummary.suggestedValidationCommands).toEqual([
+      "pnpm lint",
+      "pnpm test -- review-service"
+    ]);
+  });
+
+  it("reports unlinked-only source changes without source_changed_without_spec", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "unlinked-service.ts"),
+      "export function unlinkedService() { return 'ready'; }\n"
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n\n## Goal\n\nReview changes.\n"
+      })
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n"
+      })
+    );
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "specops@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "SpecOps Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "Initial state"]);
+    await createIndexerService(db).indexProject(project.id);
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    await writeFile(
+      path.join(project.repoPath, "src", "unlinked-service.ts"),
+      "export function unlinkedService() { return 'changed'; }\n"
+    );
+
+    const finished = await service.finishRun(project.id, started.id);
+    const findingKinds = finished.reviewSummary.findings.map((finding) => finding.kind);
+
+    expect(findingKinds).toContain("unlinked_source_changed");
+    expect(findingKinds).not.toContain("source_changed_without_spec");
+  });
+
   it.each([
     { mode: "non-Git", initializeGit: false },
     { mode: "Git repo with no HEAD", initializeGit: true }

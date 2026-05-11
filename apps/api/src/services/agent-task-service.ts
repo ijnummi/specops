@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -16,7 +16,6 @@ import { parseSpecMarkdown } from "@specops/markdown";
 import { defaultAgentTaskFilePath, generateAgentTaskMarkdown } from "@specops/taskgen";
 import type { TaskgenEntity } from "@specops/taskgen";
 import { and, asc, eq, inArray, or } from "drizzle-orm";
-import { parse } from "yaml";
 
 import { BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
 import {
@@ -25,11 +24,10 @@ import {
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
+import { readValidationCommands } from "./agent-task-defaults.js";
 import { createIndexerService } from "./indexer-service.js";
 import { createProjectService } from "./project-service.js";
 import { createSpecReadinessService } from "./spec-readiness-service.js";
-
-const fallbackValidationCommands = ["pnpm typecheck", "pnpm test"];
 
 export function createAgentTaskService(db: Db) {
   const projectService = createProjectService(db);
@@ -222,38 +220,6 @@ async function resolveAgentTaskSavePath(
   }
 }
 
-async function readValidationCommands(project: ProjectDto): Promise<string[]> {
-  const persistedSpecopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
-  const specopsPath = await assertRealPathInsideDirectory(project.repoPath, persistedSpecopsPath);
-  const projectYamlPath = assertInsideDirectory(specopsPath, path.join(specopsPath, "project.yaml"));
-
-  try {
-    const content = await readFile(projectYamlPath, "utf8");
-    const parsed = parse(content) as unknown;
-
-    if (!isRecord(parsed)) {
-      return fallbackValidationCommands;
-    }
-
-    const defaults = parsed.agent_task_defaults;
-    if (!isRecord(defaults) || !Array.isArray(defaults.validation_commands)) {
-      return fallbackValidationCommands;
-    }
-
-    const commands = defaults.validation_commands.filter(
-      (command): command is string => typeof command === "string" && command.trim().length > 0
-    );
-
-    return commands.length > 0 ? commands : fallbackValidationCommands;
-  } catch (error) {
-    if (isFileNotFoundError(error)) {
-      return fallbackValidationCommands;
-    }
-
-    throw error;
-  }
-}
-
 function validateAgentTaskMarkdown(markdown: string, expectedTaskId: string, filePath: string) {
   const parsed = parseSpecMarkdown(filePath, markdown);
 
@@ -314,16 +280,8 @@ function toTaskgenEntity(entity: SpecEntityDto): TaskgenEntity {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isFileExistsError(error: unknown): boolean {
   return isNodeError(error) && error.code === "EEXIST";
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return isNodeError(error) && error.code === "ENOENT";
 }
 
 function isPathValidationError(error: unknown): boolean {
