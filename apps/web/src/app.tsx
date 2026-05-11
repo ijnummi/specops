@@ -14,6 +14,7 @@ import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
 import { ProjectsPage } from "./routes/projects.js";
+import { ReadinessPage } from "./routes/readiness.js";
 import { RootRoute } from "./routes/root.js";
 import { SourceImportPage } from "./routes/source-import.js";
 
@@ -91,6 +92,15 @@ const entityRoute = createRoute({
   }
 });
 
+const readinessRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/readiness",
+  component: () => {
+    const { projectId } = readinessRoute.useParams();
+    return <ReadinessPage projectId={projectId} />;
+  }
+});
+
 const sourceImportRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/import/source",
@@ -152,6 +162,7 @@ const routeTree = rootRoute.addChildren([
   adminDatabaseRoute,
   projectRoute,
   entityRoute,
+  readinessRoute,
   sourceImportRoute,
   aiPrefillRoute,
   impactRoute,

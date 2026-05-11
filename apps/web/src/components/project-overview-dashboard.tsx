@@ -1,5 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import type { ProjectHealthDto, ProjectOverviewDto } from "@specops/contracts";
+import type {
+  ProjectHealthDto,
+  ProjectOverviewDto,
+  ProjectReadinessDto
+} from "@specops/contracts";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
@@ -19,6 +23,9 @@ type ProjectOverviewDashboardProps = {
   health?: ProjectHealthDto;
   healthError?: Error | null;
   isHealthLoading?: boolean;
+  readiness?: ProjectReadinessDto;
+  readinessError?: Error | null;
+  isReadinessLoading?: boolean;
 };
 
 export function ProjectOverviewDashboard({
@@ -26,7 +33,10 @@ export function ProjectOverviewDashboard({
   overview,
   health,
   healthError,
-  isHealthLoading = false
+  isHealthLoading = false,
+  readiness,
+  readinessError,
+  isReadinessLoading = false
 }: ProjectOverviewDashboardProps) {
   return (
     <div className="grid h-full min-h-0 gap-3 overflow-auto">
@@ -72,7 +82,7 @@ export function ProjectOverviewDashboard({
         </Panel>
       </section>
 
-      <section className="grid gap-3 xl:grid-cols-2">
+      <section className="grid gap-3 xl:grid-cols-3">
         <Panel title="Spec Inventory" icon={<FileText className="h-4 w-4" aria-hidden="true" />}>
           <GroupedCounts
             projectId={projectId}
@@ -106,6 +116,15 @@ export function ProjectOverviewDashboard({
               <Metric label="Exports" value={overview.sourceInventory.exportCount} />
             </div>
           )}
+        </Panel>
+
+        <Panel title="Spec Readiness" icon={<CheckCircle2 className="h-4 w-4" aria-hidden="true" />}>
+          <ReadinessSummaryPanel
+            projectId={projectId}
+            readiness={readiness}
+            readinessError={readinessError}
+            isReadinessLoading={isReadinessLoading}
+          />
         </Panel>
       </section>
 
@@ -269,6 +288,52 @@ function GitDriftPanel({
         <Metric label="Stale tasks" value={health.staleTasks.count} tone="warning" />
       </div>
       <HealthAttentionList projectId={projectId} items={health.attentionItems.slice(0, 5)} />
+    </div>
+  );
+}
+
+function ReadinessSummaryPanel({
+  projectId,
+  readiness,
+  readinessError,
+  isReadinessLoading
+}: {
+  projectId: string;
+  readiness?: ProjectReadinessDto;
+  readinessError?: Error | null;
+  isReadinessLoading: boolean;
+}) {
+  if (isReadinessLoading) {
+    return <EmptyState title="Loading readiness" body="Checking spec readiness signals." />;
+  }
+
+  if (readinessError) {
+    return <EmptyState title="Readiness unavailable" body={readinessError.message} />;
+  }
+
+  if (!readiness) {
+    return <EmptyState title="Readiness unavailable" body="Readiness data has not loaded." />;
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+        <p className="truncate font-medium text-slate-900">{readiness.summary.ready} ready</p>
+        <p className="truncate font-medium text-red-700">{readiness.summary.blocked} blocked</p>
+        <p className="truncate font-medium text-amber-700">
+          {readiness.summary.needsReview} needs review
+        </p>
+        <p className="truncate font-medium text-slate-700">
+          {readiness.summary.needsContext} needs context
+        </p>
+      </div>
+      <Link
+        to="/projects/$projectId/readiness"
+        params={{ projectId }}
+        className="text-xs font-medium text-slate-700 underline-offset-2 hover:text-slate-950 hover:underline"
+      >
+        Open readiness queue
+      </Link>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   projectHealthQuery,
   projectOverviewQuery,
   projectQuery,
+  projectReadinessQuery,
   queryKeys,
   reindexProject,
   searchQuery,
@@ -58,6 +59,10 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   });
   const health = useQuery({
     ...projectHealthQuery(projectId),
+    enabled: entityId === null && !hasActiveQuery
+  });
+  const readiness = useQuery({
+    ...projectReadinessQuery(projectId),
     enabled: entityId === null && !hasActiveQuery
   });
   const searchResults = useQuery({
@@ -145,6 +150,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
       queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) })
@@ -303,6 +309,9 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
           health={health.data}
           healthError={health.error}
           isHealthLoading={health.isLoading}
+          readiness={readiness.data}
+          readinessError={readiness.error}
+          isReadinessLoading={readiness.isLoading}
         />
       ) : (
         <div className="rounded border border-slate-200 bg-white p-4 text-sm text-slate-600">

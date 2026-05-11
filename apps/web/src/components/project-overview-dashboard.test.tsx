@@ -1,4 +1,8 @@
-import type { ProjectHealthDto, ProjectOverviewDto } from "@specops/contracts";
+import type {
+  ProjectHealthDto,
+  ProjectOverviewDto,
+  ProjectReadinessDto
+} from "@specops/contracts";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -31,7 +35,12 @@ import { ProjectOverviewDashboard } from "./project-overview-dashboard.js";
 describe("ProjectOverviewDashboard", () => {
   it("renders health, index, inventory, source evidence, tasks, attention, and entity links", () => {
     const html = renderToStaticMarkup(
-      <ProjectOverviewDashboard projectId="project-1" overview={overview} health={health} />
+      <ProjectOverviewDashboard
+        projectId="project-1"
+        overview={overview}
+        health={health}
+        readiness={readiness}
+      />
     );
 
     expect(html).toContain("Project Health");
@@ -40,6 +49,7 @@ describe("ProjectOverviewDashboard", () => {
     expect(html).toContain("xl:grid-cols-2 2xl:grid-cols-[1.3fr_1fr_1fr]");
     expect(html).toContain("Spec Inventory");
     expect(html).toContain("Source Inventory");
+    expect(html).toContain("Spec Readiness");
     expect(html).toContain("Source Evidence");
     expect(html).toContain("Agent Tasks");
     expect(html).toContain("Needs Attention");
@@ -53,11 +63,16 @@ describe("ProjectOverviewDashboard", () => {
     expect(html).toContain("Index behind HEAD");
     expect(html).toContain("Stale tasks");
     expect(html).toContain("Refresh Customer");
+    expect(html).toContain("2 ready");
+    expect(html).toContain("1 blocked");
+    expect(html).toContain("3 needs review");
+    expect(html).toContain("4 needs context");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.customer:");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.order:");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:task.customer:");
     expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:task.refresh-customer:");
     expect(html).toContain("/projects/$projectId:project-1::domain_entity");
+    expect(html).toContain("/projects/$projectId/readiness:project-1::");
   });
 
   it("renders health errors without replacing the overview dashboard", () => {
@@ -217,4 +232,14 @@ const health: ProjectHealthDto = {
       filePath: null
     }
   ]
+};
+
+const readiness: ProjectReadinessDto = {
+  summary: {
+    ready: 2,
+    blocked: 1,
+    needsReview: 3,
+    needsContext: 4
+  },
+  queue: []
 };
