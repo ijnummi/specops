@@ -1,3 +1,6 @@
+import { stat } from "node:fs/promises";
+import path from "node:path";
+
 import type {
   AcceptProposalsRequest,
   ProposalDetailDto,
@@ -7,6 +10,7 @@ import type {
   SourceSpecEntityProposalEvidence,
   SourceSpecEntityProposalPayload
 } from "@specops/contracts";
+import type { ProjectDto } from "@specops/contracts";
 import {
   proposalPatchRequestSchema,
   sourceSpecEntityProposalEvidenceSchema,
@@ -44,12 +48,27 @@ export function createProposalService(db: Db) {
     await assertExistingParentInsideDirectory(repoPath, specopsPath);
 
     const scan = await scanRepository({ repoPath });
+    const obsoletePendingProposals = async () => {
+      await db
+        .update(aiProposals)
+        .set({ status: "obsolete", reviewedAt: new Date() })
+        .where(
+          and(
+            eq(aiProposals.projectId, projectId),
+            eq(aiProposals.proposalType, sourceSpecEntityProposalType),
+            eq(aiProposals.status, "pending")
+          )
+        );
+    };
+
     if (scan.files.length === 0) {
+      await obsoletePendingProposals();
       throw new BadRequestError("No supported source files found");
     }
 
     const generated = generateBootstrapSpecProposals(scan);
     if (generated.length === 0) {
+      await obsoletePendingProposals();
       throw new BadRequestError("No eligible exported source symbols found");
     }
 
@@ -82,14 +101,14 @@ export function createProposalService(db: Db) {
         .returning();
     });
 
-    return mapSummaries(rows, projectId);
+    return mapSummaries(rows, project);
   }
 
   async function listProposals(
     projectId: string,
     status?: ProposalStatus
   ): Promise<ProposalSummaryDto[]> {
-    await projectService.getProject(projectId);
+    const project = await projectService.getProject(projectId);
 
     const rows = status
       ? await db
@@ -103,13 +122,13 @@ export function createProposalService(db: Db) {
           .where(eq(aiProposals.projectId, projectId))
           .orderBy(asc(aiProposals.createdAt), asc(aiProposals.title), asc(aiProposals.id));
 
-    return mapSummaries(rows, projectId);
+    return mapSummaries(rows, project);
   }
 
   async function getProposal(projectId: string, proposalId: string): Promise<ProposalDetailDto> {
-    await projectService.getProject(projectId);
+    const project = await projectService.getProject(projectId);
     const row = await getProposalRow(projectId, proposalId);
-    return mapDetail(row, await conflictForPayload(projectId, parsePayload(row)));
+    return mapDetail(row, await conflictForPayload(project, parsePayload(row)));
   }
 
   async function patchProposal(
@@ -117,7 +136,7 @@ export function createProposalService(db: Db) {
     proposalId: string,
     input: ProposalPatchRequest
   ): Promise<ProposalDetailDto> {
-    await projectService.getProject(projectId);
+    const project = await projectService.getProject(projectId);
     const patch = proposalPatchRequestSchema.parse(input);
     const row = await getProposalRow(projectId, proposalId);
 
@@ -143,10 +162,23 @@ export function createProposalService(db: Db) {
     const [updated] = await db
       .update(aiProposals)
       .set(update)
-      .where(and(eq(aiProposals.projectId, projectId), eq(aiProposals.id, proposalId)))
+      .where(
+        and(
+          eq(aiProposals.projectId, projectId),
+          eq(aiProposals.id, proposalId),
+          eq(aiProposals.status, "pending")
+        )
+      )
       .returning();
 
-    return mapDetail(updated, await conflictForPayload(projectId, updatedPayload));
+    if (!updated) {
+      throw new ConflictError("Only pending proposals can be edited or rejected", {
+        proposalId,
+        status: "changed"
+      });
+    }
+
+    return mapDetail(updated, await conflictForPayload(project, updatedPayload));
   }
 
   async function acceptProposals(
@@ -172,28 +204,47 @@ export function createProposalService(db: Db) {
 
   async function mapSummaries(
     rows: ProposalRow[],
-    projectId: string
+    project: Pick<ProjectDto, "id" | "repoPath" | "specopsPath">
   ): Promise<ProposalSummaryDto[]> {
     return Promise.all(
       rows.map(async (row) =>
-        mapSummary(row, await conflictForPayload(projectId, parsePayload(row)))
+        mapSummary(row, await conflictForPayload(project, parsePayload(row)))
       )
     );
   }
 
   async function conflictForPayload(
-    projectId: string,
+    project: Pick<ProjectDto, "id" | "repoPath" | "specopsPath">,
     payload: SourceSpecEntityProposalPayload
   ): Promise<ProposalSummaryDto["conflict"]> {
     const [entity] = await db
       .select({ entityId: specEntities.entityId })
       .from(specEntities)
       .where(
-        and(eq(specEntities.projectId, projectId), eq(specEntities.entityId, payload.entityId))
+        and(eq(specEntities.projectId, project.id), eq(specEntities.entityId, payload.entityId))
       )
       .limit(1);
 
-    return entity ? { status: "entity_exists", entityId: entity.entityId } : { status: "none" };
+    if (entity) {
+      return { status: "entity_exists", entityId: entity.entityId };
+    }
+
+    const repoPath = assertAbsolutePath("repoPath", project.repoPath);
+    const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
+    assertInsideDirectory(repoPath, specopsPath);
+    const targetPath = assertInsideDirectory(specopsPath, path.join(specopsPath, payload.filePath));
+
+    try {
+      await stat(targetPath);
+      await assertRealPathInsideDirectory(specopsPath, targetPath);
+      return { status: "file_exists", filePath: payload.filePath };
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return { status: "none" };
+      }
+
+      throw error;
+    }
   }
 
   return {
@@ -244,4 +295,13 @@ function mapDetail(
     payload: parsePayload(row),
     evidence: parseEvidence(row)
   };
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }

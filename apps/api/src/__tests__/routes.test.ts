@@ -1481,6 +1481,91 @@ describeWithDb("database-backed routes", () => {
     expect((obsoleteResponse.json() as unknown[]).length).toBeGreaterThan(0);
   });
 
+  it("obsoletes prior pending source import proposals when eligible symbols disappear", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const firstResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(firstResponse.statusCode).toBe(201);
+
+    await rm(path.join(project.repoPath, "src"), { recursive: true, force: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(path.join(project.repoPath, "src", "helpers.ts"), "function internalOnly() {}\n");
+
+    const regenerateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    const pendingResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=pending`
+    });
+    const obsoleteResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=obsolete`
+    });
+
+    expect(regenerateResponse.statusCode).toBe(400);
+    expect(regenerateResponse.json().error.message).toBe(
+      "No eligible exported source symbols found"
+    );
+    expect(pendingResponse.statusCode).toBe(200);
+    expect(obsoleteResponse.statusCode).toBe(200);
+    expect(pendingResponse.json()).toHaveLength(0);
+    expect((obsoleteResponse.json() as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("reports file conflict for source import proposal targets that exist but are not indexed", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const proposals = generateResponse.json() as Array<{
+      id: string;
+      entityId: string;
+      conflict: { status: string };
+    }>;
+    const proposal = proposals.find((item) => item.entityId === "interface.decision-service");
+    expect(proposal).toBeDefined();
+    expect(proposal!.conflict).toEqual({ status: "none" });
+
+    await mkdir(path.join(project.specopsPath, "interfaces"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "interfaces", "decision-service.md"),
+      "---\nid: interface.other\n---\n\n# Existing\n"
+    );
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals?status=pending`
+    });
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/proposals/${proposal!.id}`
+    });
+    const listProposal = (
+      listResponse.json() as Array<{ entityId: string; conflict: unknown }>
+    ).find((item) => item.entityId === "interface.decision-service");
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(detailResponse.statusCode).toBe(200);
+    expect(listProposal).toMatchObject({
+      conflict: { status: "file_exists", filePath: "interfaces/decision-service.md" }
+    });
+    expect(detailResponse.json()).toMatchObject({
+      conflict: { status: "file_exists", filePath: "interfaces/decision-service.md" }
+    });
+  });
+
   it("returns source import proposal detail and persists edited markdown", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -1510,7 +1595,7 @@ describeWithDb("database-backed routes", () => {
       url: `/api/projects/${project.id}/proposals/${proposal!.id}`
     });
     const detail = detailResponse.json() as {
-      payload: { markdown: string };
+      payload: { markdown: string; generatedMarkdown: string };
       evidence: {
         scanner: string;
         sourceFiles: Array<{
@@ -1521,6 +1606,7 @@ describeWithDb("database-backed routes", () => {
         }>;
       };
     };
+    const originalGeneratedMarkdown = detail.payload.generatedMarkdown;
     const editedMarkdown = detail.payload.markdown.replace(
       "Initial spec generated from exported source symbol",
       "Reviewed spec generated from exported source symbol"
@@ -1531,7 +1617,9 @@ describeWithDb("database-backed routes", () => {
       url: `/api/projects/${project.id}/proposals/${proposal!.id}`,
       payload: { markdown: editedMarkdown }
     });
-    const patched = patchResponse.json() as { payload: { markdown: string } };
+    const patched = patchResponse.json() as {
+      payload: { markdown: string; generatedMarkdown: string };
+    };
 
     expect(detailResponse.statusCode).toBe(200);
     expect(detail.evidence).toMatchObject({
@@ -1549,6 +1637,7 @@ describeWithDb("database-backed routes", () => {
     expect(patched.payload.markdown).toContain(
       "Reviewed spec generated from exported source symbol"
     );
+    expect(patched.payload.generatedMarkdown).toBe(originalGeneratedMarkdown);
   });
 
   it("rejects a pending source import proposal", async () => {
@@ -1579,6 +1668,39 @@ describeWithDb("database-backed routes", () => {
       status: "rejected",
       reviewedAt: expect.any(String)
     });
+  });
+
+  it("returns conflict when patching an obsolete source import proposal", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const firstResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(firstResponse.statusCode).toBe(201);
+    const proposals = firstResponse.json() as Array<{
+      id: string;
+      entityId: string;
+    }>;
+    const proposal = proposals.find((item) => item.entityId === "interface.decision-service");
+    expect(proposal).toBeDefined();
+
+    const secondResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/source-import`
+    });
+    expect(secondResponse.statusCode).toBe(201);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/proposals/${proposal!.id}`,
+      payload: { markdown: "# Edited obsolete proposal\n" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe("Only pending proposals can be edited or rejected");
   });
 
   it("returns entity impact with spec links and source evidence", async () => {
