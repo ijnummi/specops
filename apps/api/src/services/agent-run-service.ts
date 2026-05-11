@@ -295,6 +295,7 @@ export function createAgentRunService(db: Db) {
       taskContext
     });
     const findings = collectFindings({
+      project: input.project,
       task: input.task,
       changedFiles: input.changedFiles,
       sourceLinks,
@@ -433,6 +434,7 @@ function collectAffectedSpecs(input: {
 }
 
 function collectFindings(input: {
+  project: ProjectRow;
   task: SpecEntityRow;
   changedFiles: AgentRunChangedFiles;
   sourceLinks: Array<typeof sourceSpecLinks.$inferSelect>;
@@ -555,7 +557,11 @@ function collectFindings(input: {
     );
   }
 
-  const taskFileChanged = input.changedFiles.specs.includes(input.task.filePath);
+  const specopsPrefix = toRepoRelativeSpecopsPrefix(input.project);
+  const changedSpecEntityPaths = input.changedFiles.specs.map((filePath) =>
+    stripSpecopsPrefix(filePath, specopsPrefix)
+  );
+  const taskFileChanged = changedSpecEntityPaths.includes(input.task.filePath);
   if (!taskFileChanged) {
     addFinding(
       "task_not_updated",

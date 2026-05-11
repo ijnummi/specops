@@ -366,6 +366,62 @@ describeWithDb("database-backed routes", () => {
     expect(finished.findingCounts.review).toBeGreaterThanOrEqual(1);
   });
 
+  it("does not flag task_not_updated when the agent task markdown changes", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n"
+      })
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n"
+      })
+    );
+    await git(project.repoPath, ["init"]);
+    await git(project.repoPath, ["config", "user.email", "specops@example.test"]);
+    await git(project.repoPath, ["config", "user.name", "SpecOps Test"]);
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "Initial state"]);
+    await createIndexerService(db).indexProject(project.id);
+
+    const service = createAgentRunService(db);
+    const started = await service.startRun(project.id, {
+      taskEntityId: "task.review",
+      agent: "codex"
+    });
+
+    await writeSpecFile(
+      project.specopsPath,
+      "agent-tasks/task.review.md",
+      agentTaskMarkdown({
+        id: "task.review",
+        title: "Review Service",
+        sourceEntity: "uc.review",
+        body: "# Review Service\n\nValidation: pnpm test passed.\n"
+      })
+    );
+
+    const finished = await service.finishRun(project.id, started.id);
+
+    expect(finished.changedFiles.specs).toEqual([".specops/agent-tasks/task.review.md"]);
+    expect(finished.reviewSummary.findings.map((finding) => finding.kind)).not.toContain(
+      "task_not_updated"
+    );
+  });
+
   it("rejects starting an agent run from a non-agent-task entity", async () => {
     const db = createTestDb();
     const project = await createProjectDirectly(db);
