@@ -1709,6 +1709,72 @@ describeWithDb("database-backed routes", () => {
     await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
   });
 
+  it("rejects AI generation when selected source file changes while provider is running", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          providerCalled = true;
+          await writeFile(path.join(project.repoPath, "src", "projects.ts"), "export const changed = true;\n");
+          return aiPrefillProviderResult(input.model, "uc.manage-projects", "Manage projects");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe(
+      "Selected source file changed since indexing; re-index before AI Prefill"
+    );
+    expect(providerCalled).toBe(true);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
+  it("rejects AI generation when selected source file disappears while provider is running", async () => {
+    let providerCalled = false;
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          providerCalled = true;
+          await rm(path.join(project.repoPath, "src", "projects.ts"));
+          return aiPrefillProviderResult(input.model, "uc.manage-projects", "Manage projects");
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    const sourceFile = await insertIndexedSourceFile(project.id, project.repoPath);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/proposals/ai-prefill`,
+      payload: {
+        sourceFileIds: [sourceFile.id],
+        provider: "ollama",
+        model: "fake-local-model",
+        temperature: 0.1
+      }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.message).toBe(
+      "Selected source file is missing; re-index before AI Prefill"
+    );
+    expect(providerCalled).toBe(true);
+    await expect(countAiPrefillProposals(project.id)).resolves.toBe(0);
+  });
+
   it("keeps only one pending AI proposal batch when concurrent generations finish together", async () => {
     const entered = createDeferred<void>();
     const release = createDeferred<void>();
@@ -3856,6 +3922,32 @@ describeWithDb("database-backed routes", () => {
     );
 
     return { id: sourceFileId };
+  }
+
+  function aiPrefillProviderResult(model: string, entityId: string, title: string) {
+    return {
+      provider: "ollama" as const,
+      model,
+      text: JSON.stringify({
+        proposals: [
+          {
+            entityId,
+            type: "use_case",
+            title,
+            summary: "Users can create and inspect local projects.",
+            sourceFiles: ["src/projects.ts"],
+            claims: [
+              {
+                text: "Project routes create and inspect local projects.",
+                sourceFiles: ["src/projects.ts"]
+              }
+            ],
+            proposedLinks: [],
+            confidence: 0.82
+          }
+        ]
+      })
+    };
   }
 
   async function countAiPrefillProposals(projectId: string): Promise<number> {

@@ -78,16 +78,17 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
 
     const uniqueSourceFileIds = [...new Set(input.sourceFileIds)];
     const selectedRows = await loadSelectedSourceFiles(projectId, uniqueSourceFileIds);
+    const selectedSourceRows = uniqueSourceFileIds.map((sourceFileId) => {
+      const row = selectedRows.get(sourceFileId);
+      if (!row) {
+        throw new BadRequestError("Selected source file does not belong to project", {
+          sourceFileId
+        });
+      }
+      return row;
+    });
     const selectedFiles = await Promise.all(
-      input.sourceFileIds.map(async (sourceFileId) => {
-        const row = selectedRows.get(sourceFileId);
-        if (!row) {
-          throw new BadRequestError("Selected source file does not belong to project", {
-            sourceFileId
-          });
-        }
-        return loadSourceFileForPrompt(repoPath, row);
-      })
+      selectedSourceRows.map((row) => loadSourceFileForPrompt(repoPath, row))
     );
     const existingEntities = await loadExistingEntities(projectId);
 
@@ -144,6 +145,8 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
       })
     );
 
+    await revalidateSelectedSourceFiles(repoPath, selectedSourceRows);
+
     await db.transaction(async (tx) => {
       const now = new Date();
       await tx.execute(
@@ -197,30 +200,7 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
   }
 
   async function loadSourceFileForPrompt(repoPath: string, row: SourceFileRow) {
-    const targetPath = assertInsideDirectory(repoPath, path.join(repoPath, row.path));
-    let text: string;
-    try {
-      const safePath = await assertRealPathInsideDirectory(repoPath, targetPath);
-      text = await readFile(safePath, "utf8");
-    } catch (error) {
-      if (isNotFoundError(error)) {
-        throw new ConflictError("Selected source file is missing; re-index before AI Prefill", {
-          sourceFileId: row.id,
-          path: row.path
-        });
-      }
-      throw error;
-    }
-
-    if (sha256(text) !== row.contentHash) {
-      throw new ConflictError(
-        "Selected source file changed since indexing; re-index before AI Prefill",
-        {
-          sourceFileId: row.id,
-          path: row.path
-        }
-      );
-    }
+    const text = await validateSourceFileContent(repoPath, row);
 
     const [imports, exports, symbols] = await Promise.all([
       db
@@ -268,6 +248,39 @@ export function createAiPrefillService(db: Db, options: AiPrefillServiceOptions)
         line: symbol.line
       }))
     };
+  }
+
+  async function revalidateSelectedSourceFiles(repoPath: string, rows: SourceFileRow[]) {
+    await Promise.all(rows.map((row) => validateSourceFileContent(repoPath, row)));
+  }
+
+  async function validateSourceFileContent(repoPath: string, row: SourceFileRow) {
+    const targetPath = assertInsideDirectory(repoPath, path.join(repoPath, row.path));
+    let text: string;
+    try {
+      const safePath = await assertRealPathInsideDirectory(repoPath, targetPath);
+      text = await readFile(safePath, "utf8");
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        throw new ConflictError("Selected source file is missing; re-index before AI Prefill", {
+          sourceFileId: row.id,
+          path: row.path
+        });
+      }
+      throw error;
+    }
+
+    if (sha256(text) !== row.contentHash) {
+      throw new ConflictError(
+        "Selected source file changed since indexing; re-index before AI Prefill",
+        {
+          sourceFileId: row.id,
+          path: row.path
+        }
+      );
+    }
+
+    return text;
   }
 
   async function loadExistingEntities(projectId: string) {
