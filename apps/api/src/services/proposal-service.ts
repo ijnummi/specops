@@ -35,10 +35,23 @@ import { createIndexerService } from "./indexer-service.js";
 import { createProjectService } from "./project-service.js";
 
 type ProposalRow = typeof aiProposals.$inferSelect;
+type ProposalServiceOptions = {
+  acceptTestHooks?: {
+    afterIndex?: (context: {
+      projectId: string;
+      proposalIds: string[];
+      indexRun: AcceptProposalsResponse["indexRun"];
+    }) => Promise<void>;
+    beforeStatusUpdate?: (context: {
+      projectId: string;
+      proposalIds: string[];
+    }) => Promise<void>;
+  };
+};
 
 const sourceSpecEntityProposalType = "source_spec_entity";
 
-export function createProposalService(db: Db) {
+export function createProposalService(db: Db, options: ProposalServiceOptions = {}) {
   const projectService = createProjectService(db);
 
   async function generateSourceImportProposals(projectId: string): Promise<ProposalSummaryDto[]> {
@@ -192,6 +205,8 @@ export function createProposalService(db: Db) {
     const repoPath = assertAbsolutePath("repoPath", project.repoPath);
     const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
     const writtenPaths: string[] = [];
+    const indexerService = createIndexerService(db);
+    let indexCompleted = false;
 
     assertInsideDirectory(repoPath, specopsPath);
     await assertRealPathInsideDirectory(repoPath, repoPath);
@@ -279,8 +294,9 @@ export function createProposalService(db: Db) {
           row,
           payload,
           targetPath,
-          acceptedStatus:
+          acceptedStatus: (
             payload.markdown === payload.generatedMarkdown ? "accepted" : "edited_and_accepted"
+          ) as ProposalStatus
         };
       })
     );
@@ -294,26 +310,49 @@ export function createProposalService(db: Db) {
         writtenPaths.push(item.targetPath);
       }
 
-      const indexRun = await createIndexerService(db).indexProject(projectId);
+      const indexRun = await indexerService.indexProject(projectId);
+      indexCompleted = true;
+      await options.acceptTestHooks?.afterIndex?.({
+        projectId,
+        proposalIds: input.proposalIds,
+        indexRun
+      });
       const reviewedAt = new Date();
+
+      await options.acceptTestHooks?.beforeStatusUpdate?.({
+        projectId,
+        proposalIds: input.proposalIds
+      });
 
       await db.transaction(async (tx) => {
         for (const item of selected) {
-          await tx
+          const [updated] = await tx
             .update(aiProposals)
             .set({ status: item.acceptedStatus, reviewedAt })
             .where(
               and(
                 eq(aiProposals.projectId, projectId),
-                eq(aiProposals.id, item.row.id)
+                eq(aiProposals.id, item.row.id),
+                eq(aiProposals.status, "pending")
               )
-            );
+            )
+            .returning({ id: aiProposals.id });
+
+          if (!updated) {
+            throw new ConflictError("Only pending proposals can be accepted", {
+              proposalId: item.row.id,
+              status: "changed"
+            });
+          }
         }
       });
 
       return { acceptedProposalIds: input.proposalIds, indexRun };
     } catch (error) {
       await Promise.all(writtenPaths.map((writtenPath) => rm(writtenPath, { force: true })));
+      if (indexCompleted) {
+        await indexerService.indexProject(projectId);
+      }
       if (isFileExistsError(error)) {
         throw new ConflictError("Proposal target markdown file already exists");
       }
@@ -406,10 +445,14 @@ export function createProposalService(db: Db) {
 }
 
 function assertNoDuplicateSelectedTargets(
-  selected: Array<{ row: ProposalRow; payload: SourceSpecEntityProposalPayload }>
+  selected: Array<{
+    row: ProposalRow;
+    payload: SourceSpecEntityProposalPayload;
+    targetPath: string;
+  }>
 ): void {
   const entityIds = new Map<string, string>();
-  const filePaths = new Map<string, string>();
+  const targetPaths = new Map<string, string>();
 
   for (const item of selected) {
     const existingEntityProposalId = entityIds.get(item.payload.entityId);
@@ -421,14 +464,14 @@ function assertNoDuplicateSelectedTargets(
     }
     entityIds.set(item.payload.entityId, item.row.id);
 
-    const existingFileProposalId = filePaths.get(item.payload.filePath);
+    const existingFileProposalId = targetPaths.get(item.targetPath);
     if (existingFileProposalId) {
       throw new ConflictError("Selected proposals target the same file", {
         filePath: item.payload.filePath,
         proposalIds: [existingFileProposalId, item.row.id]
       });
     }
-    filePaths.set(item.payload.filePath, item.row.id);
+    targetPaths.set(item.targetPath, item.row.id);
   }
 }
 

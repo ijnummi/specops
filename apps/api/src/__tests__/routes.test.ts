@@ -14,6 +14,7 @@ import { buildServer } from "../server.js";
 import { createAgentTaskService } from "../services/agent-task-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
+import { createProposalService } from "../services/proposal-service.js";
 import { createSourceBootstrapService } from "../services/source-bootstrap-service.js";
 import { createSourceScanService } from "../services/source-scan-service.js";
 
@@ -1863,14 +1864,20 @@ describeWithDb("database-backed routes", () => {
     const proposals = generateResponse.json() as ProposalSummaryForTest[];
     const firstProposal = findProposalByEntityId(proposals, "interface.decision-service");
     const secondProposal = findProposalOtherThan(proposals, firstProposal.id);
-    const firstDetailResponse = await app.inject({
+    const secondDetailResponse = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/proposals/${firstProposal.id}`
+      url: `/api/projects/${project.id}/proposals/${secondProposal.id}`
     });
-    expect(firstDetailResponse.statusCode).toBe(200);
+    expect(secondDetailResponse.statusCode).toBe(200);
+    const secondPayload = (secondDetailResponse.json() as {
+      payload: Record<string, unknown>;
+    }).payload;
 
     await pool.query("update ai_proposals set payload_json = $1 where id = $2", [
-      (firstDetailResponse.json() as { payload: unknown }).payload,
+      {
+        ...secondPayload,
+        filePath: `interfaces/../${firstProposal.filePath}`
+      },
       secondProposal.id
     ]);
 
@@ -1887,6 +1894,63 @@ describeWithDb("database-backed routes", () => {
     await expect(fileExists(path.join(project.specopsPath, secondProposal.filePath))).resolves.toBe(
       false
     );
+  });
+
+  it("rolls back written proposal files and derived cache when accept fails after indexing", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSampleSourceProject(project.repoPath);
+    const service = createProposalService(db, {
+      acceptTestHooks: {
+        afterIndex: async () => {
+          throw new Error("forced accept failure after index");
+        }
+      }
+    });
+    const proposals = await service.generateSourceImportProposals(project.id);
+    const proposal = findProposalByEntityId(proposals, "interface.decision-service");
+
+    await expect(
+      service.acceptProposals(project.id, { proposalIds: [proposal.id] })
+    ).rejects.toThrow("forced accept failure after index");
+
+    await expect(fileExists(path.join(project.specopsPath, proposal.filePath))).resolves.toBe(
+      false
+    );
+    const detail = await service.getProposal(project.id, proposal.id);
+    expect(detail.status).toBe("pending");
+    await expect(expectIndexedSpecReferenceCount(project.id, proposal)).resolves.toBe(0);
+  });
+
+  it("rolls back written proposal files when final status update loses the pending race", async () => {
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSampleSourceProject(project.repoPath);
+    let proposalIdToChange = "";
+    const service = createProposalService(db, {
+      acceptTestHooks: {
+        beforeStatusUpdate: async () => {
+          await pool.query("update ai_proposals set status = 'rejected' where id = $1", [
+            proposalIdToChange
+          ]);
+        }
+      }
+    });
+    const proposals = await service.generateSourceImportProposals(project.id);
+    const proposal = findProposalByEntityId(proposals, "interface.decision-service");
+    proposalIdToChange = proposal.id;
+
+    await expect(
+      service.acceptProposals(project.id, { proposalIds: [proposal.id] })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Only pending proposals can be accepted"
+    });
+
+    await expect(fileExists(path.join(project.specopsPath, proposal.filePath))).resolves.toBe(
+      false
+    );
+    await expect(expectIndexedSpecReferenceCount(project.id, proposal)).resolves.toBe(0);
   });
 
   it("refuses invalid accepted proposal markdown without writing any selected files", async () => {
@@ -3035,6 +3099,21 @@ describeWithDb("database-backed routes", () => {
     const proposal = proposals.find((item) => item.id !== proposalId);
     expect(proposal).toBeDefined();
     return proposal!;
+  }
+
+  async function expectIndexedSpecReferenceCount(
+    projectId: string,
+    proposal: ProposalSummaryForTest
+  ): Promise<number> {
+    const result = await pool.query<{ count: number }>(
+      "select count(*)::int as count from (" +
+        "select 1 from spec_entities where project_id = $1 and (entity_id = $2 or file_path = $3) " +
+        "union all " +
+        "select 1 from spec_files where project_id = $1 and path = $3" +
+        ") refs",
+      [projectId, proposal.entityId, proposal.filePath]
+    );
+    return result.rows[0].count;
   }
 
   function createTestDb() {
