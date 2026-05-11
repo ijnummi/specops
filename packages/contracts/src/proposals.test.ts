@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   acceptProposalsRequestSchema,
+  aiPrefillGenerateRequestSchema,
+  aiSpecEntityProposalEvidenceSchema,
+  aiSpecEntityProposalPayloadSchema,
   proposalDetailSchema,
   proposalListQuerySchema,
   proposalPatchRequestSchema,
@@ -32,6 +35,15 @@ describe("proposal contracts", () => {
   it("parses proposal list queries", () => {
     expect(proposalListQuerySchema.parse({ status: "pending" })).toEqual({
       status: "pending"
+    });
+  });
+
+  it("parses proposal list queries filtered by AI proposal type", () => {
+    expect(
+      proposalListQuerySchema.parse({ status: "pending", proposalType: "ai_spec_entity" })
+    ).toEqual({
+      status: "pending",
+      proposalType: "ai_spec_entity"
     });
   });
 
@@ -68,8 +80,64 @@ describe("proposal contracts", () => {
       }
     });
 
+    expect(parsed.proposalType).toBe("source_spec_entity");
+    if (parsed.proposalType !== "source_spec_entity") {
+      throw new Error("Expected source spec entity proposal detail");
+    }
     expect(parsed.payload.filePath).toBe("interfaces/decision-service.md");
     expect(parsed.evidence.scanner).toBe("typescript");
+  });
+
+  it("parses AI prefill generate requests", () => {
+    const parsed = aiPrefillGenerateRequestSchema.parse({
+      sourceFileIds: ["source-file-1"],
+      provider: "ollama",
+      model: "qwen2.5-coder:7b",
+      temperature: 0.1
+    });
+
+    expect(parsed).toEqual({
+      sourceFileIds: ["source-file-1"],
+      provider: "ollama",
+      model: "qwen2.5-coder:7b",
+      temperature: 0.1
+    });
+  });
+
+  it("parses AI spec entity proposal payloads", () => {
+    const parsed = aiSpecEntityProposalPayloadSchema.parse(aiPayload());
+
+    expect(parsed.entityId).toBe("uc.manage-projects");
+    expect(parsed.type).toBe("use_case");
+    expect(parsed.proposedLinks[0]?.targetEntityId).toBe("interface.project-service");
+  });
+
+  it("parses AI spec entity proposal evidence", () => {
+    const parsed = aiSpecEntityProposalEvidenceSchema.parse(aiEvidence());
+
+    expect(parsed.provider).toBe("ollama");
+    expect(parsed.promptVersion).toBe("ai-prefill-v1");
+    expect(parsed.selectedSourceFiles[0]?.excerptEndLine).toBe(80);
+  });
+
+  it("parses AI spec entity proposal details", () => {
+    const parsed = proposalDetailSchema.parse({
+      ...proposalSummary(),
+      proposalType: "ai_spec_entity",
+      title: "Manage projects",
+      entityId: "uc.manage-projects",
+      entityType: "use_case",
+      filePath: "use-cases/uc.manage-projects.md",
+      payload: aiPayload(),
+      evidence: aiEvidence()
+    });
+
+    expect(parsed.proposalType).toBe("ai_spec_entity");
+    if (parsed.proposalType !== "ai_spec_entity") {
+      throw new Error("Expected AI spec entity proposal detail");
+    }
+    expect(parsed.payload.type).toBe("use_case");
+    expect(parsed.evidence.provider).toBe("ollama");
   });
 });
 
@@ -109,5 +177,49 @@ function sourceSpecEntityPayload() {
         line: 4
       }
     ]
+  };
+}
+
+function aiPayload() {
+  return {
+    entityId: "uc.manage-projects",
+    type: "use_case",
+    title: "Manage projects",
+    status: "draft",
+    filePath: "use-cases/uc.manage-projects.md",
+    generatedMarkdown: "# Manage projects",
+    markdown: "# Manage projects",
+    sourceFiles: ["apps/api/src/routes/projects.ts"],
+    proposedLinks: [
+      {
+        linkType: "uses",
+        targetEntityId: "interface.project-service",
+        targetExists: true,
+        rationale: "The selected route delegates project behavior to the project service."
+      }
+    ]
+  };
+}
+
+function aiEvidence() {
+  return {
+    provider: "ollama",
+    model: "qwen2.5-coder:7b",
+    promptVersion: "ai-prefill-v1",
+    selectedSourceFiles: [
+      {
+        file: "apps/api/src/routes/projects.ts",
+        contentHash: "hash-1",
+        excerptStartLine: 1,
+        excerptEndLine: 80
+      }
+    ],
+    claims: [
+      {
+        text: "Project routes expose project creation.",
+        sourceFiles: ["apps/api/src/routes/projects.ts"]
+      }
+    ],
+    warnings: []
   };
 }

@@ -10,7 +10,9 @@ export const proposalStatusSchema = z.enum([
   "obsolete"
 ]);
 
-export const proposalTypeSchema = z.enum(["source_spec_entity"]);
+export const proposalTypeSchema = z.enum(["source_spec_entity", "ai_spec_entity"]);
+
+export const aiProviderSchema = z.enum(["ollama", "openai"]);
 
 export const sourceSpecEntityProposalPayloadSchema = z.object({
   entityId: z.string().min(1),
@@ -45,6 +47,58 @@ export const sourceSpecEntityProposalEvidenceSchema = z.object({
   )
 });
 
+export const aiSpecEntityProposalPayloadSchema = z.object({
+  entityId: z.string().min(1),
+  type: z.enum(["use_case", "domain_entity", "interface"]),
+  title: z.string().min(1),
+  status: z.literal("draft"),
+  filePath: z.string().min(1),
+  generatedMarkdown: z.string().min(1),
+  markdown: z.string().min(1),
+  sourceFiles: z.array(z.string().min(1)),
+  proposedLinks: z.array(
+    z.object({
+      linkType: z.string().min(1),
+      targetEntityId: z.string().min(1),
+      targetExists: z.boolean(),
+      rationale: z.string().min(1)
+    })
+  )
+});
+
+export const aiSpecEntityProposalEvidenceSchema = z.object({
+  provider: aiProviderSchema,
+  model: z.string().min(1),
+  promptVersion: z.literal("ai-prefill-v1"),
+  selectedSourceFiles: z.array(
+    z.object({
+      file: z.string().min(1),
+      contentHash: z.string().min(1),
+      excerptStartLine: z.number().int().min(1),
+      excerptEndLine: z.number().int().min(1)
+    })
+  ),
+  claims: z.array(
+    z.object({
+      text: z.string().min(1),
+      sourceFiles: z.array(z.string().min(1))
+    })
+  ),
+  warnings: z.array(z.string().min(1))
+});
+
+export const aiPrefillGenerateRequestSchema = z.object({
+  sourceFileIds: z.array(z.string().min(1)).nonempty(),
+  provider: aiProviderSchema,
+  model: z.string().min(1),
+  temperature: z.number().min(0).max(2).default(0.1)
+});
+
+export const aiPrefillDiagnosticSchema = z.object({
+  level: z.enum(["warning", "info"]),
+  message: z.string().min(1)
+});
+
 export const proposalConflictSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("none") }),
   z.object({ status: z.literal("file_exists"), filePath: z.string().min(1) }),
@@ -52,14 +106,14 @@ export const proposalConflictSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("unavailable"), message: z.string().min(1) })
 ]);
 
-export const proposalSummarySchema = z.object({
+const proposalSummaryBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   proposalType: proposalTypeSchema,
   status: proposalStatusSchema,
   title: z.string(),
   entityId: z.string(),
-  entityType: z.enum(["domain_entity", "interface"]),
+  entityType: z.enum(["use_case", "domain_entity", "interface"]),
   filePath: z.string(),
   confidence: z.number().nullable(),
   conflict: proposalConflictSchema,
@@ -67,13 +121,30 @@ export const proposalSummarySchema = z.object({
   reviewedAt: z.string().nullable()
 });
 
-export const proposalDetailSchema = proposalSummarySchema.extend({
+export const proposalSummarySchema = proposalSummaryBaseSchema;
+
+export const sourceSpecEntityProposalDetailSchema = proposalSummaryBaseSchema.extend({
+  proposalType: z.literal("source_spec_entity"),
+  entityType: z.enum(["domain_entity", "interface"]),
   payload: sourceSpecEntityProposalPayloadSchema,
   evidence: sourceSpecEntityProposalEvidenceSchema
 });
 
+export const aiSpecEntityProposalDetailSchema = proposalSummaryBaseSchema.extend({
+  proposalType: z.literal("ai_spec_entity"),
+  entityType: z.enum(["use_case", "domain_entity", "interface"]),
+  payload: aiSpecEntityProposalPayloadSchema,
+  evidence: aiSpecEntityProposalEvidenceSchema
+});
+
+export const proposalDetailSchema = z.discriminatedUnion("proposalType", [
+  sourceSpecEntityProposalDetailSchema,
+  aiSpecEntityProposalDetailSchema
+]);
+
 export const proposalListQuerySchema = z.object({
-  status: proposalStatusSchema.optional()
+  status: proposalStatusSchema.optional(),
+  proposalType: proposalTypeSchema.optional()
 });
 
 export const proposalPatchRequestSchema = z
@@ -96,12 +167,21 @@ export const acceptProposalsResponseSchema = z.object({
 
 export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
 export type ProposalType = z.infer<typeof proposalTypeSchema>;
+export type AiProvider = z.infer<typeof aiProviderSchema>;
 export type SourceSpecEntityProposalPayload = z.infer<
   typeof sourceSpecEntityProposalPayloadSchema
 >;
 export type SourceSpecEntityProposalEvidence = z.infer<
   typeof sourceSpecEntityProposalEvidenceSchema
 >;
+export type AiSpecEntityProposalPayload = z.infer<
+  typeof aiSpecEntityProposalPayloadSchema
+>;
+export type AiSpecEntityProposalEvidence = z.infer<
+  typeof aiSpecEntityProposalEvidenceSchema
+>;
+export type AiPrefillGenerateRequest = z.infer<typeof aiPrefillGenerateRequestSchema>;
+export type AiPrefillDiagnostic = z.infer<typeof aiPrefillDiagnosticSchema>;
 export type ProposalConflictDto = z.infer<typeof proposalConflictSchema>;
 export type ProposalConflict = ProposalConflictDto;
 export type ProposalSummaryDto = z.infer<typeof proposalSummarySchema>;
