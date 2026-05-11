@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 
 import { isHttpError } from "./lib/http-errors.js";
 import { registerAdminDatabaseRoutes } from "./routes/admin-database.js";
+import { registerAgentRunRoutes } from "./routes/agent-runs.js";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.js";
 import { registerEntityRoutes } from "./routes/entities.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
@@ -92,6 +93,7 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
   app.register(registerReadinessRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
   app.register(registerAgentTaskRoutes, { prefix: "/api", db });
+  app.register(registerAgentRunRoutes, { prefix: "/api", db });
   app.register(registerSearchRoutes, { prefix: "/api", db });
   app.register(registerSourceRoutes, { prefix: "/api", db });
   app.register(registerValidationRoutes, { prefix: "/api", db });

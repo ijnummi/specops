@@ -262,7 +262,8 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("starts and finishes an agent run with deterministic review findings", async () => {
+  it("starts, lists, reads, and finishes an agent run through the API", async () => {
+    app = buildServer(testDatabaseUrl!);
     const db = createTestDb();
     const project = await createProjectDirectly(db);
     await writeSampleSourceProject(project.repoPath);
@@ -308,23 +309,97 @@ describeWithDb("database-backed routes", () => {
       [project.id, sourceFileResult.rows[0]!.id]
     );
 
-    const service = createAgentRunService(db);
-    const started = await service.startRun(project.id, {
-      taskEntityId: "task.review",
-      agent: "codex"
+    const startResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/agent-runs`,
+      payload: {
+        taskEntityId: "task.review",
+        agent: "codex"
+      }
     });
+    const started = startResponse.json() as {
+      id: string;
+      status: string;
+      taskEntityId: string;
+      promptMarkdown: string;
+    };
 
+    expect(startResponse.statusCode).toBe(201);
     expect(started.status).toBe("running");
     expect(started.taskEntityId).toBe("task.review");
     expect(started.promptMarkdown).toContain("source_entity: uc.review");
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/agent-runs`
+    });
+    const listBody = listResponse.json() as Array<{ id: string; status: string }>;
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listBody).toEqual([
+      expect.objectContaining({
+        id: started.id,
+        status: "running"
+      })
+    ]);
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/agent-runs/${started.id}`
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({
+      id: started.id,
+      status: "running",
+      taskEntityId: "task.review"
+    });
 
     await writeFile(
       path.join(project.repoPath, "src", "review-service.ts"),
       "export function reviewService() { return 'changed'; }\n"
     );
 
-    const finished = await service.finishRun(project.id, started.id);
+    const finishResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/agent-runs/${started.id}/finish`
+    });
+    const finished = finishResponse.json() as {
+      status: string;
+      changedFiles: {
+        specs: string[];
+        source: string[];
+        tests: string[];
+        other: string[];
+      };
+      changedFileCount: number;
+      reviewSummary: {
+        taskContext: {
+          sourceEntityId: string | null;
+          contextEntityIds: string[];
+          missingEntityIds: string[];
+        };
+        affectedSpecs: Array<{
+          entityId: string;
+          title: string;
+          type: string;
+          filePath: string;
+          reason: string;
+        }>;
+        findings: Array<{
+          id: string;
+          kind: string;
+          entityId: string | null;
+          filePath: string | null;
+        }>;
+        suggestedValidationCommands: string[];
+      };
+      findingCounts: {
+        review: number;
+      };
+    };
 
+    expect(finishResponse.statusCode).toBe(200);
     expect(finished.status).toBe("ready_for_review");
     expect(finished.changedFiles).toEqual({
       specs: [],
@@ -562,7 +637,8 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
-  it("rejects accepting an agent run while it is still running", async () => {
+  it("rejects accepting a running agent run through the API", async () => {
+    app = buildServer(testDatabaseUrl!);
     const db = createTestDb();
     const project = await createProjectDirectly(db);
     await writeSpecFile(
@@ -587,17 +663,32 @@ describeWithDb("database-backed routes", () => {
       })
     );
     await createIndexerService(db).indexProject(project.id);
-    const service = createAgentRunService(db);
-    const run = await service.startRun(project.id, {
-      taskEntityId: "task.review",
-      agent: "codex"
+    const startResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/agent-runs`,
+      payload: {
+        taskEntityId: "task.review",
+        agent: "codex"
+      }
+    });
+    const run = startResponse.json() as { id: string };
+
+    expect(startResponse.statusCode).toBe(201);
+
+    const acceptResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/agent-runs/${run.id}`,
+      payload: {
+        status: "accepted"
+      }
     });
 
-    await expect(
-      service.updateRunStatus(project.id, run.id, { status: "accepted" })
-    ).rejects.toMatchObject({
-      statusCode: 400,
-      message: "Agent run status can only be accepted from ready_for_review"
+    expect(acceptResponse.statusCode).toBe(400);
+    expect(acceptResponse.json()).toMatchObject({
+      error: {
+        code: "bad_request",
+        message: "Agent run status can only be accepted from ready_for_review"
+      }
     });
   });
 
