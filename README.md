@@ -10,7 +10,7 @@ This repository is a pnpm TypeScript monorepo with:
 - `apps/api`: Fastify API for projects, markdown initialization, indexing, source inventory, entities, search, links, and validation messages.
 - `apps/worker`: future asynchronous worker entrypoint. In Milestone 1, indexing runs synchronously through the API.
 - `packages/domain`, `packages/contracts`, `packages/markdown`, `packages/graph`, and `packages/db`: shared domain types, Zod contracts, markdown parsing, graph helpers, and Drizzle/PostgreSQL persistence.
-- `packages/repo-scanner`, `packages/taskgen`, and `packages/ai-prefill`: source scanning, agent task generation, and future AI-assisted workflows.
+- `packages/repo-scanner`, `packages/taskgen`, and `packages/ai-prefill`: source scanning, agent task generation, and AI-assisted prefill workflows.
 
 Markdown and source files are canonical. PostgreSQL stores rebuildable cache data for indexed entities, links, source inventory, index runs, and validation messages. If database cache data is deleted, it can be rebuilt by indexing the project again.
 
@@ -97,6 +97,19 @@ pnpm dev
 7. Review entities, source inventory, outgoing links, backlinks, search results, index runs, and validation messages in the workbench.
 
 Markdown and source files remain the source of truth. PostgreSQL is a cache and workflow store derived from those files, so index data can be discarded and rebuilt from the project.
+
+## AI Prefill
+
+AI Prefill generates reviewable spec proposals from manually selected indexed source files. Generation writes pending proposal rows only; accepting proposals writes canonical markdown under `specops/`.
+
+Ollama is the default local provider:
+
+```sh
+ollama serve
+ollama pull qwen2.5-coder:7b
+```
+
+OpenAI can be enabled by setting `OPENAI_API_KEY` and choosing the OpenAI provider in the UI.
 
 ## Validation
 
