@@ -569,6 +569,49 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("classifies generated_from timestamp fallback as context when it is not the source entity", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, frontmatter_json, body_markdown, body_text, content_hash, created_at, updated_at) values " +
+        "($1, 'domain.source', 'domain_entity', 'Source', 'draft', 'domain/source.md', '{}'::jsonb, '# Source', 'Source', 'hash-source', '2026-05-10T08:00:00Z', '2026-05-10T08:00:00Z')," +
+        "($1, 'domain.context', 'domain_entity', 'Context', 'draft', 'domain/context.md', '{}'::jsonb, '# Context', 'Context', 'hash-context', '2026-05-10T10:00:00Z', '2026-05-10T12:00:00Z')," +
+        "($1, 'task.context', 'agent_task', 'Context Task', 'open', 'agent-tasks/task.context.md', $2::jsonb, '# Context Task', 'Context Task', 'task-context-hash', '2026-05-10T09:00:00Z', '2026-05-10T09:00:00Z')",
+      [
+        project.id,
+        JSON.stringify({
+          source_entity: "domain.source",
+          links: { generated_from: ["domain.context"] }
+        })
+      ]
+    );
+    await pool.query(
+      "insert into spec_links (project_id, from_entity_id, to_entity_id, link_type, source) values " +
+        "($1, 'task.context', 'domain.context', 'generated_from', 'frontmatter')",
+      [project.id]
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      staleTasks: {
+        count: 1,
+        samples: [
+          {
+            entityId: "task.context",
+            sourceEntityId: "domain.source",
+            reason: "context_spec_changed"
+          }
+        ]
+      }
+    });
+  });
+
   it("returns an empty project overview before indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

@@ -169,22 +169,20 @@ function classifyStaleTask(
 ): ProjectHealthDto["staleTasks"]["samples"][number] | null {
   const frontmatter = readFrontmatter(task.frontmatterJson);
   const sourceEntityId = readString(frontmatter.source_entity);
-  const generatedFromIds = mergeIds(
-    sourceEntityId ? [sourceEntityId] : [],
-    readFrontmatterLinkIds(frontmatter, "generated_from"),
-    [...(linkedIdsByType?.get("generated_from") ?? [])]
-  );
+  const sourceIds = sourceEntityId ? [sourceEntityId] : [];
   const contextIds = mergeIds(
+    readFrontmatterLinkIds(frontmatter, "generated_from"),
+    [...(linkedIdsByType?.get("generated_from") ?? [])],
     readFrontmatterLinkIds(frontmatter, "uses"),
     [...(linkedIdsByType?.get("uses") ?? [])]
-  );
+  ).filter((entityId) => entityId !== sourceEntityId);
   const trackedHashes = readTrackedSpecHashes(frontmatter.tracked_spec_hashes);
   const reason =
     sourceEntityId && !entitiesById.has(sourceEntityId)
       ? "missing_source_entity"
       : trackedHashes && hasTrackedHashMismatch(trackedHashes, entitiesById)
         ? "tracked_hash_mismatch"
-        : !trackedHashes && hasNewerLinkedEntity(generatedFromIds, entitiesById, task.updatedAt)
+        : !trackedHashes && hasNewerLinkedEntity(sourceIds, entitiesById, task.updatedAt)
           ? "source_spec_changed"
           : !trackedHashes && hasNewerLinkedEntity(contextIds, entitiesById, task.updatedAt)
             ? "context_spec_changed"
