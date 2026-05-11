@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { FolderSearch, FolderSync, Play, RotateCw } from "lucide-react";
+import { FolderSearch, FolderSync, Play, RotateCw, Sparkles } from "lucide-react";
 
 export type ProjectActionsProps = {
   projectId: string;
@@ -40,6 +40,14 @@ export function ProjectActions({
       >
         <FolderSearch className="h-4 w-4" aria-hidden="true" />
         Import from source
+      </Link>
+      <Link
+        to="/projects/$projectId/ai-prefill"
+        params={{ projectId }}
+        className="button-secondary"
+      >
+        <Sparkles className="h-4 w-4" aria-hidden="true" />
+        AI Prefill
       </Link>
       <button
         type="button"

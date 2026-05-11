@@ -42,6 +42,8 @@ describe("ProjectActions", () => {
     expect(html).toContain("Init specops");
     expect(html).toContain("Import from source");
     expect(html).toContain('href="/projects/project-1/import/source"');
+    expect(html).toContain("AI Prefill");
+    expect(html).toContain('href="/projects/project-1/ai-prefill"');
     expect(html).not.toContain("Bootstrap from source");
     expect(html).toContain("Re-index");
   });
