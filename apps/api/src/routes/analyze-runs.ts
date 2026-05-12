@@ -20,7 +20,7 @@ const projectParamsSchema = z.object({
 
 const analyzeRunParamsSchema = z.object({
   projectId: z.string().min(1),
-  runId: z.string().min(1)
+  runId: z.string().uuid()
 });
 
 export const registerAnalyzeRunRoutes: FastifyPluginAsync<RouteOptions> = async (

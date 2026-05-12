@@ -2477,6 +2477,8 @@ describeWithDb("database-backed routes", () => {
       id: started.id,
       projectId: project.id
     });
+    expect(fetched.status).toBe("succeeded");
+    expect(fetched.aiProposalCount).toBeGreaterThan(0);
     expect(fetched.steps.map((step) => step.name)).toEqual(started.steps.map((step) => step.name));
   });
 
@@ -2510,6 +2512,18 @@ describeWithDb("database-backed routes", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("returns bad request when fetching an analyze run with a malformed run id", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/analyze-runs/not-a-uuid`
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 
   it("generates AI proposals from selected source files without writing markdown", async () => {
@@ -5277,8 +5291,11 @@ Let customers buy products and receive confirmation while keeping payment and or
       const run = analyzeRunDetailSchema.parse(response.json());
 
       expect(response.statusCode).toBe(200);
-      if (run.status === "succeeded" || run.status === "failed") {
+      if (run.status === "succeeded") {
         return run;
+      }
+      if (run.status === "failed") {
+        throw new Error(`Analyze run failed: ${run.errorMessage ?? "unknown error"}`);
       }
 
       await delay(50);
@@ -5291,7 +5308,11 @@ Let customers buy products and receive confirmation while keeping payment and or
     return ["initialize", "index", "source_proposals", "select_ai_sources", "ai_prefill"].map(
       (name) => ({
         name,
-        status: "pending"
+        status: "pending",
+        startedAt: null,
+        finishedAt: null,
+        message: null,
+        counts: null
       })
     );
   }
