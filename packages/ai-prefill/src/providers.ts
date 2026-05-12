@@ -30,6 +30,7 @@ export function createAiPrefillProvider(
             model: providerInput.model,
             messages: providerInput.packet.messages,
             stream: false,
+            format: "json",
             options: { temperature: providerInput.temperature }
           }
         });

@@ -42,6 +42,7 @@ describe("createAiPrefillProvider", () => {
       model: "qwen2.5-coder:7b",
       messages: packet().messages,
       stream: false,
+      format: "json",
       options: { temperature: 0.2 }
     });
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 60_000);
