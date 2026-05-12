@@ -85,5 +85,8 @@ describe("initial migration", () => {
     expect(migration).toContain("analyze_runs_project_id_idx");
     expect(migration).toContain("analyze_runs_project_status_idx");
     expect(migration).toContain("analyze_runs_project_created_at_idx");
+    expect(migration).toContain("analyze_runs_index_run_id_idx");
+    expect(migration).toContain("analyze_runs_one_active_per_project_idx");
+    expect(migration).toContain("WHERE status IN ('queued', 'running')");
   });
 });

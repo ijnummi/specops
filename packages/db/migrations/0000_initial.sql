@@ -382,3 +382,5 @@ CREATE TABLE IF NOT EXISTS analyze_runs (
 CREATE INDEX IF NOT EXISTS analyze_runs_project_id_idx ON analyze_runs(project_id);
 CREATE INDEX IF NOT EXISTS analyze_runs_project_status_idx ON analyze_runs(project_id, status);
 CREATE INDEX IF NOT EXISTS analyze_runs_project_created_at_idx ON analyze_runs(project_id, created_at);
+CREATE INDEX IF NOT EXISTS analyze_runs_index_run_id_idx ON analyze_runs(index_run_id);
+CREATE UNIQUE INDEX IF NOT EXISTS analyze_runs_one_active_per_project_idx ON analyze_runs(project_id) WHERE status IN ('queued', 'running');

@@ -46,30 +46,30 @@ export const analyzeRunSelectionSummarySchema = z.object({
 export const analyzeRunStepSchema = z.object({
   name: analyzeRunStepNameSchema,
   status: analyzeRunStepStatusSchema,
-  startedAt: z.string().nullable(),
-  finishedAt: z.string().nullable(),
+  startedAt: z.string().datetime().nullable(),
+  finishedAt: z.string().datetime().nullable(),
   message: z.string().nullable(),
-  counts: z.record(z.string(), z.number()),
+  counts: z.record(z.string(), z.number().min(0)),
 });
 
 export const analyzeRunDetailSchema = z.object({
-  id: z.string(),
-  projectId: z.string(),
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
   status: analyzeRunStatusSchema,
   currentStep: analyzeRunStepNameSchema.nullable(),
   steps: z.array(analyzeRunStepSchema),
   selection: analyzeRunSelectionSummarySchema.nullable(),
   sourceProposalCount: z.number().int().min(0),
   aiProposalCount: z.number().int().min(0),
-  indexRunId: z.string().nullable(),
+  indexRunId: z.string().uuid().nullable(),
   errorMessage: z.string().nullable(),
-  createdAt: z.string(),
-  startedAt: z.string().nullable(),
-  finishedAt: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  finishedAt: z.string().datetime().nullable(),
 });
 
 export const activeAnalyzeRunConflictSchema = z.object({
-  activeRunId: z.string().min(1),
+  activeRunId: z.string().uuid(),
 });
 
 export type AnalyzeRunStatus = z.infer<typeof analyzeRunStatusSchema>;

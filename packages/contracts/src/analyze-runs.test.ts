@@ -7,6 +7,10 @@ import {
 } from "./analyze-runs.js";
 import type { AnalyzeRunSelectionCategory } from "./analyze-runs.js";
 
+const analyzeRunId = "11111111-1111-4111-8111-111111111111";
+const projectId = "22222222-2222-4222-8222-222222222222";
+const indexRunId = "33333333-3333-4333-8333-333333333333";
+
 const categoryTypecheck: AnalyzeRunSelectionCategory = {
   category: "entrypoints_routes",
   count: 1,
@@ -16,8 +20,8 @@ void categoryTypecheck;
 describe("analyze run contracts", () => {
   it("parses analyze run details", () => {
     const parsed = analyzeRunDetailSchema.parse({
-      id: "run-1",
-      projectId: "project-1",
+      id: analyzeRunId,
+      projectId,
       status: "running",
       currentStep: "ai_prefill",
       steps: [
@@ -40,7 +44,7 @@ describe("analyze run contracts", () => {
       },
       sourceProposalCount: 2,
       aiProposalCount: 1,
-      indexRunId: "index-run-1",
+      indexRunId,
       errorMessage: null,
       createdAt: "2026-05-12T09:59:59.000Z",
       startedAt: "2026-05-12T10:00:00.000Z",
@@ -83,8 +87,136 @@ describe("analyze run contracts", () => {
   it("parses active run conflict payloads", () => {
     expect(
       activeAnalyzeRunConflictSchema.parse({
+        activeRunId: analyzeRunId,
+      }),
+    ).toEqual({ activeRunId: analyzeRunId });
+  });
+
+  it("rejects malformed UUIDs", () => {
+    expect(() =>
+      analyzeRunDetailSchema.parse({
+        id: "run-1",
+        projectId,
+        status: "running",
+        currentStep: "index",
+        steps: [],
+        selection: null,
+        sourceProposalCount: 0,
+        aiProposalCount: 0,
+        indexRunId,
+        errorMessage: null,
+        createdAt: "2026-05-12T09:59:59.000Z",
+        startedAt: null,
+        finishedAt: null,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      activeAnalyzeRunConflictSchema.parse({
         activeRunId: "run-1",
       }),
-    ).toEqual({ activeRunId: "run-1" });
+    ).toThrow();
+  });
+
+  it("rejects malformed timestamps", () => {
+    expect(() =>
+      analyzeRunDetailSchema.parse({
+        id: analyzeRunId,
+        projectId,
+        status: "running",
+        currentStep: "index",
+        steps: [
+          {
+            name: "index",
+            status: "running",
+            startedAt: "not-a-date",
+            finishedAt: null,
+            message: null,
+            counts: {},
+          },
+        ],
+        selection: null,
+        sourceProposalCount: 0,
+        aiProposalCount: 0,
+        indexRunId: null,
+        errorMessage: null,
+        createdAt: "2026-05-12T09:59:59.000Z",
+        startedAt: "2026-05-12T10:00:00.000Z",
+        finishedAt: null,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects invalid statuses", () => {
+    expect(() =>
+      analyzeRunDetailSchema.parse({
+        id: analyzeRunId,
+        projectId,
+        status: "paused",
+        currentStep: "index",
+        steps: [],
+        selection: null,
+        sourceProposalCount: 0,
+        aiProposalCount: 0,
+        indexRunId: null,
+        errorMessage: null,
+        createdAt: "2026-05-12T09:59:59.000Z",
+        startedAt: null,
+        finishedAt: null,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects empty diagnostic messages", () => {
+    expect(() =>
+      analyzeRunSelectionSummarySchema.parse({
+        selectedSourceFileIds: [],
+        selectedPaths: [],
+        eligibleHighSignalFileCount: 0,
+        skippedHighSignalFileCount: 0,
+        categories: [],
+        diagnostics: [{ level: "warning", message: "" }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects negative counts", () => {
+    expect(() =>
+      analyzeRunSelectionSummarySchema.parse({
+        selectedSourceFileIds: [],
+        selectedPaths: [],
+        eligibleHighSignalFileCount: -1,
+        skippedHighSignalFileCount: 0,
+        categories: [],
+        diagnostics: [],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      analyzeRunDetailSchema.parse({
+        id: analyzeRunId,
+        projectId,
+        status: "running",
+        currentStep: "index",
+        steps: [
+          {
+            name: "index",
+            status: "succeeded",
+            startedAt: "2026-05-12T10:00:00.000Z",
+            finishedAt: "2026-05-12T10:00:02.000Z",
+            message: null,
+            counts: { sourceFileCount: -1 },
+          },
+        ],
+        selection: null,
+        sourceProposalCount: 0,
+        aiProposalCount: 0,
+        indexRunId: null,
+        errorMessage: null,
+        createdAt: "2026-05-12T09:59:59.000Z",
+        startedAt: "2026-05-12T10:00:00.000Z",
+        finishedAt: null,
+      }),
+    ).toThrow();
   });
 });

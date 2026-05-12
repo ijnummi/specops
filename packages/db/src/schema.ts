@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -342,6 +343,10 @@ export const analyzeRuns = pgTable(
       table.projectId,
       table.createdAt,
     ),
+    indexRunIdx: index("analyze_runs_index_run_id_idx").on(table.indexRunId),
+    oneActivePerProjectIdx: uniqueIndex("analyze_runs_one_active_per_project_idx")
+      .on(table.projectId)
+      .where(sql`${table.status} in ('queued', 'running')`),
   }),
 );
 
