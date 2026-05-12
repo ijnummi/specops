@@ -124,6 +124,17 @@ describe("selectAnalyzeSourceFiles", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  it("classifies frontend route components as frontend views", () => {
+    const result = selectAnalyzeSourceFiles({
+      files: [file("web-route", "apps/web/src/routes/projects.$projectId.tsx", 6_000, 2, 1, 3)],
+      maxFiles: 3,
+      maxTotalBytes: 20_000
+    });
+
+    expect(result.selectedSourceFileIds).toEqual(["web-route"]);
+    expect(result.categories).toEqual([{ category: "frontend_views", count: 1 }]);
+  });
+
   it("returns a warning when no useful files fit", () => {
     const result = selectAnalyzeSourceFiles({
       files: [file("huge", "apps/api/src/routes/huge.ts", 70_000, 1, 2, 3)],

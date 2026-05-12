@@ -31,6 +31,7 @@ const categoryOrder: SelectionCategory[] = [
   "tests_config"
 ];
 const reservedCategoryOrder = categoryOrder.slice(0, 3);
+const maxReservedCandidatesPerCategory = 16;
 
 export function selectAnalyzeSourceFiles(
   input: SelectAnalyzeSourceFilesInput
@@ -110,6 +111,15 @@ function selectReservedBucketCandidates(
   input: SelectAnalyzeSourceFilesInput
 ) {
   let best: ScoredCandidate[] = [];
+  const candidatesByCategory = new Map(
+    reservedCategoryOrder.map((category) => [
+      category,
+      rankReservedCandidatesForSearch(
+        candidates.filter((candidate) => candidate.category === category),
+        input
+      ).slice(0, maxReservedCandidatesPerCategory)
+    ])
+  );
 
   function visit(categoryIndex: number, current: ScoredCandidate[]) {
     if (categoryIndex === reservedCategoryOrder.length) {
@@ -122,8 +132,7 @@ function selectReservedBucketCandidates(
     visit(categoryIndex + 1, current);
 
     const category = reservedCategoryOrder[categoryIndex];
-    for (const candidate of candidates) {
-      if (candidate.category !== category) continue;
+    for (const candidate of candidatesByCategory.get(category) ?? []) {
       const next = [...current, candidate];
       if (next.length > input.maxFiles || sumBytes(next) > input.maxTotalBytes) continue;
       visit(categoryIndex + 1, next);
@@ -132,6 +141,21 @@ function selectReservedBucketCandidates(
 
   visit(0, []);
   return best;
+}
+
+function rankReservedCandidatesForSearch(
+  candidates: ScoredCandidate[],
+  input: SelectAnalyzeSourceFilesInput
+) {
+  const reservedBucketTargetBytes =
+    input.maxTotalBytes / Math.max(1, Math.min(input.maxFiles, reservedCategoryOrder.length));
+
+  return [...candidates].sort((left, right) => {
+    const leftFitsTarget = left.sizeBytes <= reservedBucketTargetBytes;
+    const rightFitsTarget = right.sizeBytes <= reservedBucketTargetBytes;
+    if (leftFitsTarget !== rightFitsTarget) return leftFitsTarget ? -1 : 1;
+    return compareCandidates(left, right);
+  });
 }
 
 function compareSelections(left: ScoredCandidate[], right: ScoredCandidate[]) {
@@ -171,6 +195,15 @@ function categorizePath(path: string, kind: string): SelectionCategory {
     path.includes("/config.")
   ) {
     return "tests_config";
+  }
+  if (
+    (path.includes("apps/web/") || path.includes("/frontend/") || path.includes("/client/")) &&
+    (path.includes("/routes/") ||
+      path.includes("/pages/") ||
+      path.includes("/components/") ||
+      path.endsWith(".tsx"))
+  ) {
+    return "frontend_views";
   }
   if (
     path.includes("/routes/") ||
