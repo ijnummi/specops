@@ -48,10 +48,39 @@ describe("selectAnalyzeSourceFiles", () => {
     expect(result.selectedPaths).toHaveLength(2);
     expect(result.eligibleHighSignalFileCount).toBe(4);
     expect(result.skippedHighSignalFileCount).toBe(2);
+    expect(result.categories).toEqual([
+      { category: "entrypoints_routes", count: 1 },
+      { category: "services_modules", count: 1 }
+    ]);
     expect(result.diagnostics).toContainEqual({
       level: "info",
       message: "AI source selection is partial: selected 2 of 4 high-signal files."
     });
+  });
+
+  it("prefers a fitting balanced reserved-bucket subset under byte pressure", () => {
+    const result = selectAnalyzeSourceFiles({
+      files: [
+        file("route-large", "apps/api/src/routes/large.ts", 25_000, 10, 10, 10),
+        file("route-small", "apps/api/src/routes/small.ts", 5_000, 1, 1, 1),
+        file("service", "apps/api/src/services/project-service.ts", 10_000, 1, 4, 4),
+        file("domain", "packages/domain/src/types.ts", 10_000, 0, 4, 4)
+      ],
+      maxFiles: 3,
+      maxTotalBytes: 25_000
+    });
+
+    expect(result.selectedSourceFileIds).toEqual(["route-small", "service", "domain"]);
+    expect(result.selectedPaths).toEqual([
+      "apps/api/src/routes/small.ts",
+      "apps/api/src/services/project-service.ts",
+      "packages/domain/src/types.ts"
+    ]);
+    expect(result.categories).toEqual([
+      { category: "entrypoints_routes", count: 1 },
+      { category: "services_modules", count: 1 },
+      { category: "domain_models", count: 1 }
+    ]);
   });
 
   it("uses tests and config as weak fallback when high-signal files do not fit", () => {

@@ -30,6 +30,7 @@ const categoryOrder: SelectionCategory[] = [
   "frontend_views",
   "tests_config"
 ];
+const reservedCategoryOrder = categoryOrder.slice(0, 3);
 
 export function selectAnalyzeSourceFiles(
   input: SelectAnalyzeSourceFilesInput
@@ -39,21 +40,8 @@ export function selectAnalyzeSourceFiles(
     .filter((candidate) => candidate.score > 0)
     .sort(compareCandidates);
   const highSignal = scored.filter(isHighSignal);
-  const selected: ScoredCandidate[] = [];
-  let selectedBytes = 0;
-
-  for (const category of categoryOrder.slice(0, 3)) {
-    const candidate = scored.find(
-      (item) =>
-        item.category === category &&
-        !selected.some((selectedItem) => selectedItem.id === item.id) &&
-        canSelect(item, selected.length, selectedBytes, input)
-    );
-    if (candidate) {
-      selected.push(candidate);
-      selectedBytes += candidate.sizeBytes;
-    }
-  }
+  const selected = selectReservedBucketCandidates(scored, input);
+  let selectedBytes = sumBytes(selected);
 
   for (const candidate of scored) {
     if (selected.some((item) => item.id === candidate.id)) continue;
@@ -62,7 +50,7 @@ export function selectAnalyzeSourceFiles(
     selectedBytes += candidate.sizeBytes;
   }
 
-  selected.sort((left, right) => left.path.localeCompare(right.path));
+  selected.sort((left, right) => compareStrings(left.path, right.path));
 
   const diagnostics: AnalyzeRunDiagnostic[] = [];
   const selectedHighSignalFileCount = selected.filter(isHighSignal).length;
@@ -117,6 +105,63 @@ function isHighSignal(candidate: ScoredCandidate) {
   return candidate.category !== "tests_config";
 }
 
+function selectReservedBucketCandidates(
+  candidates: ScoredCandidate[],
+  input: SelectAnalyzeSourceFilesInput
+) {
+  let best: ScoredCandidate[] = [];
+
+  function visit(categoryIndex: number, current: ScoredCandidate[]) {
+    if (categoryIndex === reservedCategoryOrder.length) {
+      if (compareSelections(current, best) < 0) {
+        best = current;
+      }
+      return;
+    }
+
+    visit(categoryIndex + 1, current);
+
+    const category = reservedCategoryOrder[categoryIndex];
+    for (const candidate of candidates) {
+      if (candidate.category !== category) continue;
+      const next = [...current, candidate];
+      if (next.length > input.maxFiles || sumBytes(next) > input.maxTotalBytes) continue;
+      visit(categoryIndex + 1, next);
+    }
+  }
+
+  visit(0, []);
+  return best;
+}
+
+function compareSelections(left: ScoredCandidate[], right: ScoredCandidate[]) {
+  const byCount = right.length - left.length;
+  if (byCount !== 0) return byCount;
+
+  const byScore = sumScore(right) - sumScore(left);
+  if (byScore !== 0) return byScore;
+
+  const byBytes = sumBytes(left) - sumBytes(right);
+  if (byBytes !== 0) return byBytes;
+
+  return compareStrings(selectionKey(left), selectionKey(right));
+}
+
+function selectionKey(selection: ScoredCandidate[]) {
+  return selection
+    .map((candidate) => candidate.path)
+    .sort(compareStrings)
+    .join("\n");
+}
+
+function sumBytes(candidates: ScoredCandidate[]) {
+  return candidates.reduce((total, candidate) => total + candidate.sizeBytes, 0);
+}
+
+function sumScore(candidates: ScoredCandidate[]) {
+  return candidates.reduce((total, candidate) => total + candidate.score, 0);
+}
+
 function categorizePath(path: string, kind: string): SelectionCategory {
   if (
     kind === "test" ||
@@ -154,7 +199,6 @@ function categorizePath(path: string, kind: string): SelectionCategory {
     return "domain_models";
   }
   if (
-    path.includes("/routes/") ||
     path.includes("/pages/") ||
     path.includes("/components/") ||
     path.endsWith(".tsx")
@@ -166,7 +210,13 @@ function categorizePath(path: string, kind: string): SelectionCategory {
 
 function compareCandidates(left: ScoredCandidate, right: ScoredCandidate) {
   const byScore = right.score - left.score;
-  return byScore === 0 ? left.path.localeCompare(right.path) : byScore;
+  return byScore === 0 ? compareStrings(left.path, right.path) : byScore;
+}
+
+function compareStrings(left: string, right: string) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function canSelect(
