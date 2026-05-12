@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
     queryKey: readonly unknown[];
     queryType?: string;
   }>,
-  proposalSummariesOverride: undefined as unknown,
+  aiProposalSummariesOverride: undefined as ProposalSummaryDto[] | undefined,
+  sourceProposalSummariesOverride: undefined as ProposalSummaryDto[] | undefined,
   proposalQuery: vi.fn((projectId: string, proposalId: string) => ({
     queryKey: ["projects", projectId, "proposals", proposalId],
     queryType: "proposal"
@@ -53,8 +54,19 @@ vi.mock("@tanstack/react-query", () => ({
   }),
   useQuery: (options: Record<string, unknown>) => {
     if (options.queryType === "proposals") {
+      const input = (options.queryKey as readonly unknown[])[3] as
+        | { proposalType?: string }
+        | undefined;
+      const sourceSummaries = mocks.sourceProposalSummariesOverride ?? [sourceProposalSummary()];
+      const aiSummaries = mocks.aiProposalSummariesOverride ?? [aiProposalSummary()];
+
       return {
-        data: mocks.proposalSummariesOverride ?? proposalSummaries(),
+        data:
+          input?.proposalType === "ai_spec_entity"
+            ? aiSummaries
+            : input?.proposalType === "source_spec_entity" || input?.proposalType === undefined
+              ? sourceSummaries
+              : [],
         error: null,
         isLoading: false
       };
@@ -252,7 +264,12 @@ describe("AnalyzeRunReviewPage", () => {
       <AnalyzeRunReviewPage projectId="project-1" runId="run-1" />
     );
 
-    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1");
+    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1", {
+      proposalType: "source_spec_entity"
+    });
+    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1", {
+      proposalType: "ai_spec_entity"
+    });
     expect(html).toContain("Analyze review");
     expect(html).toContain("DecisionService");
     expect(html).toContain("Manage projects");
@@ -419,7 +436,8 @@ function resetMocks() {
   mocks.proposalDetailOverride = undefined;
   mocks.proposalQuery.mockClear();
   mocks.proposalQueryOptions = [];
-  mocks.proposalSummariesOverride = undefined;
+  mocks.aiProposalSummariesOverride = undefined;
+  mocks.sourceProposalSummariesOverride = undefined;
   mocks.proposalsQuery.mockClear();
 }
 
@@ -495,10 +513,6 @@ function waitForRender() {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
-}
-
-function proposalSummaries(): ProposalSummaryDto[] {
-  return [sourceProposalSummary(), aiProposalSummary()];
 }
 
 function sourceProposalSummary(overrides: Partial<ProposalSummaryDto> = {}): ProposalSummaryDto {

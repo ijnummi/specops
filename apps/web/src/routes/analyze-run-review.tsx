@@ -55,8 +55,19 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     () => ({})
   );
 
-  const proposals = useQuery(proposalsQuery(projectId));
-  const allProposals = useMemo(() => proposals.data ?? [], [proposals.data]);
+  const sourceProposals = useQuery(
+    proposalsQuery(projectId, { proposalType: "source_spec_entity" })
+  );
+  const aiProposals = useQuery(proposalsQuery(projectId, { proposalType: "ai_spec_entity" }));
+  const allProposals = useMemo(
+    () =>
+      [...(sourceProposals.data ?? []), ...(aiProposals.data ?? [])].sort(
+        compareProposalSummaries
+      ),
+    [aiProposals.data, sourceProposals.data]
+  );
+  const proposalsError = sourceProposals.error ?? aiProposals.error;
+  const proposalsLoading = sourceProposals.isLoading || aiProposals.isLoading;
   const visibleProposals = useMemo(
     () =>
       allProposals.filter(
@@ -330,9 +341,9 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
             </h2>
             <p className="text-xs text-slate-500">Only pending proposals can be selected.</p>
           </header>
-          {proposals.error ? (
-            <div className="p-3 text-sm text-red-700">{proposals.error.message}</div>
-          ) : proposals.isLoading ? (
+          {proposalsError ? (
+            <div className="p-3 text-sm text-red-700">{proposalsError.message}</div>
+          ) : proposalsLoading ? (
             <p className="p-3 text-sm text-slate-500">Loading proposals...</p>
           ) : visibleProposals.length === 0 ? (
             <p className="p-3 text-sm text-slate-500">No matching proposals.</p>
@@ -715,6 +726,24 @@ function filterButtonClass(selected: boolean) {
 
 function formatConfidence(confidence: number | null) {
   return confidence === null ? "n/a" : `${Math.round(confidence * 100)}%`;
+}
+
+function compareProposalSummaries(left: ProposalSummaryDto, right: ProposalSummaryDto) {
+  const createdAt = left.createdAt.localeCompare(right.createdAt);
+  if (createdAt !== 0) {
+    return createdAt;
+  }
+
+  const type = proposalTypeRank(left.proposalType) - proposalTypeRank(right.proposalType);
+  if (type !== 0) {
+    return type;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function proposalTypeRank(proposalType: ProposalType) {
+  return proposalType === "source_spec_entity" ? 0 : 1;
 }
 
 function matchesStatusFilter(status: ProposalStatus, filter: ProposalStatusFilter) {
