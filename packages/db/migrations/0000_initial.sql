@@ -387,3 +387,67 @@ CREATE INDEX IF NOT EXISTS analyze_runs_project_status_idx ON analyze_runs(proje
 CREATE INDEX IF NOT EXISTS analyze_runs_project_created_at_idx ON analyze_runs(project_id, created_at);
 CREATE INDEX IF NOT EXISTS analyze_runs_index_run_id_idx ON analyze_runs(index_run_id);
 CREATE UNIQUE INDEX IF NOT EXISTS analyze_runs_one_active_per_project_idx ON analyze_runs(project_id) WHERE status IN ('queued', 'running');
+
+CREATE TABLE IF NOT EXISTS analyze_review_assemblies (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  analyze_run_id uuid NOT NULL,
+  status text NOT NULL,
+  entity_type text NOT NULL,
+  entity_id text NOT NULL,
+  title text NOT NULL,
+  summary text NOT NULL DEFAULT '',
+  file_path text NOT NULL,
+  rendered_markdown text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  accepted_at timestamptz,
+  discarded_at timestamptz,
+  FOREIGN KEY (analyze_run_id) REFERENCES analyze_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS analyze_review_assemblies_project_idx ON analyze_review_assemblies(project_id);
+CREATE INDEX IF NOT EXISTS analyze_review_assemblies_run_idx ON analyze_review_assemblies(analyze_run_id);
+CREATE INDEX IF NOT EXISTS analyze_review_assemblies_run_status_idx ON analyze_review_assemblies(analyze_run_id, status);
+
+CREATE TABLE IF NOT EXISTS analyze_review_assembly_inputs (
+  assembly_id uuid NOT NULL REFERENCES analyze_review_assemblies(id) ON DELETE CASCADE,
+  proposal_id uuid NOT NULL,
+  role text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (assembly_id, proposal_id),
+  FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS analyze_review_assembly_inputs_assembly_idx ON analyze_review_assembly_inputs(assembly_id);
+CREATE INDEX IF NOT EXISTS analyze_review_assembly_inputs_proposal_idx ON analyze_review_assembly_inputs(proposal_id);
+
+CREATE TABLE IF NOT EXISTS analyze_review_claims (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assembly_id uuid NOT NULL REFERENCES analyze_review_assemblies(id) ON DELETE CASCADE,
+  text text NOT NULL,
+  kind text NOT NULL,
+  confidence double precision,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS analyze_review_claims_assembly_idx ON analyze_review_claims(assembly_id);
+
+CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  claim_id uuid NOT NULL REFERENCES analyze_review_claims(id) ON DELETE CASCADE,
+  proposal_id uuid NOT NULL,
+  source_file_path text NOT NULL,
+  symbol_name text,
+  start_line integer,
+  end_line integer,
+  provenance text NOT NULL,
+  confidence double precision,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS analyze_review_claim_evidence_claim_idx ON analyze_review_claim_evidence(claim_id);
+CREATE INDEX IF NOT EXISTS analyze_review_claim_evidence_proposal_idx ON analyze_review_claim_evidence(proposal_id);

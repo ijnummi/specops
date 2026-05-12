@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -348,6 +349,100 @@ export const analyzeRuns = pgTable(
     oneActivePerProjectIdx: uniqueIndex("analyze_runs_one_active_per_project_idx")
       .on(table.projectId)
       .where(sql`${table.status} in ('queued', 'running')`),
+  }),
+);
+
+export const analyzeReviewAssemblies = pgTable(
+  "analyze_review_assemblies",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    analyzeRunId: uuid("analyze_run_id")
+      .notNull()
+      .references(() => analyzeRuns.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    filePath: text("file_path").notNull(),
+    renderedMarkdown: text("rendered_markdown"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    discardedAt: timestamp("discarded_at", { withTimezone: true }),
+  },
+  (table) => ({
+    projectIdx: index("analyze_review_assemblies_project_idx").on(table.projectId),
+    runIdx: index("analyze_review_assemblies_run_idx").on(table.analyzeRunId),
+    runStatusIdx: index("analyze_review_assemblies_run_status_idx").on(
+      table.analyzeRunId,
+      table.status,
+    ),
+  }),
+);
+
+export const analyzeReviewAssemblyInputs = pgTable(
+  "analyze_review_assembly_inputs",
+  {
+    assemblyId: uuid("assembly_id")
+      .notNull()
+      .references(() => analyzeReviewAssemblies.id, { onDelete: "cascade" }),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => aiProposals.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.assemblyId, table.proposalId] }),
+    assemblyIdx: index("analyze_review_assembly_inputs_assembly_idx").on(table.assemblyId),
+    proposalIdx: index("analyze_review_assembly_inputs_proposal_idx").on(table.proposalId),
+  }),
+);
+
+export const analyzeReviewClaims = pgTable(
+  "analyze_review_claims",
+  {
+    id: primaryId(),
+    assemblyId: uuid("assembly_id")
+      .notNull()
+      .references(() => analyzeReviewAssemblies.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    kind: text("kind").notNull(),
+    confidence: doublePrecision("confidence"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    assemblyIdx: index("analyze_review_claims_assembly_idx").on(table.assemblyId),
+  }),
+);
+
+export const analyzeReviewClaimEvidence = pgTable(
+  "analyze_review_claim_evidence",
+  {
+    id: primaryId(),
+    claimId: uuid("claim_id")
+      .notNull()
+      .references(() => analyzeReviewClaims.id, { onDelete: "cascade" }),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => aiProposals.id, { onDelete: "cascade" }),
+    sourceFilePath: text("source_file_path").notNull(),
+    symbolName: text("symbol_name"),
+    startLine: integer("start_line"),
+    endLine: integer("end_line"),
+    provenance: text("provenance").notNull(),
+    confidence: doublePrecision("confidence"),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    claimIdx: index("analyze_review_claim_evidence_claim_idx").on(table.claimId),
+    proposalIdx: index("analyze_review_claim_evidence_proposal_idx").on(table.proposalId),
   }),
 );
 

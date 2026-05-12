@@ -93,4 +93,23 @@ describe("initial migration", () => {
       "ALTER TABLE analyze_runs ADD COLUMN IF NOT EXISTS proposal_ids_json jsonb NOT NULL DEFAULT '[]'::jsonb",
     );
   });
+
+  it("creates analyze review assembly storage", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_assemblies");
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_assembly_inputs");
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claims");
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence");
+    expect(migration).toContain("analyze_review_assemblies_run_idx");
+    expect(migration).toContain("analyze_review_assembly_inputs_assembly_idx");
+    expect(migration).toContain("analyze_review_claims_assembly_idx");
+    expect(migration).toContain("analyze_review_claim_evidence_claim_idx");
+    expect(migration).toContain(
+      "FOREIGN KEY (analyze_run_id) REFERENCES analyze_runs(id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE",
+    );
+  });
 });
