@@ -10,7 +10,14 @@ vi.mock("./client.js", () => ({
   apiSend: mocks.apiSend
 }));
 
-import { generateAiPrefillProposals, proposalsQuery, sourceFilesQuery } from "./queries.js";
+import {
+  analyzeRunQuery,
+  generateAiPrefillProposals,
+  proposalsQuery,
+  queryKeys,
+  sourceFilesQuery,
+  startAnalyzeRun
+} from "./queries.js";
 
 describe("api queries", () => {
   it("serializes proposal type in proposal list requests", async () => {
@@ -62,6 +69,37 @@ describe("api queries", () => {
       "POST",
       "/api/projects/project-1/proposals/ai-prefill",
       input
+    );
+  });
+
+  it("posts analyze run start requests", async () => {
+    mocks.apiSend.mockResolvedValueOnce({ runId: "run-1" });
+
+    await startAnalyzeRun("project-1");
+
+    expect(mocks.apiSend).toHaveBeenCalledWith(
+      "POST",
+      "/api/projects/project-1/analyze-runs"
+    );
+  });
+
+  it("fetches analyze run details", async () => {
+    mocks.apiGet.mockResolvedValueOnce({ runId: "run-1" });
+    const query = analyzeRunQuery("project-1", "run-1");
+
+    expect(query.queryKey).toEqual(["projects", "project-1", "analyze-runs", "run-1"]);
+    expect(queryKeys.analyzeRun("project-1", "run-1")).toEqual([
+      "projects",
+      "project-1",
+      "analyze-runs",
+      "run-1"
+    ]);
+
+    const runQuery = query.queryFn as () => Promise<unknown>;
+    await runQuery();
+
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      "/api/projects/project-1/analyze-runs/run-1"
     );
   });
 });

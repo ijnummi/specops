@@ -7,6 +7,7 @@ import { isHttpError } from "./lib/http-errors.js";
 import { registerAdminDatabaseRoutes } from "./routes/admin-database.js";
 import { registerAgentRunRoutes } from "./routes/agent-runs.js";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.js";
+import { registerAnalyzeRunRoutes } from "./routes/analyze-runs.js";
 import { registerDiffReviewRoutes } from "./routes/diff-reviews.js";
 import { registerEntityRoutes } from "./routes/entities.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
@@ -85,6 +86,12 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
   app.register(registerAdminDatabaseRoutes, { prefix: "/api", db });
   app.register(registerProjectRoutes, { prefix: "/api", db });
   app.register(registerProposalRoutes, {
+    prefix: "/api",
+    db,
+    aiPrefillConfig,
+    aiPrefillProviderFactory: options.aiPrefillProviderFactory
+  });
+  app.register(registerAnalyzeRunRoutes, {
     prefix: "/api",
     db,
     aiPrefillConfig,

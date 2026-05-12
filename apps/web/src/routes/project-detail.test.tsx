@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     queryKey: ["projects", projectId, "readiness"],
     queryType: "readiness"
   })),
+  startAnalyzeRun: vi.fn(() => ({ id: "run-1" })),
   searchQuery: vi.fn((projectId: string, input: { q: string; limit: number }) => ({
     queryKey: ["projects", projectId, "search", input],
     queryType: "search"
@@ -74,6 +75,7 @@ vi.mock("../api/queries.js", () => ({
     queryKey: ["projects", projectId],
     queryType: "project"
   })),
+  startAnalyzeRun: mocks.startAnalyzeRun,
   queryKeys: {
     entities: (projectId: string) => ["projects", projectId, "entities"],
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
@@ -103,14 +105,14 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
-  useMutation: (options: { mutationFn: () => unknown; onSuccess?: () => unknown }) => {
+  useMutation: (options: { mutationFn: () => unknown; onSuccess?: (data: unknown) => unknown }) => {
     const state = mocks.mutationStates.shift() ?? { isPending: false, error: null };
 
     return {
       ...state,
       mutate: () => {
         const result = options.mutationFn();
-        void options.onSuccess?.();
+        void options.onSuccess?.(result);
         return result;
       }
     };
@@ -203,6 +205,9 @@ vi.mock("../components/project-actions.js", () => ({
         <button type="button" disabled={props.isProjectActionPending}>
           Init specops
         </button>
+        <button type="button" disabled={props.isProjectActionPending} onClick={props.onAnalyze}>
+          Analyze project
+        </button>
         <a href={`/projects/${props.projectId}/import/source`}>Import from source</a>
         <button type="button" disabled={props.isProjectActionPending}>
           Re-index
@@ -244,7 +249,9 @@ describe("ProjectDetailPage actions", () => {
   beforeEach(() => {
     mocks.projectHealthQuery.mockClear();
     mocks.projectReadinessQuery.mockClear();
+    mocks.startAnalyzeRun.mockClear();
     mocks.searchQuery.mockClear();
+    mocks.navigate.mockReset();
     mocks.projectActionsProps = null;
     mocks.invalidateQueries.mockReset();
     mocks.debouncedValueOverride = null;
@@ -281,6 +288,7 @@ describe("ProjectDetailPage actions", () => {
       isLoading: false
     };
     mocks.mutationStates = [
+      { isPending: false, error: null },
       { isPending: false, error: null },
       { isPending: false, error: null }
     ];
@@ -524,17 +532,45 @@ describe("ProjectDetailPage actions", () => {
     });
   });
 
-  it("disables project action buttons while re-index is pending", () => {
+  it("navigates to the created analyze run after starting analysis", () => {
+    mocks.startAnalyzeRun.mockReturnValueOnce({ id: "run-42" });
+    renderToStaticMarkup(<ProjectDetailPage projectId="project-1" entityId={null} query="" />);
+
+    mocks.projectActionsProps?.onAnalyze();
+
+    expect(mocks.startAnalyzeRun).toHaveBeenCalledWith("project-1");
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/projects/$projectId/analyze-runs/$runId",
+      params: { projectId: "project-1", runId: "run-42" }
+    });
+  });
+
+  it("renders analyze errors with project action errors", () => {
     mocks.mutationStates = [
       { isPending: false, error: null },
-      { isPending: true, error: null }
+      { isPending: false, error: null },
+      { isPending: false, error: new Error("Analyze failed") }
     ];
 
     const html = renderToStaticMarkup(
       <ProjectDetailPage projectId="project-1" entityId={null} query="" />
     );
 
-    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(html).toContain("Analyze failed");
+  });
+
+  it("disables project action buttons while re-index is pending", () => {
+    mocks.mutationStates = [
+      { isPending: false, error: null },
+      { isPending: true, error: null },
+      { isPending: false, error: null }
+    ];
+
+    const html = renderToStaticMarkup(
+      <ProjectDetailPage projectId="project-1" entityId={null} query="" />
+    );
+
+    expect(html.match(/disabled=""/g)).toHaveLength(3);
     expect(mocks.projectActionsProps?.isIndexing).toBe(true);
     expect(mocks.projectActionsProps?.isProjectActionPending).toBe(true);
   });

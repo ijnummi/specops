@@ -31,14 +31,17 @@ describe("ProjectActions", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
         projectId="project-1"
+        isAnalyzing={false}
         isInitializing={false}
         isIndexing={false}
         isProjectActionPending={false}
+        onAnalyze={() => undefined}
         onInitialize={() => undefined}
         onReindex={() => undefined}
       />
     );
 
+    expect(html).toContain("Analyze project");
     expect(html).toContain("Init specops");
     expect(html).toContain("Import from source");
     expect(html).toContain('href="/projects/project-1/import/source"');
@@ -52,9 +55,11 @@ describe("ProjectActions", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
         projectId="project-1"
+        isAnalyzing={false}
         isInitializing={false}
         isIndexing={true}
         isProjectActionPending={true}
+        onAnalyze={() => undefined}
         onInitialize={() => undefined}
         onReindex={() => undefined}
       />
@@ -68,9 +73,11 @@ describe("ProjectActions", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
         projectId="project-1"
+        isAnalyzing={false}
         isInitializing={true}
         isIndexing={false}
         isProjectActionPending={true}
+        onAnalyze={() => undefined}
         onInitialize={() => undefined}
         onReindex={() => undefined}
       />
@@ -80,19 +87,39 @@ describe("ProjectActions", () => {
     expect(html).toContain("animate-spin");
   });
 
-  it("disables project action buttons while any project action is pending", () => {
+  it("shows an active spinner while analyzing", () => {
     const html = renderToStaticMarkup(
       <ProjectActions
         projectId="project-1"
+        isAnalyzing={true}
         isInitializing={false}
-        isIndexing={true}
+        isIndexing={false}
         isProjectActionPending={true}
+        onAnalyze={() => undefined}
         onInitialize={() => undefined}
         onReindex={() => undefined}
       />
     );
 
-    expect(html.match(/disabled=""/g)).toHaveLength(2);
+    expect(html).toContain("Analyze project");
+    expect(html).toContain("animate-spin");
+  });
+
+  it("disables project action buttons while any project action is pending", () => {
+    const html = renderToStaticMarkup(
+      <ProjectActions
+        projectId="project-1"
+        isAnalyzing={false}
+        isInitializing={false}
+        isIndexing={true}
+        isProjectActionPending={true}
+        onAnalyze={() => undefined}
+        onInitialize={() => undefined}
+        onReindex={() => undefined}
+      />
+    );
+
+    expect(html.match(/disabled=""/g)).toHaveLength(3);
     expect(html).toContain("Import from source");
     expect(html).toContain("animate-spin");
   });

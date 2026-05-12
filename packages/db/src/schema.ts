@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -313,6 +314,40 @@ export const aiProposals = pgTable(
   (table) => ({
     projectIdx: index("ai_proposals_project_id_idx").on(table.projectId),
     projectStatusIdx: index("ai_proposals_project_status_idx").on(table.projectId, table.status),
+  }),
+);
+
+export const analyzeRuns = pgTable(
+  "analyze_runs",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    currentStep: text("current_step"),
+    stepsJson: jsonb("steps_json").notNull().default(sql`'[]'::jsonb`),
+    selectionJson: jsonb("selection_json"),
+    proposalIdsJson: jsonb("proposal_ids_json").notNull().default(sql`'[]'::jsonb`),
+    sourceProposalCount: integer("source_proposal_count").notNull().default(0),
+    aiProposalCount: integer("ai_proposal_count").notNull().default(0),
+    indexRunId: uuid("index_run_id").references(() => indexRuns.id, { onDelete: "set null" }),
+    errorMessage: text("error_message"),
+    createdAt: createdAt(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => ({
+    projectIdx: index("analyze_runs_project_id_idx").on(table.projectId),
+    projectStatusIdx: index("analyze_runs_project_status_idx").on(table.projectId, table.status),
+    projectCreatedAtIdx: index("analyze_runs_project_created_at_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
+    indexRunIdx: index("analyze_runs_index_run_id_idx").on(table.indexRunId),
+    oneActivePerProjectIdx: uniqueIndex("analyze_runs_one_active_per_project_idx")
+      .on(table.projectId)
+      .where(sql`${table.status} in ('queued', 'running')`),
   }),
 );
 

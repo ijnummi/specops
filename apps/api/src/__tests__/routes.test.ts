@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { analyzeRunDetailSchema } from "@specops/contracts";
 import { createDb, diffReviews } from "@specops/db";
 import { and, eq } from "drizzle-orm";
 import pg from "pg";
@@ -14,6 +15,7 @@ import { BadRequestError } from "../lib/http-errors.js";
 import { buildServer } from "../server.js";
 import { createAgentRunService } from "../services/agent-run-service.js";
 import { createAgentTaskService } from "../services/agent-task-service.js";
+import type { AiPrefillProviderFactory } from "../services/ai-prefill-service.js";
 import { createDiffReviewService } from "../services/diff-review-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
@@ -2441,6 +2443,87 @@ describeWithDb("database-backed routes", () => {
     );
     await expect(fileExists(path.join(project.specopsPath, "interfaces", "decision-service.md")))
       .resolves.toBe(false);
+  });
+
+  it("starts and fetches an analyze run through the API", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: successfulAnalyzeRunProviderFactory()
+    });
+    const project = await createProjectViaApi();
+    await writeSampleSourceProject(project.repoPath);
+
+    const startResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs`
+    });
+    const started = analyzeRunDetailSchema.parse(startResponse.json());
+
+    expect(startResponse.statusCode).toBe(201);
+    expect(started).toMatchObject({
+      id: expect.any(String),
+      projectId: project.id
+    });
+    expect(started.steps.map((step) => step.name)).toEqual([
+      "initialize",
+      "index",
+      "source_proposals",
+      "select_ai_sources",
+      "ai_prefill"
+    ]);
+
+    const fetched = await waitForAnalyzeRun(project.id, started.id);
+
+    expect(fetched).toMatchObject({
+      id: started.id,
+      projectId: project.id
+    });
+    expect(fetched.status).toBe("succeeded");
+    expect(fetched.aiProposalCount).toBeGreaterThan(0);
+    expect(fetched.steps.map((step) => step.name)).toEqual(started.steps.map((step) => step.name));
+  });
+
+  it("returns conflict details when starting an analyze run while one is active", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const activeRun = await insertActiveAnalyzeRun(project.id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs`
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: {
+        details: {
+          activeRunId: activeRun.id
+        }
+      }
+    });
+  });
+
+  it("returns not found when fetching a missing analyze run", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/analyze-runs/00000000-0000-4000-8000-000000000404`
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("returns bad request when fetching an analyze run with a malformed run id", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/analyze-runs/not-a-uuid`
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 
   it("generates AI proposals from selected source files without writing markdown", async () => {
@@ -5158,6 +5241,80 @@ Let customers buy products and receive confirmation while keeping payment and or
         ]
       })
     };
+  }
+
+  function successfulAnalyzeRunProviderFactory(): AiPrefillProviderFactory {
+    return () => ({
+      async generateSpecProposals(input) {
+        return {
+          provider: "ollama",
+          model: input.model,
+          text: JSON.stringify({
+            proposals: [
+              {
+                entityId: "uc.manage-projects",
+                type: "use_case",
+                title: "Manage projects",
+                summary: "Users can create and inspect local projects.",
+                sourceFiles: ["src/service.ts"],
+                claims: [
+                  {
+                    text: "Decision services can list workspace decisions.",
+                    sourceFiles: ["src/service.ts"]
+                  }
+                ],
+                proposedLinks: [],
+                confidence: 0.82
+              }
+            ]
+          })
+        };
+      }
+    });
+  }
+
+  async function insertActiveAnalyzeRun(projectId: string): Promise<{ id: string }> {
+    const result = await pool.query<{ id: string }>(
+      "insert into analyze_runs (project_id, status, steps_json) values ($1, 'running', $2::jsonb) returning id",
+      [projectId, JSON.stringify(initialAnalyzeRunSteps())]
+    );
+
+    return result.rows[0];
+  }
+
+  async function waitForAnalyzeRun(projectId: string, runId: string) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/projects/${projectId}/analyze-runs/${runId}`
+      });
+      const run = analyzeRunDetailSchema.parse(response.json());
+
+      expect(response.statusCode).toBe(200);
+      if (run.status === "succeeded") {
+        return run;
+      }
+      if (run.status === "failed") {
+        throw new Error(`Analyze run failed: ${run.errorMessage ?? "unknown error"}`);
+      }
+
+      await delay(50);
+    }
+
+    throw new Error("Timed out waiting for analyze run to finish");
+  }
+
+  function initialAnalyzeRunSteps() {
+    return ["initialize", "index", "source_proposals", "select_ai_sources", "ai_prefill"].map(
+      (name) => ({
+        name,
+        status: "pending",
+        startedAt: null,
+        finishedAt: null,
+        message: null,
+        counts: {}
+      })
+    );
   }
 
   async function countAiPrefillProposals(projectId: string): Promise<number> {
