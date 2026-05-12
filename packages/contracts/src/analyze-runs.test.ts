@@ -5,6 +5,13 @@ import {
   analyzeRunDetailSchema,
   analyzeRunSelectionSummarySchema,
 } from "./analyze-runs.js";
+import type { AnalyzeRunSelectionCategory } from "./analyze-runs.js";
+
+const categoryTypecheck: AnalyzeRunSelectionCategory = {
+  category: "entrypoints_routes",
+  count: 1,
+};
+void categoryTypecheck;
 
 describe("analyze run contracts", () => {
   it("parses analyze run details", () => {
@@ -46,6 +53,20 @@ describe("analyze run contracts", () => {
   });
 
   it("allows empty selection diagnostics", () => {
+    const parsed = analyzeRunSelectionSummarySchema.parse({
+      selectedSourceFileIds: [],
+      selectedPaths: [],
+      eligibleHighSignalFileCount: 0,
+      skippedHighSignalFileCount: 0,
+      categories: [],
+      diagnostics: [],
+    });
+
+    expect(parsed.selectedPaths).toEqual([]);
+    expect(parsed.diagnostics).toEqual([]);
+  });
+
+  it("allows warning selection diagnostics", () => {
     const parsed = analyzeRunSelectionSummarySchema.parse({
       selectedSourceFileIds: [],
       selectedPaths: [],

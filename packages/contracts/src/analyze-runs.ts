@@ -76,6 +76,7 @@ export type AnalyzeRunStatus = z.infer<typeof analyzeRunStatusSchema>;
 export type AnalyzeRunStepName = z.infer<typeof analyzeRunStepNameSchema>;
 export type AnalyzeRunStepStatus = z.infer<typeof analyzeRunStepStatusSchema>;
 export type AnalyzeRunDiagnostic = z.infer<typeof analyzeRunDiagnosticSchema>;
+export type AnalyzeRunSelectionCategory = z.infer<typeof analyzeRunSelectionCategorySchema>;
 export type AnalyzeRunSelectionSummary = z.infer<typeof analyzeRunSelectionSummarySchema>;
 export type AnalyzeRunStepDto = z.infer<typeof analyzeRunStepSchema>;
 export type AnalyzeRunDetailDto = z.infer<typeof analyzeRunDetailSchema>;

@@ -71,11 +71,19 @@ describe("initial migration", () => {
 
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_runs");
     expect(migration).toContain("project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE");
+    expect(migration).toContain("status text NOT NULL");
+    expect(migration).toContain("current_step text");
     expect(migration).toContain("steps_json jsonb NOT NULL DEFAULT '[]'::jsonb");
     expect(migration).toContain("selection_json jsonb");
     expect(migration).toContain("source_proposal_count integer NOT NULL DEFAULT 0");
     expect(migration).toContain("ai_proposal_count integer NOT NULL DEFAULT 0");
+    expect(migration).toContain("index_run_id uuid REFERENCES index_runs(id) ON DELETE SET NULL");
+    expect(migration).toContain("error_message text");
+    expect(migration).toContain("created_at timestamptz NOT NULL DEFAULT now()");
+    expect(migration).toContain("started_at timestamptz");
+    expect(migration).toContain("finished_at timestamptz");
     expect(migration).toContain("analyze_runs_project_id_idx");
     expect(migration).toContain("analyze_runs_project_status_idx");
+    expect(migration).toContain("analyze_runs_project_created_at_idx");
   });
 });
