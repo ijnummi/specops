@@ -5312,7 +5312,7 @@ Let customers buy products and receive confirmation while keeping payment and or
         startedAt: null,
         finishedAt: null,
         message: null,
-        counts: null
+        counts: {}
       })
     );
   }
