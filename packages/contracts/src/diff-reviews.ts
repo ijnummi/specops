@@ -125,6 +125,9 @@ export const createDiffReviewResponseSchema = diffReviewSummaryResponseSchema;
 export const updateDiffReviewStatusResponseSchema = diffReviewDetailResponseSchema;
 
 export type DiffReviewStatus = z.infer<typeof diffReviewStatusSchema>;
+export type DiffReviewUpdateStatus = z.infer<
+  typeof diffReviewUpdateStatusSchema
+>;
 export type DiffReviewType = z.infer<typeof diffReviewTypeSchema>;
 export type DiffReviewFindingSeverity = z.infer<
   typeof diffReviewFindingSeveritySchema
