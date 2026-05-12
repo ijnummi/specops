@@ -116,11 +116,31 @@ export function createDiffReviewService(db: Db) {
     const [updated] = await db
       .update(diffReviews)
       .set({ status: input.status, updatedAt: new Date() })
-      .where(and(eq(diffReviews.projectId, projectId), eq(diffReviews.id, reviewId)))
+      .where(
+        and(
+          eq(diffReviews.projectId, projectId),
+          eq(diffReviews.id, reviewId),
+          eq(diffReviews.status, currentStatus)
+        )
+      )
       .returning();
 
     if (!updated) {
-      throw new NotFoundError("Diff review not found", { projectId, reviewId });
+      const latest = await findReview(projectId, reviewId);
+      if (!latest) {
+        throw new NotFoundError("Diff review not found", { projectId, reviewId });
+      }
+
+      const latestStatus = latest.status as DiffReviewStatus;
+      if (TERMINAL_STATUSES.has(latestStatus)) {
+        throw new BadRequestError("Diff review already has a terminal status", {
+          reviewId,
+          status: latestStatus,
+          requestedStatus: input.status
+        });
+      }
+
+      return mapReviewDetail(latest);
     }
 
     return mapReviewDetail(updated);
@@ -136,17 +156,23 @@ export function createDiffReviewService(db: Db) {
   }
 
   async function loadReview(projectId: string, reviewId: string): Promise<DiffReviewRow> {
-    const [row] = await db
-      .select()
-      .from(diffReviews)
-      .where(and(eq(diffReviews.projectId, projectId), eq(diffReviews.id, reviewId)))
-      .limit(1);
+    const row = await findReview(projectId, reviewId);
 
     if (!row) {
       throw new NotFoundError("Diff review not found", { projectId, reviewId });
     }
 
     return row;
+  }
+
+  async function findReview(projectId: string, reviewId: string): Promise<DiffReviewRow | null> {
+    const [row] = await db
+      .select()
+      .from(diffReviews)
+      .where(and(eq(diffReviews.projectId, projectId), eq(diffReviews.id, reviewId)))
+      .limit(1);
+
+    return row ?? null;
   }
 
   return {

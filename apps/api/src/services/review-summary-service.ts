@@ -1004,6 +1004,7 @@ function compareDiffFindings(left: DiffReviewFinding, right: DiffReviewFinding):
     left.kind.localeCompare(right.kind) ||
     (left.entityId ?? "").localeCompare(right.entityId ?? "") ||
     (left.filePath ?? "").localeCompare(right.filePath ?? "") ||
-    left.message.localeCompare(right.message)
+    left.message.localeCompare(right.message) ||
+    left.id.localeCompare(right.id)
   );
 }

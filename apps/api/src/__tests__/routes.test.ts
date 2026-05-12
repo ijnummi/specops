@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { createDb } from "@specops/db";
+import { createDb, diffReviews } from "@specops/db";
+import { and, eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -13,6 +14,7 @@ import { BadRequestError } from "../lib/http-errors.js";
 import { buildServer } from "../server.js";
 import { createAgentRunService } from "../services/agent-run-service.js";
 import { createAgentTaskService } from "../services/agent-task-service.js";
+import { createDiffReviewService } from "../services/diff-review-service.js";
 import { createIndexerService } from "../services/indexer-service.js";
 import { createProjectService } from "../services/project-service.js";
 import { createProposalService } from "../services/proposal-service.js";
@@ -1029,6 +1031,32 @@ describeWithDb("database-backed routes", () => {
         code: "bad_request",
         message: "Diff review already has a terminal status"
       }
+    });
+  });
+
+  it("rejects a diff review status update when a concurrent update makes it terminal", async () => {
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+    const service = createDiffReviewService(db);
+    const created = await service.createReview(project.id, { reviewType: "working_tree" });
+    const raceDb = createTerminalRaceDb(db, project.id, created.id);
+
+    await expect(
+      createDiffReviewService(raceDb).updateReviewStatus(project.id, created.id, {
+        status: "needs_followup"
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: "Diff review already has a terminal status",
+      details: expect.objectContaining({
+        reviewId: created.id,
+        status: "accepted",
+        requestedStatus: "needs_followup"
+      })
+    });
+
+    await expect(service.getReview(project.id, created.id)).resolves.toMatchObject({
+      status: "accepted"
     });
   });
 
@@ -5184,6 +5212,57 @@ Let customers buy products and receive confirmation while keeping payment and or
     const db = createDb(testDatabaseUrl!);
     dbs.push(db);
     return db;
+  }
+
+  function createTerminalRaceDb(
+    db: ReturnType<typeof createDb>,
+    projectId: string,
+    reviewId: string
+  ): ReturnType<typeof createDb> {
+    const originalUpdate = db.update.bind(db);
+    let raced = false;
+
+    return new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== "update") {
+          return Reflect.get(target, property, receiver);
+        }
+
+        return ((table: Parameters<typeof db.update>[0]) => {
+          if (table !== diffReviews || raced) {
+            return originalUpdate(table);
+          }
+
+          raced = true;
+          const builder = originalUpdate(table);
+
+          return {
+            set(values: Parameters<typeof builder.set>[0]) {
+              const setBuilder = builder.set(values);
+
+              return {
+                where(condition: Parameters<typeof setBuilder.where>[0]) {
+                  const whereBuilder = setBuilder.where(condition);
+
+                  return {
+                    async returning() {
+                      await originalUpdate(diffReviews)
+                        .set({ status: "accepted", updatedAt: new Date() })
+                        .where(
+                          and(eq(diffReviews.projectId, projectId), eq(diffReviews.id, reviewId))
+                        )
+                        .returning();
+
+                      return whereBuilder.returning();
+                    }
+                  };
+                }
+              };
+            }
+          };
+        }) as typeof db.update;
+      }
+    });
   }
 
   async function createProjectDirectly(db: ReturnType<typeof createDb>) {
