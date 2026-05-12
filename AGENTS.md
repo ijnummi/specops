@@ -11,7 +11,6 @@ SpecOps Workbench is a pnpm TypeScript monorepo.
 - `packages/db`: Drizzle/PostgreSQL schema and migration runner.
 - `packages/markdown`: SpecOps markdown parsing and project initialization.
 - `packages/repo-scanner`: TypeScript/JavaScript source inventory scanner.
-- `sample/`: Trial project with SpecOps markdown and source files for scanner validation.
 
 Markdown and source files are canonical. PostgreSQL stores rebuildable derived cache data.
 

@@ -57,8 +57,27 @@ describe("scanRepository", () => {
     );
   });
 
-  it("scans the sample project as a milestone 3 trial fixture", async () => {
-    const sampleRoot = path.resolve(__dirname, "../../../../sample");
+  it("scans a mixed source fixture with entrypoint, config, tests, and symbols", async () => {
+    const sampleRoot = await mkdtemp(path.join(os.tmpdir(), "specops-scanner-sample-"));
+    roots.push(sampleRoot);
+    await mkdir(path.join(sampleRoot, "src", "__tests__"), { recursive: true });
+    await mkdir(path.join(sampleRoot, "src", "services"), { recursive: true });
+    await writeFile(
+      path.join(sampleRoot, "src", "main.ts"),
+      "import { DecisionService } from './services/decision-service';\nexport const service = new DecisionService();\n"
+    );
+    await writeFile(path.join(sampleRoot, "src", "index.ts"), "export * from './domain';\n");
+    await writeFile(path.join(sampleRoot, "src", "domain.ts"), "export interface Decision { id: string; }\n");
+    await writeFile(
+      path.join(sampleRoot, "src", "services", "decision-service.ts"),
+      "import type { Decision } from '../domain';\nexport function toDecisionId(value: string) { return value; }\nexport class DecisionService { list(): Decision[] { return []; } }\n"
+    );
+    await writeFile(
+      path.join(sampleRoot, "src", "__tests__", "decision-service.test.ts"),
+      "import { DecisionService } from '../services/decision-service';\nnew DecisionService();\n"
+    );
+    await writeFile(path.join(sampleRoot, "vitest.config.ts"), "export default {};\n");
+
     const result = await scanRepository({ repoPath: sampleRoot });
     const byPath = new Map(result.files.map((file) => [file.path, file]));
 
@@ -78,7 +97,14 @@ describe("scanRepository", () => {
       expect.arrayContaining(["DecisionService", "toDecisionId"]),
     );
 
-    expect(result.files.length).toBeGreaterThanOrEqual(7);
+    expect([...byPath.keys()].sort()).toEqual([
+      "src/__tests__/decision-service.test.ts",
+      "src/domain.ts",
+      "src/index.ts",
+      "src/main.ts",
+      "src/services/decision-service.ts",
+      "vitest.config.ts"
+    ]);
     expect(result.warnings).toEqual([]);
   });
 });

@@ -11,11 +11,11 @@ vi.mock("@tanstack/react-router", () => ({
 
 const project = {
   id: "project-1",
-  name: "Sample",
-  slug: "sample",
-  description: "A sample project",
-  repoPath: "/repo/sample",
-  specopsPath: "/repo/sample/specops",
+  name: "Product",
+  slug: "product",
+  description: "A product project",
+  repoPath: "/repo/product",
+  specopsPath: "/repo/product/specops",
   createdAt: "2026-05-10T00:00:00.000Z",
   updatedAt: "2026-05-10T00:00:00.000Z"
 };
@@ -25,20 +25,20 @@ describe("ProjectCard", () => {
     const html = renderToStaticMarkup(<ProjectCard project={project} onDelete={() => undefined} />);
 
     expect(html).toContain("Delete project metadata");
-    expect(html).toContain("Remove Sample from SpecOps");
+    expect(html).toContain("Remove Product from SpecOps");
   });
 
   it("confirms that delete leaves files on disk before calling delete", () => {
     const calls: string[] = [];
 
-    const confirmed = confirmProjectMetadataDelete("Sample", (message) => {
+    const confirmed = confirmProjectMetadataDelete("Product", (message) => {
       calls.push(message);
       return true;
     });
 
     expect(confirmed).toBe(true);
     expect(calls).toEqual([
-      "Remove Sample from SpecOps? This only deletes workbench metadata; repository files and spec files stay on disk."
+      "Remove Product from SpecOps? This only deletes workbench metadata; repository files and spec files stay on disk."
     ]);
   });
 

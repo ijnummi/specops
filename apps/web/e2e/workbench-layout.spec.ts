@@ -5,7 +5,7 @@ const project = {
   name: "Decision Workspace",
   slug: "decision-workspace",
   repoPath: "/Users/example/decision-workspace",
-  specopsPath: "sample/specops",
+  specopsPath: "/Users/example/decision-workspace/specops",
   description: "Sample project",
   createdAt: "2026-05-09T12:00:00.000Z",
   updatedAt: "2026-05-09T12:00:00.000Z",

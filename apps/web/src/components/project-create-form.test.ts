@@ -4,7 +4,7 @@ import { defaultSpecopsPathForRepoInput } from "./project-create-form.js";
 
 describe("ProjectCreateForm helpers", () => {
   it("defaults the specops path to a specops folder under the repository path", () => {
-    expect(defaultSpecopsPathForRepoInput("/repo/sample")).toBe("/repo/sample/specops");
-    expect(defaultSpecopsPathForRepoInput("/repo/sample/")).toBe("/repo/sample/specops");
+    expect(defaultSpecopsPathForRepoInput("/repo/product")).toBe("/repo/product/specops");
+    expect(defaultSpecopsPathForRepoInput("/repo/product/")).toBe("/repo/product/specops");
   });
 });
