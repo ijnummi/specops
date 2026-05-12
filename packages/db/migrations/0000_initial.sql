@@ -362,3 +362,23 @@ CREATE TABLE IF NOT EXISTS diff_reviews (
 CREATE INDEX IF NOT EXISTS diff_reviews_project_id_idx ON diff_reviews(project_id);
 CREATE INDEX IF NOT EXISTS diff_reviews_project_status_idx ON diff_reviews(project_id, status);
 CREATE INDEX IF NOT EXISTS diff_reviews_project_created_at_idx ON diff_reviews(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS analyze_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  status text NOT NULL,
+  current_step text,
+  steps_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  selection_json jsonb,
+  source_proposal_count integer NOT NULL DEFAULT 0,
+  ai_proposal_count integer NOT NULL DEFAULT 0,
+  index_run_id uuid REFERENCES index_runs(id) ON DELETE SET NULL,
+  error_message text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  started_at timestamptz,
+  finished_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS analyze_runs_project_id_idx ON analyze_runs(project_id);
+CREATE INDEX IF NOT EXISTS analyze_runs_project_status_idx ON analyze_runs(project_id, status);
+CREATE INDEX IF NOT EXISTS analyze_runs_project_created_at_idx ON analyze_runs(project_id, created_at);

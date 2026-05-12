@@ -316,6 +316,35 @@ export const aiProposals = pgTable(
   }),
 );
 
+export const analyzeRuns = pgTable(
+  "analyze_runs",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    currentStep: text("current_step"),
+    stepsJson: jsonb("steps_json").notNull().default(sql`'[]'::jsonb`),
+    selectionJson: jsonb("selection_json"),
+    sourceProposalCount: integer("source_proposal_count").notNull().default(0),
+    aiProposalCount: integer("ai_proposal_count").notNull().default(0),
+    indexRunId: uuid("index_run_id").references(() => indexRuns.id, { onDelete: "set null" }),
+    errorMessage: text("error_message"),
+    createdAt: createdAt(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => ({
+    projectIdx: index("analyze_runs_project_id_idx").on(table.projectId),
+    projectStatusIdx: index("analyze_runs_project_status_idx").on(table.projectId, table.status),
+    projectCreatedAtIdx: index("analyze_runs_project_created_at_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const agentRuns = pgTable(
   "agent_runs",
   {
