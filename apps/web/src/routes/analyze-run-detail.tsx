@@ -73,14 +73,13 @@ function AnalyzeRunDetailContent({
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={run.status} />
             {canReviewDrafts ? (
-              <a
-                href={`/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
-                  run.id
-                )}/review`}
+              <Link
+                to="/projects/$projectId/analyze-runs/$runId/review"
+                params={{ projectId, runId: run.id }}
                 className="button-primary"
               >
                 Review generated drafts
-              </a>
+              </Link>
             ) : null}
           </div>
         </div>

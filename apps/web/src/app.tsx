@@ -12,6 +12,7 @@ import { AgentRunDetailPage } from "./routes/agent-run-detail.js";
 import { AgentRunsPage } from "./routes/agent-runs.js";
 import { AiPrefillPage } from "./routes/ai-prefill.js";
 import { AnalyzeRunDetailPage } from "./routes/analyze-run-detail.js";
+import { AnalyzeRunReviewPage } from "./routes/analyze-run-review.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
 import { DiffReviewDetailPage } from "./routes/diff-review-detail.js";
 import { DiffReviewsPage } from "./routes/diff-reviews.js";
@@ -133,6 +134,15 @@ const analyzeRunDetailRoute = createRoute({
   }
 });
 
+const analyzeRunReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/analyze-runs/$runId/review",
+  component: () => {
+    const { projectId, runId } = analyzeRunReviewRoute.useParams();
+    return <AnalyzeRunReviewPage projectId={projectId} runId={runId} />;
+  }
+});
+
 const diffReviewsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/diff-reviews",
@@ -216,6 +226,7 @@ const routeTree = rootRoute.addChildren([
   agentRunsRoute,
   agentRunDetailRoute,
   analyzeRunDetailRoute,
+  analyzeRunReviewRoute,
   diffReviewsRoute,
   diffReviewDetailRoute,
   sourceImportRoute,
