@@ -198,11 +198,28 @@ export const analyzeReviewAcceptResponseSchema = z.object({
 export type AnalyzeReviewAssemblyStatus = z.infer<typeof analyzeReviewAssemblyStatusSchema>;
 export type AnalyzeReviewInputRole = z.infer<typeof analyzeReviewInputRoleSchema>;
 export type AnalyzeReviewClaimKind = z.infer<typeof analyzeReviewClaimKindSchema>;
+export type AnalyzeReviewEvidenceProvenance = z.infer<
+  typeof analyzeReviewEvidenceProvenanceSchema
+>;
+export type AnalyzeReviewInputAssignmentState = z.infer<
+  typeof analyzeReviewInputAssignmentStateSchema
+>;
+export type AnalyzeReviewValidationSeverity = z.infer<
+  typeof analyzeReviewValidationSeveritySchema
+>;
 export type AnalyzeReviewValidationState = z.infer<typeof analyzeReviewValidationStateSchema>;
+export type AnalyzeReviewEntityType = z.infer<typeof analyzeReviewEntityTypeSchema>;
 export type AnalyzeReviewInputDto = z.infer<typeof analyzeReviewInputSchema>;
 export type AnalyzeReviewEvidenceDto = z.infer<typeof analyzeReviewEvidenceSchema>;
 export type AnalyzeReviewClaimDto = z.infer<typeof analyzeReviewClaimSchema>;
+export type AnalyzeReviewValidationMessage = z.infer<
+  typeof analyzeReviewValidationMessageSchema
+>;
+export type AnalyzeReviewValidationSummary = z.infer<
+  typeof analyzeReviewValidationSummarySchema
+>;
 export type AnalyzeReviewAssemblyDto = z.infer<typeof analyzeReviewAssemblySchema>;
+export type AnalyzeReviewCounts = z.infer<typeof analyzeReviewCountsSchema>;
 export type AnalyzeReviewListResponse = z.infer<typeof analyzeReviewListResponseSchema>;
 export type AnalyzeReviewCreateAssemblyRequest = z.infer<
   typeof analyzeReviewCreateAssemblyRequestSchema
@@ -217,4 +234,5 @@ export type AnalyzeReviewAttachEvidenceRequest = z.infer<
   typeof analyzeReviewAttachEvidenceRequestSchema
 >;
 export type AnalyzeReviewAcceptRequest = z.infer<typeof analyzeReviewAcceptRequestSchema>;
+export type AnalyzeReviewAcceptFailure = z.infer<typeof analyzeReviewAcceptFailureSchema>;
 export type AnalyzeReviewAcceptResponse = z.infer<typeof analyzeReviewAcceptResponseSchema>;
