@@ -31,10 +31,11 @@ type ProposalMarkdownDraft = {
   savedMarkdown: string;
 };
 
-type ProposalStatusFilter = "pending" | "accepted" | "rejected" | "obsolete";
+type ProposalStatusFilter = "all" | "pending" | "accepted" | "rejected" | "obsolete";
 type ProposalTypeFilter = "all" | ProposalType;
 
 const proposalStatusFilters = [
+  "all",
   "pending",
   "accepted",
   "rejected",
@@ -48,7 +49,8 @@ const proposalTypeFilters = [
 
 export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageProps) {
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<ProposalStatusFilter>("pending");
+  const [pendingOnly, setPendingOnly] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<ProposalStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<ProposalTypeFilter>("all");
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [checkedProposalIds, setCheckedProposalIds] = useState<Set<string>>(() => new Set());
@@ -79,10 +81,12 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     () =>
       runProposals.filter(
         (proposal) =>
-          matchesStatusFilter(proposal.status, statusFilter) &&
+          (pendingOnly
+            ? proposal.status === "pending"
+            : matchesStatusFilter(proposal.status, statusFilter)) &&
           (typeFilter === "all" || proposal.proposalType === typeFilter)
       ),
-    [runProposals, statusFilter, typeFilter]
+    [pendingOnly, runProposals, statusFilter, typeFilter]
   );
   const allProposalIds = useMemo(
     () => new Set(runProposals.map((proposal) => proposal.id)),
@@ -92,17 +96,22 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     () => new Set(visibleProposals.map((proposal) => proposal.id)),
     [visibleProposals]
   );
-  const pendingProposalIds = useMemo(
+  const visiblePendingProposalIds = useMemo(
     () =>
       new Set(
-        runProposals
+        visibleProposals
           .filter((proposal) => proposal.status === "pending")
           .map((proposal) => proposal.id)
       ),
-    [runProposals]
+    [visibleProposals]
+  );
+  const checkedVisiblePendingProposalIds = useMemo(
+    () => [...checkedProposalIds].filter((proposalId) => visiblePendingProposalIds.has(proposalId)),
+    [checkedProposalIds, visiblePendingProposalIds]
   );
   const proposalCounts = useMemo(
     () => ({
+      all: runProposals.length,
       pending: runProposals.filter((proposal) => proposal.status === "pending").length,
       accepted: runProposals.filter((proposal) =>
         matchesStatusFilter(proposal.status, "accepted")
@@ -156,7 +165,9 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
 
   useEffect(() => {
     setCheckedProposalIds((current) => {
-      const next = new Set([...current].filter((proposalId) => pendingProposalIds.has(proposalId)));
+      const next = new Set(
+        [...current].filter((proposalId) => visiblePendingProposalIds.has(proposalId))
+      );
       return next.size === current.size ? current : next;
     });
     setMarkdownDrafts((current) => {
@@ -168,7 +179,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       );
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
-  }, [allProposalIds, pendingProposalIds]);
+  }, [allProposalIds, visiblePendingProposalIds]);
 
   const invalidateAnalyzeReview = async (proposalIds: string[] = []) => {
     await Promise.all([
@@ -211,6 +222,33 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       await invalidateAnalyzeReview([proposalId]);
     }
   });
+  const rejectSelectedMutation = useMutation({
+    mutationFn: (proposalIds: string[]) =>
+      Promise.all(
+        proposalIds.map((proposalId) =>
+          patchProposal(projectId, proposalId, { status: "rejected" })
+        )
+      ),
+    onSuccess: async (_updated, proposalIds) => {
+      const rejectedIds = new Set(proposalIds);
+      setSelectedProposalId((current) => (current && rejectedIds.has(current) ? null : current));
+      setCheckedProposalIds((current) => {
+        const next = new Set(current);
+        for (const proposalId of rejectedIds) {
+          next.delete(proposalId);
+        }
+        return next;
+      });
+      setMarkdownDrafts((current) => {
+        const next = { ...current };
+        for (const proposalId of rejectedIds) {
+          delete next[proposalId];
+        }
+        return next;
+      });
+      await invalidateAnalyzeReview(proposalIds);
+    }
+  });
   const saveMutation = useMutation({
     mutationFn: ({ proposalId, markdown }: { proposalId: string; markdown: string }) =>
       patchProposal(projectId, proposalId, { markdown }),
@@ -227,13 +265,19 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
   });
 
   const isReviewMutationPending =
-    acceptMutation.isPending || rejectMutation.isPending || saveMutation.isPending;
+    acceptMutation.isPending ||
+    rejectMutation.isPending ||
+    rejectSelectedMutation.isPending ||
+    saveMutation.isPending;
   const isAcceptDisabled =
-    checkedProposalIds.size === 0 ||
+    checkedVisiblePendingProposalIds.length === 0 ||
     isReviewMutationPending ||
     hasDirtyCheckedProposal ||
     hasDirtyDraft;
-  const isRejectDisabled = !selectedProposalIsPending || isReviewMutationPending || hasDirtyDraft;
+  const isRejectSelectedDisabled =
+    checkedVisiblePendingProposalIds.length === 0 || isReviewMutationPending || hasDirtyDraft;
+  const isRejectCurrentDisabled =
+    !selectedProposalIsPending || isReviewMutationPending || hasDirtyDraft;
   const isSaveDisabled =
     !selectedProposalIsPending || !isMarkdownDirty || isReviewMutationPending;
   const isFilterDisabled = hasDirtyDraft || isReviewMutationPending;
@@ -259,14 +303,21 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
             Review source and AI spec entity proposals generated by analyze run {runId}.
           </p>
         </div>
-        <Link
-          to="/projects/$projectId/analyze-runs/$runId"
-          params={{ projectId, runId }}
-          className="button-secondary"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back to progress
-        </Link>
+        {hasDirtyDraft ? (
+          <button type="button" className="button-secondary" disabled>
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Back to progress
+          </button>
+        ) : (
+          <Link
+            to="/projects/$projectId/analyze-runs/$runId"
+            params={{ projectId, runId }}
+            className="button-secondary"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Back to progress
+          </Link>
+        )}
       </div>
 
       <div className="mb-3 grid gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2 lg:grid-cols-[1fr_auto]">
@@ -288,23 +339,54 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
               if (isAcceptDisabled) {
                 return;
               }
-              acceptMutation.mutate([...checkedProposalIds]);
+              acceptMutation.mutate(checkedVisiblePendingProposalIds);
             }}
           >
             <Check className="h-4 w-4" aria-hidden="true" />
             Accept selected
           </button>
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={isRejectSelectedDisabled}
+            onClick={() => {
+              if (isRejectSelectedDisabled) {
+                return;
+              }
+              rejectSelectedMutation.mutate(checkedVisiblePendingProposalIds);
+            }}
+          >
+            <XCircle className="h-4 w-4" aria-hidden="true" />
+            Reject selected
+          </button>
         </div>
+        <label className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-slate-300"
+            aria-label="Show pending only"
+            checked={pendingOnly}
+            disabled={isFilterDisabled}
+            onChange={(event) => {
+              if (isFilterDisabled) {
+                return;
+              }
+              setPendingOnly(event.currentTarget.checked);
+              setSelectedProposalId(null);
+            }}
+          />
+          Pending only
+        </label>
         <div className="flex flex-wrap items-center gap-1" aria-label="Proposal status filters">
           {proposalStatusFilters.map((filter) => (
             <button
               key={filter}
               type="button"
               aria-pressed={statusFilter === filter}
-              disabled={filter !== statusFilter && isFilterDisabled}
+              disabled={pendingOnly || (filter !== statusFilter && isFilterDisabled)}
               className={filterButtonClass(statusFilter === filter)}
               onClick={() => {
-                if (filter !== statusFilter && isFilterDisabled) {
+                if (pendingOnly || (filter !== statusFilter && isFilterDisabled)) {
                   return;
                 }
                 setStatusFilter(filter);
@@ -341,7 +423,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
         <aside className="min-h-0 overflow-hidden rounded border border-slate-200 bg-white">
           <header className="border-b border-slate-200 px-3 py-2">
             <h2 className="text-sm font-semibold text-slate-800">
-              {statusFilterLabel(statusFilter)} proposals
+              {pendingOnly ? "Pending" : statusFilterLabel(statusFilter)} proposals
             </h2>
             <p className="text-xs text-slate-500">Only pending proposals can be selected.</p>
           </header>
@@ -386,7 +468,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
               detail={selectedDetail.data}
               editorMarkdown={editorMarkdown}
               isMarkdownDirty={isMarkdownDirty}
-              isRejectDisabled={isRejectDisabled}
+              isRejectDisabled={isRejectCurrentDisabled}
               isSaveDisabled={isSaveDisabled}
               selectedProposalIsPending={selectedProposalIsPending}
               onMarkdownChange={(markdown) => {
@@ -419,6 +501,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
 
       {mutationError(acceptMutation.error, "Accept selected failed")}
       {mutationError(rejectMutation.error, "Reject proposal failed")}
+      {mutationError(rejectSelectedMutation.error, "Reject selected failed")}
       {mutationError(saveMutation.error, "Save markdown failed")}
       {isReviewMutationPending ? (
         <p className="mt-2 text-xs text-slate-500">Updating analyze review...</p>
@@ -755,6 +838,10 @@ function proposalTypeRank(proposalType: ProposalType) {
 }
 
 function matchesStatusFilter(status: ProposalStatus, filter: ProposalStatusFilter) {
+  if (filter === "all") {
+    return true;
+  }
+
   if (filter === "accepted") {
     return status === "accepted" || status === "edited_and_accepted";
   }
@@ -764,6 +851,8 @@ function matchesStatusFilter(status: ProposalStatus, filter: ProposalStatusFilte
 
 function statusFilterLabel(status: ProposalStatusFilter) {
   switch (status) {
+    case "all":
+      return "All";
     case "pending":
       return "Pending";
     case "accepted":

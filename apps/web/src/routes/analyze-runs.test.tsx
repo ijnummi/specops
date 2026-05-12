@@ -372,6 +372,75 @@ describe("AnalyzeRunReviewPage", () => {
     });
   });
 
+  it("shows pending proposals by default and can toggle to all statuses", async () => {
+    mocks.sourceProposalSummariesOverride = [
+      sourceProposalSummary(),
+      sourceProposalSummary({
+        id: "accepted-source-proposal",
+        status: "accepted",
+        title: "Accepted source",
+        entityId: "interfaces.accepted-source",
+        filePath: "interfaces/accepted-source.md"
+      })
+    ];
+    mocks.state = {
+      data: analyzeRun({
+        proposalIds: ["source-proposal-1", "accepted-source-proposal", "ai-proposal-1"]
+      }),
+      error: null,
+      isLoading: false
+    };
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    expect(input(container, "Show pending only").checked).toBe(true);
+    expect(container.textContent).toContain("DecisionService");
+    expect(container.textContent).toContain("Manage projects");
+    expect(container.textContent).not.toContain("Accepted source");
+
+    await changeCheckbox(container, "Show pending only", false);
+
+    expect(input(container, "Show pending only").checked).toBe(false);
+    expect(container.textContent).toContain("Accepted source");
+  });
+
+  it("rejects checked pending proposals by id", async () => {
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    await changeCheckbox(container, "Select DecisionService", true);
+    await changeCheckbox(container, "Select Manage projects", true);
+    await clickButton(container, "Reject selected");
+
+    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
+      status: "rejected"
+    });
+    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "ai-proposal-1", {
+      status: "rejected"
+    });
+    expect(container.textContent).toContain("0 selected");
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "proposals", "source-proposal-1"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "proposals", "ai-proposal-1"]
+    });
+  });
+
+  it("prunes checked proposals that are hidden by filter changes", async () => {
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    await changeCheckbox(container, "Select DecisionService", true);
+    await changeCheckbox(container, "Select Manage projects", true);
+    await clickButton(container, "Source 1");
+
+    expect(container.textContent).toContain("1 selected");
+
+    await clickButton(container, "Accept selected");
+
+    expect(mocks.acceptProposals).toHaveBeenCalledWith("project-1", {
+      proposalIds: ["source-proposal-1"]
+    });
+  });
+
   it("saves markdown edits through the proposal patch API", async () => {
     const { container } = await renderAnalyzeRunReviewPage();
 
@@ -391,6 +460,18 @@ describe("AnalyzeRunReviewPage", () => {
     expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
       status: "rejected"
     });
+  });
+
+  it("disables the back navigation link while markdown edits are dirty", async () => {
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    expect(container.querySelector('a[href="/projects/project-1/analyze-runs/run-1"]')).not.toBeNull();
+
+    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nEdited.");
+
+    expect(container.querySelector('a[href="/projects/project-1/analyze-runs/run-1"]')).toBeNull();
+    expect(button(container, "Back to progress").disabled).toBe(true);
+    expect(container.textContent).toContain("Unsaved markdown edits.");
   });
 });
 
