@@ -101,6 +101,13 @@ describe("initial migration", () => {
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_assembly_inputs");
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claims");
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence");
+    expect(migration).toContain(
+      [
+        "CREATE TABLE IF NOT EXISTS analyze_review_assemblies (",
+        "  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),",
+        "  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,",
+      ].join("\n"),
+    );
     expect(migration).toContain("analyze_review_assemblies_project_idx");
     expect(migration).toContain("analyze_review_assemblies_run_idx");
     expect(migration).toContain("analyze_review_assemblies_run_status_idx");
@@ -118,8 +125,8 @@ describe("initial migration", () => {
     expect(migration).toContain(
       "claim_id uuid NOT NULL REFERENCES analyze_review_claims(id) ON DELETE CASCADE",
     );
-    expect(migration).toContain(
-      "FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE",
-    );
+    expect(
+      migration.match(/FOREIGN KEY \(proposal_id\) REFERENCES ai_proposals\(id\) ON DELETE CASCADE/g),
+    ).toHaveLength(2);
   });
 });
