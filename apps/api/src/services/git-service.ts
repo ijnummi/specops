@@ -26,17 +26,63 @@ export async function readGitChangedFiles(
   fromCommit: string,
   toCommit: string
 ): Promise<string[]> {
-  const { stdout } = await execFileAsync(
-    "git",
-    ["diff", "--name-only", fromCommit, toCommit, "--"],
-    { cwd: repoPath }
-  );
+  return readGitDiffNameOnly(repoPath, [fromCommit, toCommit]);
+}
 
-  return stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .sort((left, right) => left.localeCompare(right));
+export async function resolveGitRef(repoPath: string, ref: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", ref], {
+      cwd: repoPath
+    });
+    const commit = stdout.trim();
+
+    if (/^[0-9a-f]{40}$/i.test(commit)) {
+      return commit;
+    }
+  } catch {
+    // Fall through to the stable invalid-ref error below.
+  }
+
+  throw new Error(`Invalid Git ref: ${ref}`);
+}
+
+export async function readGitWorkingTreeChangedFiles(repoPath: string): Promise<string[]> {
+  const changedFiles = new Set<string>();
+  const [workingTreeFiles, stagedFiles, status] = await Promise.all([
+    readGitDiffNameOnly(repoPath, ["HEAD"]),
+    readGitDiffNameOnly(repoPath, ["--cached"]),
+    readGitStatus(repoPath)
+  ]);
+
+  for (const filePath of workingTreeFiles) {
+    changedFiles.add(filePath);
+  }
+
+  for (const filePath of stagedFiles) {
+    changedFiles.add(filePath);
+  }
+
+  for (const entry of status.entries) {
+    changedFiles.add(entry.path);
+
+    if (entry.originalPath) {
+      changedFiles.add(entry.originalPath);
+    }
+  }
+
+  return sortPaths([...changedFiles].filter((filePath) => filePath.length > 0));
+}
+
+export async function readGitStagedChangedFiles(repoPath: string): Promise<string[]> {
+  return readGitDiffNameOnly(repoPath, ["--cached"]);
+}
+
+export async function readGitRefRangeChangedFiles(
+  repoPath: string,
+  baseCommit: string,
+  headCommit: string
+): Promise<string[]> {
+  return readGitDiffNameOnly(repoPath, [baseCommit, headCommit]);
 }
 
 export async function readGitStatus(
@@ -87,6 +133,27 @@ async function readStatusEntries(repoPath: string): Promise<GitStatusEntry[]> {
     }
   );
   return parsePorcelainStatus(stdout.toString("utf8"));
+}
+
+async function readGitDiffNameOnly(repoPath: string, args: string[]): Promise<string[]> {
+  const { stdout } = await execFileAsync("git", ["diff", "--name-only", ...args, "--"], {
+    cwd: repoPath
+  });
+
+  return sortPaths(
+    Array.from(
+      new Set(
+        stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+      )
+    )
+  );
+}
+
+function sortPaths(paths: string[]): string[] {
+  return paths.sort((left, right) => left.localeCompare(right));
 }
 
 function parsePorcelainStatus(output: string): GitStatusEntry[] {
