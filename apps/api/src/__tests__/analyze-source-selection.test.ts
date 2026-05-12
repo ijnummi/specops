@@ -54,6 +54,47 @@ describe("selectAnalyzeSourceFiles", () => {
     });
   });
 
+  it("uses tests and config as weak fallback when high-signal files do not fit", () => {
+    const result = selectAnalyzeSourceFiles({
+      files: [
+        file("huge-route", "apps/api/src/routes/huge.ts", 70_000, 1, 2, 3),
+        file("config", "apps/api/src/config.ts", 4_000, 0, 1, 2),
+        file("test", "apps/api/src/__tests__/routes.test.ts", 5_000, 0, 0, 0)
+      ],
+      maxFiles: 2,
+      maxTotalBytes: 10_000
+    });
+
+    expect(result.selectedSourceFileIds).toEqual(["test", "config"]);
+    expect(result.eligibleHighSignalFileCount).toBe(1);
+    expect(result.skippedHighSignalFileCount).toBe(1);
+    expect(result.categories).toEqual([{ category: "tests_config", count: 2 }]);
+    expect(result.diagnostics).toContainEqual({
+      level: "info",
+      message: "AI source selection is partial: selected 0 of 1 high-signal files."
+    });
+  });
+
+  it("uses tests and config as weak context when budget remains", () => {
+    const result = selectAnalyzeSourceFiles({
+      files: [
+        file("route", "apps/api/src/routes/projects.ts", 10_000, 1, 3, 8),
+        file("config", "apps/api/src/config.ts", 4_000, 0, 1, 2)
+      ],
+      maxFiles: 2,
+      maxTotalBytes: 20_000
+    });
+
+    expect(result.selectedSourceFileIds).toEqual(["config", "route"]);
+    expect(result.eligibleHighSignalFileCount).toBe(1);
+    expect(result.skippedHighSignalFileCount).toBe(0);
+    expect(result.categories).toEqual([
+      { category: "entrypoints_routes", count: 1 },
+      { category: "tests_config", count: 1 }
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
   it("returns a warning when no useful files fit", () => {
     const result = selectAnalyzeSourceFiles({
       files: [file("huge", "apps/api/src/routes/huge.ts", 70_000, 1, 2, 3)],

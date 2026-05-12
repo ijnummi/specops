@@ -38,6 +38,7 @@ export function selectAnalyzeSourceFiles(
     .map(scoreCandidate)
     .filter((candidate) => candidate.score > 0)
     .sort(compareCandidates);
+  const highSignal = scored.filter(isHighSignal);
   const selected: ScoredCandidate[] = [];
   let selectedBytes = 0;
 
@@ -64,7 +65,8 @@ export function selectAnalyzeSourceFiles(
   selected.sort((left, right) => left.path.localeCompare(right.path));
 
   const diagnostics: AnalyzeRunDiagnostic[] = [];
-  const skippedHighSignalFileCount = Math.max(0, scored.length - selected.length);
+  const selectedHighSignalFileCount = selected.filter(isHighSignal).length;
+  const skippedHighSignalFileCount = Math.max(0, highSignal.length - selectedHighSignalFileCount);
   if (selected.length === 0) {
     diagnostics.push({
       level: "warning",
@@ -73,14 +75,14 @@ export function selectAnalyzeSourceFiles(
   } else if (skippedHighSignalFileCount > 0) {
     diagnostics.push({
       level: "info",
-      message: `AI source selection is partial: selected ${selected.length} of ${scored.length} high-signal files.`
+      message: `AI source selection is partial: selected ${selectedHighSignalFileCount} of ${highSignal.length} high-signal files.`
     });
   }
 
   return {
     selectedSourceFileIds: selected.map((file) => file.id),
     selectedPaths: selected.map((file) => file.path),
-    eligibleHighSignalFileCount: scored.length,
+    eligibleHighSignalFileCount: highSignal.length,
     skippedHighSignalFileCount,
     categories: categoryOrder
       .map((category) => ({
@@ -96,7 +98,7 @@ function scoreCandidate(candidate: AnalyzeSourceCandidate): ScoredCandidate {
   const path = candidate.path.toLowerCase();
   const category = categorizePath(path, candidate.kind);
   if (category === "tests_config") {
-    return { ...candidate, category, score: 0 };
+    return { ...candidate, category, score: 1 };
   }
   const categoryScore = {
     entrypoints_routes: 100,
@@ -109,6 +111,10 @@ function scoreCandidate(candidate: AnalyzeSourceCandidate): ScoredCandidate {
     categoryScore + candidate.exportCount * 4 + candidate.symbolCount * 2 + candidate.importCount;
 
   return { ...candidate, category, score };
+}
+
+function isHighSignal(candidate: ScoredCandidate) {
+  return candidate.category !== "tests_config";
 }
 
 function categorizePath(path: string, kind: string): SelectionCategory {
