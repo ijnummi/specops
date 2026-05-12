@@ -10,8 +10,12 @@ import type {
   AiPrefillGenerateResponse,
   ChangeImpactPreviewQuery,
   ChangeImpactPreviewResponseDto,
+  CreateDiffReviewRequest,
+  CreateDiffReviewResponse,
   CreateEntityRequest,
   CreateProjectRequest,
+  DiffReviewDetailResponse,
+  DiffReviewSummaryResponse,
   EntitySearchQuery,
   EntitySearchResultDto,
   EntityImpactQuery,
@@ -36,6 +40,8 @@ import type {
   SourceSpecLinkDto,
   StartAgentRunRequest,
   StartAgentRunResponse,
+  UpdateDiffReviewStatusRequest,
+  UpdateDiffReviewStatusResponse,
   UpdateAgentRunStatusRequest,
   UpdateAgentRunStatusResponse,
   ValidationMessageDto
@@ -104,6 +110,10 @@ export const queryKeys = {
   agentRuns: (projectId: string) => ["projects", projectId, "agent-runs", "list"] as const,
   agentRun: (projectId: string, runId: string) =>
     ["projects", projectId, "agent-runs", runId] as const,
+  diffReviewsRoot: (projectId: string) => ["projects", projectId, "diff-reviews"] as const,
+  diffReviews: (projectId: string) => ["projects", projectId, "diff-reviews", "list"] as const,
+  diffReview: (projectId: string, reviewId: string) =>
+    ["projects", projectId, "diff-reviews", reviewId] as const,
   sourceFiles: (projectId: string, input: SourceFileListQuery) =>
     ["projects", projectId, "source-files", input] as const,
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
@@ -216,6 +226,28 @@ export function agentRunQuery(projectId: string, runId: string) {
     queryFn: () =>
       apiGet<AgentRunDetailDto>(
         `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}`
+      )
+  });
+}
+
+export function diffReviewsQuery(projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.diffReviews(projectId),
+    queryFn: () =>
+      apiGet<DiffReviewSummaryResponse[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/diff-reviews`
+      )
+  });
+}
+
+export function diffReviewQuery(projectId: string, reviewId: string) {
+  return queryOptions({
+    queryKey: queryKeys.diffReview(projectId, reviewId),
+    queryFn: () =>
+      apiGet<DiffReviewDetailResponse>(
+        `/api/projects/${encodeURIComponent(projectId)}/diff-reviews/${encodeURIComponent(
+          reviewId
+        )}`
       )
   });
 }
@@ -582,6 +614,26 @@ export function updateAgentRunStatus(
   return apiSend<UpdateAgentRunStatusResponse>(
     "PATCH",
     `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}`,
+    input
+  );
+}
+
+export function createDiffReview(projectId: string, input: CreateDiffReviewRequest) {
+  return apiSend<CreateDiffReviewResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/diff-reviews`,
+    input
+  );
+}
+
+export function updateDiffReviewStatus(
+  projectId: string,
+  reviewId: string,
+  input: UpdateDiffReviewStatusRequest
+) {
+  return apiSend<UpdateDiffReviewStatusResponse>(
+    "PATCH",
+    `/api/projects/${encodeURIComponent(projectId)}/diff-reviews/${encodeURIComponent(reviewId)}`,
     input
   );
 }

@@ -12,6 +12,8 @@ import { AgentRunDetailPage } from "./routes/agent-run-detail.js";
 import { AgentRunsPage } from "./routes/agent-runs.js";
 import { AiPrefillPage } from "./routes/ai-prefill.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
+import { DiffReviewDetailPage } from "./routes/diff-review-detail.js";
+import { DiffReviewsPage } from "./routes/diff-reviews.js";
 import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
@@ -121,6 +123,24 @@ const agentRunDetailRoute = createRoute({
   }
 });
 
+const diffReviewsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/diff-reviews",
+  component: () => {
+    const { projectId } = diffReviewsRoute.useParams();
+    return <DiffReviewsPage projectId={projectId} />;
+  }
+});
+
+const diffReviewDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/diff-reviews/$reviewId",
+  component: () => {
+    const { projectId, reviewId } = diffReviewDetailRoute.useParams();
+    return <DiffReviewDetailPage projectId={projectId} reviewId={reviewId} />;
+  }
+});
+
 const sourceImportRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/import/source",
@@ -185,6 +205,8 @@ const routeTree = rootRoute.addChildren([
   readinessRoute,
   agentRunsRoute,
   agentRunDetailRoute,
+  diffReviewsRoute,
+  diffReviewDetailRoute,
   sourceImportRoute,
   aiPrefillRoute,
   impactRoute,
