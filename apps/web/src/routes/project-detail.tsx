@@ -13,6 +13,7 @@ import {
   queryKeys,
   reindexProject,
   searchQuery,
+  startAnalyzeRun,
   validationMessagesQuery
 } from "../api/queries.js";
 import {
@@ -165,7 +166,19 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
     mutationFn: () => reindexProject(projectId),
     onSuccess: invalidateProject
   });
-  const isProjectActionPending = initializeMutation.isPending || indexMutation.isPending;
+  const analyzeMutation = useMutation({
+    mutationFn: () => startAnalyzeRun(projectId),
+    onSuccess: (run) => {
+      const analyzeRunRoute = {
+        to: "/projects/$projectId/analyze-runs/$runId",
+        params: { projectId, runId: run.id }
+      } as unknown as Parameters<typeof navigate>[0];
+
+      return navigate(analyzeRunRoute);
+    }
+  });
+  const isProjectActionPending =
+    initializeMutation.isPending || indexMutation.isPending || analyzeMutation.isPending;
 
   return (
     <WorkbenchLayout
@@ -174,9 +187,11 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
       actions={
         <ProjectActions
           projectId={projectId}
+          isAnalyzing={analyzeMutation.isPending}
           isInitializing={initializeMutation.isPending}
           isIndexing={indexMutation.isPending}
           isProjectActionPending={isProjectActionPending}
+          onAnalyze={() => analyzeMutation.mutate()}
           onInitialize={() => initializeMutation.mutate()}
           onReindex={() => indexMutation.mutate()}
         />
@@ -323,6 +338,9 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
         <p className="mt-3 text-sm text-red-700">{initializeMutation.error.message}</p>
       ) : null}
       {indexMutation.error ? <p className="mt-3 text-sm text-red-700">{indexMutation.error.message}</p> : null}
+      {analyzeMutation.error ? (
+        <p className="mt-3 text-sm text-red-700">{analyzeMutation.error.message}</p>
+      ) : null}
     </WorkbenchLayout>
   );
 }

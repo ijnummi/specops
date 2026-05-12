@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import {
+  BrainCircuit,
   CheckCircle2,
   ClipboardList,
   FolderSearch,
@@ -12,23 +13,40 @@ import {
 
 export type ProjectActionsProps = {
   projectId: string;
+  isAnalyzing: boolean;
   isInitializing: boolean;
   isIndexing: boolean;
   isProjectActionPending: boolean;
+  onAnalyze: () => void;
   onInitialize: () => void;
   onReindex: () => void;
 };
 
 export function ProjectActions({
   projectId,
+  isAnalyzing,
   isInitializing,
   isIndexing,
   isProjectActionPending,
+  onAnalyze,
   onInitialize,
   onReindex
 }: ProjectActionsProps) {
   return (
     <>
+      <button
+        type="button"
+        className="button-primary"
+        disabled={isProjectActionPending}
+        onClick={onAnalyze}
+      >
+        {isAnalyzing ? (
+          <RotateCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <BrainCircuit className="h-4 w-4" aria-hidden="true" />
+        )}
+        Analyze project
+      </button>
       <button
         type="button"
         className="button-secondary"
@@ -84,7 +102,7 @@ export function ProjectActions({
       </Link>
       <button
         type="button"
-        className="button-primary"
+        className="button-secondary"
         disabled={isProjectActionPending}
         onClick={onReindex}
       >

@@ -6,6 +6,7 @@ import type {
   AgentRunSummary as AgentRunSummaryDto,
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
+  AnalyzeRunDetailDto,
   AiPrefillGenerateRequest,
   AiPrefillGenerateResponse,
   ChangeImpactPreviewQuery,
@@ -110,6 +111,8 @@ export const queryKeys = {
   agentRuns: (projectId: string) => ["projects", projectId, "agent-runs", "list"] as const,
   agentRun: (projectId: string, runId: string) =>
     ["projects", projectId, "agent-runs", runId] as const,
+  analyzeRun: (projectId: string, runId: string) =>
+    ["projects", projectId, "analyze-runs", runId] as const,
   diffReviewsRoot: (projectId: string) => ["projects", projectId, "diff-reviews"] as const,
   diffReviews: (projectId: string) => ["projects", projectId, "diff-reviews", "list"] as const,
   diffReview: (projectId: string, reviewId: string) =>
@@ -226,6 +229,16 @@ export function agentRunQuery(projectId: string, runId: string) {
     queryFn: () =>
       apiGet<AgentRunDetailDto>(
         `/api/projects/${encodeURIComponent(projectId)}/agent-runs/${encodeURIComponent(runId)}`
+      )
+  });
+}
+
+export function analyzeRunQuery(projectId: string, runId: string) {
+  return queryOptions({
+    queryKey: queryKeys.analyzeRun(projectId, runId),
+    queryFn: () =>
+      apiGet<AnalyzeRunDetailDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(runId)}`
       )
   });
 }
@@ -505,6 +518,13 @@ export function initializeSpecops(projectId: string) {
 
 export function reindexProject(projectId: string) {
   return apiSend<IndexRunDto>("POST", `/api/projects/${encodeURIComponent(projectId)}/index`);
+}
+
+export function startAnalyzeRun(projectId: string) {
+  return apiSend<AnalyzeRunDetailDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs`
+  );
 }
 
 export function bootstrapFromSource(projectId: string) {
