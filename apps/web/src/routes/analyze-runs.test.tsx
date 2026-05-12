@@ -40,64 +40,90 @@ const mocks = vi.hoisted(() => ({
   }))
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useMutation: (options: {
-    mutationFn: (variables?: unknown) => unknown;
-    onSuccess?: (data: unknown, variables: unknown) => unknown;
-  }) => ({
-    error: null,
-    isPending: false,
-    mutate: (variables?: unknown) => {
-      const result = options.mutationFn(variables);
-      void options.onSuccess?.(result, variables);
-      return result;
-    }
-  }),
-  useQuery: (options: Record<string, unknown>) => {
-    if (options.queryType === "analyzeRun") {
+vi.mock("@tanstack/react-query", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    useMutation: (options: {
+      mutationFn: (variables?: unknown) => unknown;
+      onError?: (error: unknown, variables: unknown) => unknown;
+      onSuccess?: (data: unknown, variables: unknown) => unknown;
+    }) => {
+      const [error, setError] = React.useState<unknown>(null);
+      const [isPending, setIsPending] = React.useState(false);
+
+      return {
+        error,
+        isPending,
+        mutate: (variables?: unknown) => {
+          setError(null);
+          setIsPending(true);
+          const result = Promise.resolve()
+            .then(() => options.mutationFn(variables))
+            .then(
+              async (data) => {
+                await options.onSuccess?.(data, variables);
+                setIsPending(false);
+                return data;
+              },
+              async (mutationError) => {
+                setError(mutationError);
+                await options.onError?.(mutationError, variables);
+                setIsPending(false);
+                throw mutationError;
+              }
+            );
+          void result.catch(() => undefined);
+          return result;
+        }
+      };
+    },
+    useQuery: (options: Record<string, unknown>) => {
+      if (options.queryType === "analyzeRun") {
+        mocks.lastUseQueryOptions = options;
+        return mocks.state;
+      }
+
+      if (options.queryType === "proposals") {
+        const input = (options.queryKey as readonly unknown[])[3] as
+          | { proposalType?: string }
+          | undefined;
+        const sourceSummaries = mocks.sourceProposalSummariesOverride ?? [sourceProposalSummary()];
+        const aiSummaries = mocks.aiProposalSummariesOverride ?? [aiProposalSummary()];
+
+        return {
+          data:
+            input?.proposalType === "ai_spec_entity"
+              ? aiSummaries
+              : input?.proposalType === "source_spec_entity" || input?.proposalType === undefined
+                ? sourceSummaries
+                : [],
+          error: null,
+          isLoading: false
+        };
+      }
+
+      if (options.queryType === "proposal") {
+        mocks.proposalQueryOptions.push(
+          options as { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }
+        );
+        const proposalId = String((options.queryKey as readonly unknown[])[3]);
+
+        return {
+          data: mocks.proposalDetailOverride ?? proposalDetail(proposalId),
+          error: null,
+          isLoading: false
+        };
+      }
+
       mocks.lastUseQueryOptions = options;
       return mocks.state;
-    }
-
-    if (options.queryType === "proposals") {
-      const input = (options.queryKey as readonly unknown[])[3] as
-        | { proposalType?: string }
-        | undefined;
-      const sourceSummaries = mocks.sourceProposalSummariesOverride ?? [sourceProposalSummary()];
-      const aiSummaries = mocks.aiProposalSummariesOverride ?? [aiProposalSummary()];
-
-      return {
-        data:
-          input?.proposalType === "ai_spec_entity"
-            ? aiSummaries
-            : input?.proposalType === "source_spec_entity" || input?.proposalType === undefined
-              ? sourceSummaries
-              : [],
-        error: null,
-        isLoading: false
-      };
-    }
-
-    if (options.queryType === "proposal") {
-      mocks.proposalQueryOptions.push(
-        options as { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }
-      );
-      const proposalId = String((options.queryKey as readonly unknown[])[3]);
-
-      return {
-        data: mocks.proposalDetailOverride ?? proposalDetail(proposalId),
-        error: null,
-        isLoading: false
-      };
-    }
-
-    mocks.lastUseQueryOptions = options;
-    return mocks.state;
-  },
-  useQueryClient: () => ({
-    invalidateQueries: mocks.invalidateQueries
-  })
-}));
+    },
+    useQueryClient: () => ({
+      invalidateQueries: mocks.invalidateQueries
+    })
+  };
+});
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -421,6 +447,45 @@ describe("AnalyzeRunReviewPage", () => {
       queryKey: ["projects", "project-1", "proposals", "source-proposal-1"]
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "proposals", "ai-proposal-1"]
+    });
+  });
+
+  it("clears successful batch rejects when another selected reject fails", async () => {
+    mocks.patchProposal.mockImplementation(
+      (_projectId: string, proposalId: string, input: { status?: string }) => {
+        if (proposalId === "ai-proposal-1") {
+          return Promise.reject(new Error("Reject failed for ai-proposal-1"));
+        }
+
+        const detail = proposalDetail(proposalId);
+        return Promise.resolve({
+          ...detail,
+          status: input.status ?? detail.status
+        });
+      }
+    );
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    await changeCheckbox(container, "Select DecisionService", true);
+    await changeCheckbox(container, "Select Manage projects", true);
+    await clickButton(container, "Reject selected");
+
+    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
+      status: "rejected"
+    });
+    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "ai-proposal-1", {
+      status: "rejected"
+    });
+    expect(input(container, "Select DecisionService").checked).toBe(false);
+    expect(input(container, "Select Manage projects").checked).toBe(true);
+    expect(container.textContent).toContain("1 selected");
+    expect(container.textContent).toContain("Reject selected failed");
+    expect(container.textContent).toContain("ai-proposal-1");
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "proposals", "source-proposal-1"]
+    });
+    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "proposals", "ai-proposal-1"]
     });
   });

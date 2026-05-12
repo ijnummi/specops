@@ -47,6 +47,16 @@ const proposalTypeFilters = [
   "ai_spec_entity"
 ] satisfies ProposalTypeFilter[];
 
+class RejectSelectedError extends Error {
+  constructor(
+    readonly succeededProposalIds: string[],
+    readonly failedProposalIds: string[]
+  ) {
+    super(`Failed to reject ${failedProposalIds.join(", ")}`);
+    this.name = "RejectSelectedError";
+  }
+}
+
 export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageProps) {
   const queryClient = useQueryClient();
   const [pendingOnly, setPendingOnly] = useState(true);
@@ -197,6 +207,30 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     ]);
   };
 
+  const clearRejectedProposals = async (proposalIds: string[]) => {
+    if (proposalIds.length === 0) {
+      return;
+    }
+
+    const rejectedIds = new Set(proposalIds);
+    setSelectedProposalId((current) => (current && rejectedIds.has(current) ? null : current));
+    setCheckedProposalIds((current) => {
+      const next = new Set(current);
+      for (const proposalId of rejectedIds) {
+        next.delete(proposalId);
+      }
+      return next;
+    });
+    setMarkdownDrafts((current) => {
+      const next = { ...current };
+      for (const proposalId of rejectedIds) {
+        delete next[proposalId];
+      }
+      return next;
+    });
+    await invalidateAnalyzeReview(proposalIds);
+  };
+
   const acceptMutation = useMutation({
     mutationFn: (proposalIds: string[]) => acceptProposals(projectId, { proposalIds }),
     onSuccess: async (_accepted, proposalIds) => {
@@ -223,30 +257,37 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     }
   });
   const rejectSelectedMutation = useMutation({
-    mutationFn: (proposalIds: string[]) =>
-      Promise.all(
-        proposalIds.map((proposalId) =>
-          patchProposal(projectId, proposalId, { status: "rejected" })
-        )
-      ),
-    onSuccess: async (_updated, proposalIds) => {
-      const rejectedIds = new Set(proposalIds);
-      setSelectedProposalId((current) => (current && rejectedIds.has(current) ? null : current));
-      setCheckedProposalIds((current) => {
-        const next = new Set(current);
-        for (const proposalId of rejectedIds) {
-          next.delete(proposalId);
+    mutationFn: async (proposalIds: string[]) => {
+      const results = await Promise.allSettled(
+        proposalIds.map(async (proposalId) => {
+          await patchProposal(projectId, proposalId, { status: "rejected" });
+          return proposalId;
+        })
+      );
+      const succeededProposalIds: string[] = [];
+      const failedProposalIds: string[] = [];
+
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") {
+          succeededProposalIds.push(result.value);
+        } else {
+          failedProposalIds.push(proposalIds[index]!);
         }
-        return next;
-      });
-      setMarkdownDrafts((current) => {
-        const next = { ...current };
-        for (const proposalId of rejectedIds) {
-          delete next[proposalId];
-        }
-        return next;
-      });
-      await invalidateAnalyzeReview(proposalIds);
+      }
+
+      if (failedProposalIds.length > 0) {
+        throw new RejectSelectedError(succeededProposalIds, failedProposalIds);
+      }
+
+      return succeededProposalIds;
+    },
+    onSuccess: async (succeededProposalIds) => {
+      await clearRejectedProposals(succeededProposalIds);
+    },
+    onError: async (error) => {
+      if (error instanceof RejectSelectedError) {
+        await clearRejectedProposals(error.succeededProposalIds);
+      }
     }
   });
   const saveMutation = useMutation({
