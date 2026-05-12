@@ -168,14 +168,11 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
   });
   const analyzeMutation = useMutation({
     mutationFn: () => startAnalyzeRun(projectId),
-    onSuccess: (run) => {
-      const analyzeRunRoute = {
+    onSuccess: (run) =>
+      navigate({
         to: "/projects/$projectId/analyze-runs/$runId",
         params: { projectId, runId: run.id }
-      } as unknown as Parameters<typeof navigate>[0];
-
-      return navigate(analyzeRunRoute);
-    }
+      })
   });
   const isProjectActionPending =
     initializeMutation.isPending || indexMutation.isPending || analyzeMutation.isPending;

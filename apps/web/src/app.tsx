@@ -11,6 +11,7 @@ import type { AdminDatabaseMode } from "./routes/admin-database.js";
 import { AgentRunDetailPage } from "./routes/agent-run-detail.js";
 import { AgentRunsPage } from "./routes/agent-runs.js";
 import { AiPrefillPage } from "./routes/ai-prefill.js";
+import { AnalyzeRunDetailPage } from "./routes/analyze-run-detail.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
 import { DiffReviewDetailPage } from "./routes/diff-review-detail.js";
 import { DiffReviewsPage } from "./routes/diff-reviews.js";
@@ -123,6 +124,15 @@ const agentRunDetailRoute = createRoute({
   }
 });
 
+const analyzeRunDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/analyze-runs/$runId",
+  component: () => {
+    const { projectId, runId } = analyzeRunDetailRoute.useParams();
+    return <AnalyzeRunDetailPage projectId={projectId} runId={runId} />;
+  }
+});
+
 const diffReviewsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/diff-reviews",
@@ -205,6 +215,7 @@ const routeTree = rootRoute.addChildren([
   readinessRoute,
   agentRunsRoute,
   agentRunDetailRoute,
+  analyzeRunDetailRoute,
   diffReviewsRoute,
   diffReviewDetailRoute,
   sourceImportRoute,

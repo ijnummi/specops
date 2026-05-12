@@ -14,6 +14,7 @@ import {
   analyzeRunQuery,
   generateAiPrefillProposals,
   proposalsQuery,
+  queryKeys,
   sourceFilesQuery,
   startAnalyzeRun
 } from "./queries.js";
@@ -85,6 +86,14 @@ describe("api queries", () => {
   it("fetches analyze run details", async () => {
     mocks.apiGet.mockResolvedValueOnce({ runId: "run-1" });
     const query = analyzeRunQuery("project-1", "run-1");
+
+    expect(query.queryKey).toEqual(["projects", "project-1", "analyze-runs", "run-1"]);
+    expect(queryKeys.analyzeRun("project-1", "run-1")).toEqual([
+      "projects",
+      "project-1",
+      "analyze-runs",
+      "run-1"
+    ]);
 
     const runQuery = query.queryFn as () => Promise<unknown>;
     await runQuery();
