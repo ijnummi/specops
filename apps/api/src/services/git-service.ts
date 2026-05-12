@@ -31,9 +31,13 @@ export async function readGitChangedFiles(
 
 export async function resolveGitRef(repoPath: string, ref: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", ref], {
-      cwd: repoPath
-    });
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
+      {
+        cwd: repoPath
+      }
+    );
     const commit = stdout.trim();
 
     if (/^[0-9a-f]{40}$/i.test(commit)) {
@@ -48,11 +52,12 @@ export async function resolveGitRef(repoPath: string, ref: string): Promise<stri
 
 export async function readGitWorkingTreeChangedFiles(repoPath: string): Promise<string[]> {
   const changedFiles = new Set<string>();
-  const [workingTreeFiles, stagedFiles, status] = await Promise.all([
-    readGitDiffNameOnly(repoPath, ["HEAD"]),
-    readGitDiffNameOnly(repoPath, ["--cached"]),
+  const [stagedFiles, status] = await Promise.all([
+    readGitStagedChangedFiles(repoPath),
     readGitStatus(repoPath)
   ]);
+  const workingTreeFiles =
+    status.headCommit === null ? [] : await readGitDiffNameOnly(repoPath, ["HEAD"]);
 
   for (const filePath of workingTreeFiles) {
     changedFiles.add(filePath);

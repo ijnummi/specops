@@ -51,6 +51,18 @@ describe("git-service diff helpers", () => {
     ]);
   });
 
+  it("reads working tree changed files from an initialized repo with no commits", async () => {
+    const repoPath = await createRepo();
+    await writeFile(join(repoPath, "staged.txt"), "staged\n");
+    await git(repoPath, "add", "staged.txt");
+    await writeFile(join(repoPath, "untracked.txt"), "untracked\n");
+
+    await expect(readGitWorkingTreeChangedFiles(repoPath)).resolves.toEqual([
+      "staged.txt",
+      "untracked.txt"
+    ]);
+  });
+
   it("reads staged changed files only", async () => {
     const repoPath = await createRepo();
     await writeFile(join(repoPath, "tracked.txt"), "initial\n");
@@ -88,6 +100,17 @@ describe("git-service diff helpers", () => {
     const repoPath = await createRepo();
 
     await expect(resolveGitRef(repoPath, "not-a-ref")).rejects.toThrow("Invalid Git ref: not-a-ref");
+  });
+
+  it("rejects non-commit object expressions with a stable error message", async () => {
+    const repoPath = await createRepo();
+    await writeFile(join(repoPath, "tracked.txt"), "initial\n");
+    await git(repoPath, "add", "tracked.txt");
+    await git(repoPath, "commit", "-m", "initial");
+
+    await expect(resolveGitRef(repoPath, "HEAD^{tree}")).rejects.toThrow(
+      "Invalid Git ref: HEAD^{tree}"
+    );
   });
 });
 
