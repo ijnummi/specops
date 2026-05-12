@@ -39,12 +39,17 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
 
     expect(markdown).toContain("id: use-case.review-drafts");
     expect(markdown).toContain("type: use_case");
+    expect(markdown).toContain("title: Review drafts");
+    expect(markdown).toContain("status: draft");
     expect(markdown).toContain("# Review drafts");
     expect(markdown).toContain("## Reviewed Facts");
     expect(markdown).toContain("Users can accept reviewed assemblies.");
     expect(markdown).toContain("apps/api/src/routes/analyze-review-assemblies.ts:20-80");
+    expect(markdown).toContain("(registerAnalyzeReviewAssemblyRoutes)");
     expect(markdown).toContain("## Hypotheses and Unknowns");
     expect(markdown).toContain("The review model may later feed refresh workflows.");
     expect(markdown).toContain("## Proposed Links");
+    expect(markdown).toContain("relates_to: interface.proposal-service");
+    expect(markdown).toContain("Assemblies are built from proposal inputs.");
   });
 });
