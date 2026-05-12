@@ -1,5 +1,6 @@
 export * from "./agent-tasks.js";
 export * from "./agent-runs.js";
+export * from "./analyze-review-assemblies.js";
 export * from "./analyze-runs.js";
 export * from "./change-impact.js";
 export * from "./diff-reviews.js";
