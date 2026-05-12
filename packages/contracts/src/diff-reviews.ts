@@ -121,7 +121,7 @@ export const diffReviewDetailResponseSchema = diffReviewSummaryResponseSchema.ex
   reviewSummary: diffReviewSummarySchema
 });
 
-export const createDiffReviewResponseSchema = diffReviewSummaryResponseSchema;
+export const createDiffReviewResponseSchema = diffReviewDetailResponseSchema;
 export const updateDiffReviewStatusResponseSchema = diffReviewDetailResponseSchema;
 
 export type DiffReviewStatus = z.infer<typeof diffReviewStatusSchema>;
