@@ -207,7 +207,9 @@ function FindingsPanel({ findings }: { findings: DiffReviewFinding[] }) {
                 <span className="font-semibold text-slate-700">{finding.severity}</span>
                 <span>{formatStatus(finding.kind)}</span>
                 {finding.entityId ? <span>{finding.entityId}</span> : null}
-                {finding.filePath ? <span className="font-mono">{finding.filePath}</span> : null}
+                {finding.filePath ? (
+                  <span className="min-w-0 break-all font-mono">{finding.filePath}</span>
+                ) : null}
               </div>
               <p className="mt-1 text-sm text-slate-800">{finding.message}</p>
               <p className="mt-1 text-sm text-slate-600">{finding.suggestedFollowUp}</p>
@@ -282,7 +284,10 @@ function ValidationCommandsPanel({ commands }: { commands: string[] }) {
       ) : (
         <ul className="mt-3 grid gap-2">
           {commands.map((command) => (
-            <li key={command} className="rounded bg-slate-950 px-2 py-1 font-mono text-xs text-white">
+            <li
+              key={command}
+              className="min-w-0 break-all rounded bg-slate-950 px-2 py-1 font-mono text-xs text-white"
+            >
               {command}
             </li>
           ))}

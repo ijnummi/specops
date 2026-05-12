@@ -8,7 +8,7 @@ import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   listState: {
@@ -37,8 +37,28 @@ const mocks = vi.hoisted(() => ({
   updateDiffReviewStatus: vi.fn()
 }));
 
+type MutationOptions = {
+  mutationFn: (input: unknown) => unknown;
+  onSuccess?: (result: unknown, input: unknown) => unknown;
+};
+
 vi.mock("@tanstack/react-query", () => ({
-  useMutation: () => mocks.mutationState,
+  useMutation: (options: MutationOptions) => ({
+    isPending: mocks.mutationState.isPending,
+    mutate: vi.fn((input: unknown) => {
+      const result = options.mutationFn(input);
+
+      if (isPromiseLike(result)) {
+        void result.then(async (resolved) => {
+          await options.onSuccess?.(resolved, input);
+        });
+      } else {
+        void options.onSuccess?.(result, input);
+      }
+
+      return result;
+    })
+  }),
   useQuery: (options: { queryKey: readonly unknown[] }) =>
     options.queryKey.at(-1) === "review-1" ? mocks.detailState : mocks.listState,
   useQueryClient: () => ({
@@ -90,18 +110,35 @@ const containers: HTMLElement[] = [];
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-describe("DiffReviewsPage", () => {
-  afterEach(() => {
-    for (const root of roots.splice(0)) {
-      act(() => {
-        root.unmount();
-      });
-    }
-    for (const container of containers.splice(0)) {
-      container.remove();
-    }
-  });
+beforeEach(() => {
+  mocks.listState = {
+    data: null,
+    error: null,
+    isLoading: false
+  };
+  mocks.detailState = {
+    data: null,
+    error: null,
+    isLoading: false
+  };
+  mocks.createDiffReview.mockReset();
+  mocks.updateDiffReviewStatus.mockReset();
+  mocks.invalidateQueries.mockReset();
+  mocks.navigate.mockReset();
+});
 
+afterEach(() => {
+  for (const root of roots.splice(0)) {
+    act(() => {
+      root.unmount();
+    });
+  }
+  for (const container of containers.splice(0)) {
+    container.remove();
+  }
+});
+
+describe("DiffReviewsPage", () => {
   it("renders create controls and review summaries", () => {
     mocks.listState = {
       data: [diffReviewSummary],
@@ -144,6 +181,57 @@ describe("DiffReviewsPage", () => {
 
     expect(container.textContent).toContain("Base ref");
     expect(container.textContent).toContain("Head ref");
+  });
+
+  it("creates a working tree review and navigates to the detail route", async () => {
+    mocks.listState = {
+      data: [],
+      error: null,
+      isLoading: false
+    };
+    mocks.createDiffReview.mockResolvedValue({
+      ...diffReviewSummary,
+      id: "created-review"
+    });
+
+    const { container } = await renderDiffReviewsPage();
+    await submitForm(container);
+
+    expect(mocks.createDiffReview).toHaveBeenCalledWith("project-1", {
+      reviewType: "working_tree"
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "diff-reviews"]
+    });
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/projects/$projectId/diff-reviews/$reviewId",
+      params: { projectId: "project-1", reviewId: "created-review" }
+    });
+  });
+
+  it("creates a ref range review with base and head refs", async () => {
+    mocks.listState = {
+      data: [],
+      error: null,
+      isLoading: false
+    };
+    mocks.createDiffReview.mockResolvedValue({
+      ...diffReviewSummary,
+      id: "created-review"
+    });
+
+    const { container } = await renderDiffReviewsPage();
+
+    await changeSelect(container, "Review type", "ref_range");
+    await changeInput(container, "Base ref", "main");
+    await changeInput(container, "Head ref", "feature/local-diff-review");
+    await submitForm(container);
+
+    expect(mocks.createDiffReview).toHaveBeenCalledWith("project-1", {
+      reviewType: "ref_range",
+      baseRef: "main",
+      headRef: "feature/local-diff-review"
+    });
   });
 });
 
@@ -194,6 +282,40 @@ describe("DiffReviewDetailPage", () => {
     expect(html).toContain("Mark accepted");
     expect(html).toContain("Needs follow-up");
     expect(html).toContain("Supersede");
+  });
+
+  it("updates ready review statuses and invalidates review queries", async () => {
+    mocks.detailState = {
+      data: diffReviewDetail,
+      error: null,
+      isLoading: false
+    };
+    mocks.updateDiffReviewStatus.mockResolvedValue({
+      ...diffReviewDetail,
+      status: "accepted"
+    });
+
+    const { container } = await renderDiffReviewDetailPage();
+
+    await clickButton(container, "Mark accepted");
+    expect(mocks.updateDiffReviewStatus).toHaveBeenLastCalledWith("project-1", "review-1", {
+      status: "accepted"
+    });
+    expectReviewInvalidations();
+
+    mocks.invalidateQueries.mockClear();
+    await clickButton(container, "Needs follow-up");
+    expect(mocks.updateDiffReviewStatus).toHaveBeenLastCalledWith("project-1", "review-1", {
+      status: "needs_followup"
+    });
+    expectReviewInvalidations();
+
+    mocks.invalidateQueries.mockClear();
+    await clickButton(container, "Supersede");
+    expect(mocks.updateDiffReviewStatus).toHaveBeenLastCalledWith("project-1", "review-1", {
+      status: "superseded"
+    });
+    expectReviewInvalidations();
   });
 });
 
@@ -279,11 +401,82 @@ async function renderDiffReviewsPage() {
   return { container };
 }
 
+async function renderDiffReviewDetailPage() {
+  const container = document.createElement("div");
+  document.body.append(container);
+  containers.push(container);
+  const root = createRoot(container);
+  roots.push(root);
+
+  await act(async () => {
+    root.render(<DiffReviewDetailPage projectId="project-1" reviewId="review-1" />);
+  });
+
+  return { container };
+}
+
+async function submitForm(container: HTMLElement) {
+  const form = container.querySelector("form");
+  if (!form) {
+    throw new Error("Missing diff review form");
+  }
+
+  await act(async () => {
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flushPromises();
+  });
+}
+
+async function changeInput(container: HTMLElement, label: string, value: string) {
+  const target = labelledControl<HTMLInputElement>(container, label, "input");
+  await act(async () => {
+    target.value = value;
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+  });
+}
+
 async function changeSelect(container: HTMLElement, label: string, value: string) {
   const target = labelledControl<HTMLSelectElement>(container, label, "select");
   await act(async () => {
     target.value = value;
     target.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+async function clickButton(container: HTMLElement, text: string) {
+  const button = [...container.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent === text
+  );
+  if (!button) {
+    throw new Error(`Missing button ${text}`);
+  }
+
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+}
+
+async function flushPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof value.then === "function"
+  );
+}
+
+function expectReviewInvalidations() {
+  expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+    queryKey: ["projects", "project-1", "diff-reviews"]
+  });
+  expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+    queryKey: ["projects", "project-1", "diff-reviews", "review-1"]
   });
 }
 
