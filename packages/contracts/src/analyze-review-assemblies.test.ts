@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyzeReviewAcceptResponseSchema,
+  analyzeReviewAttachEvidenceRequestSchema,
   analyzeReviewAssemblySchema,
+  analyzeReviewCreateAssemblyRequestSchema,
   analyzeReviewListResponseSchema,
+  analyzeReviewUpdateAssemblyRequestSchema,
   analyzeReviewValidationSeveritySchema
 } from "./analyze-review-assemblies.js";
 
@@ -119,5 +122,52 @@ describe("analyze review assembly contracts", () => {
     });
 
     expect(response.failures[0]?.messages[0]?.code).toBe("fact_missing_evidence");
+  });
+
+  it("rejects attach evidence requests with invalid line ranges", () => {
+    expect(() =>
+      analyzeReviewAttachEvidenceRequestSchema.parse({
+        proposalId: "44444444-4444-4444-8444-444444444444",
+        sourceFilePath: "apps/web/src/routes/analyze-run-review.tsx",
+        startLine: 20,
+        endLine: 10,
+        provenance: "user"
+      })
+    ).toThrow();
+  });
+
+  it("rejects empty create assembly requests", () => {
+    expect(() => analyzeReviewCreateAssemblyRequestSchema.parse({})).toThrow();
+  });
+
+  it("accepts proposal-backed create assembly requests", () => {
+    const request = analyzeReviewCreateAssemblyRequestSchema.parse({
+      proposalIds: ["44444444-4444-4444-8444-444444444444"]
+    });
+
+    expect(request.proposalIds).toHaveLength(1);
+  });
+
+  it("accepts manual create assembly requests with identity fields", () => {
+    const request = analyzeReviewCreateAssemblyRequestSchema.parse({
+      title: "Review drafts",
+      entityType: "use_case",
+      entityId: "use-case.review-drafts",
+      filePath: "use-cases/review-drafts.md"
+    });
+
+    expect(request.entityId).toBe("use-case.review-drafts");
+  });
+
+  it("rejects accepted status in update assembly requests", () => {
+    expect(() =>
+      analyzeReviewUpdateAssemblyRequestSchema.parse({ status: "accepted" })
+    ).toThrow();
+  });
+
+  it("accepts discarded status in update assembly requests", () => {
+    const request = analyzeReviewUpdateAssemblyRequestSchema.parse({ status: "discarded" });
+
+    expect(request.status).toBe("discarded");
   });
 });

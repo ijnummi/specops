@@ -26,6 +26,14 @@ export const analyzeReviewEntityTypeSchema = z.enum([
   "use_case"
 ]);
 
+const validLineRange = (value: { startLine: number | null; endLine: number | null }) =>
+  value.startLine === null || value.endLine === null || value.endLine >= value.startLine;
+
+const validLineRangeRefinement = {
+  message: "endLine must be greater than or equal to startLine",
+  path: ["endLine"]
+};
+
 export const analyzeReviewInputSchema = z.object({
   proposalId: z.string().uuid(),
   role: analyzeReviewInputRoleSchema.optional(),
@@ -51,14 +59,8 @@ export const analyzeReviewEvidenceSchema = z
     confidence: z.number().min(0).max(1).nullable()
   })
   .refine(
-    (value) =>
-      value.startLine === null ||
-      value.endLine === null ||
-      value.endLine >= value.startLine,
-    {
-      message: "endLine must be greater than or equal to startLine",
-      path: ["endLine"]
-    }
+    validLineRange,
+    validLineRangeRefinement
   );
 
 export const analyzeReviewClaimSchema = z.object({
@@ -126,14 +128,29 @@ export const analyzeReviewListResponseSchema = z.object({
   counts: analyzeReviewCountsSchema
 });
 
-export const analyzeReviewCreateAssemblyRequestSchema = z.object({
-  proposalIds: z.array(z.string().uuid()).default([]),
-  title: z.string().min(1).optional(),
-  entityType: analyzeReviewEntityTypeSchema.optional(),
-  entityId: z.string().min(1).optional(),
-  filePath: z.string().min(1).optional(),
-  summary: z.string().optional()
-});
+export const analyzeReviewCreateAssemblyRequestSchema = z
+  .object({
+    proposalIds: z.array(z.string().uuid()).default([]),
+    title: z.string().min(1).optional(),
+    entityType: analyzeReviewEntityTypeSchema.optional(),
+    entityId: z.string().min(1).optional(),
+    filePath: z.string().min(1).optional(),
+    summary: z.string().optional()
+  })
+  .refine(
+    (value) =>
+      value.proposalIds.length > 0 ||
+      (value.title !== undefined &&
+        value.entityType !== undefined &&
+        value.entityId !== undefined &&
+        value.filePath !== undefined),
+    {
+      message:
+        "Expected proposalIds or title, entityType, entityId, and filePath"
+    }
+  );
+
+const analyzeReviewUpdateAssemblyStatusSchema = z.literal("discarded");
 
 export const analyzeReviewUpdateAssemblyRequestSchema = z
   .object({
@@ -142,7 +159,7 @@ export const analyzeReviewUpdateAssemblyRequestSchema = z
     entityId: z.string().min(1).optional(),
     filePath: z.string().min(1).optional(),
     summary: z.string().optional(),
-    status: analyzeReviewAssemblyStatusSchema.optional()
+    status: analyzeReviewUpdateAssemblyStatusSchema.optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Expected at least one assembly field"
@@ -170,15 +187,20 @@ export const analyzeReviewUpdateClaimRequestSchema = z
     message: "Expected at least one claim field"
   });
 
-export const analyzeReviewAttachEvidenceRequestSchema = z.object({
-  proposalId: z.string().uuid(),
-  sourceFilePath: z.string().min(1),
-  symbolName: z.string().min(1).nullable().default(null),
-  startLine: z.number().int().min(1).nullable().default(null),
-  endLine: z.number().int().min(1).nullable().default(null),
-  provenance: analyzeReviewEvidenceProvenanceSchema,
-  confidence: z.number().min(0).max(1).nullable().default(null)
-});
+export const analyzeReviewAttachEvidenceRequestSchema = z
+  .object({
+    proposalId: z.string().uuid(),
+    sourceFilePath: z.string().min(1),
+    symbolName: z.string().min(1).nullable().default(null),
+    startLine: z.number().int().min(1).nullable().default(null),
+    endLine: z.number().int().min(1).nullable().default(null),
+    provenance: analyzeReviewEvidenceProvenanceSchema,
+    confidence: z.number().min(0).max(1).nullable().default(null)
+  })
+  .refine(
+    validLineRange,
+    validLineRangeRefinement
+  );
 
 export const analyzeReviewAcceptRequestSchema = z.object({
   assemblyIds: z.array(z.string().uuid()).nonempty()
