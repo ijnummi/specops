@@ -101,6 +101,14 @@ describe("initial migration", () => {
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_assembly_inputs");
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claims");
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence");
+    expect(migration).toContain("CONSTRAINT ai_proposals_id_project_id_unique UNIQUE (id, project_id)");
+    expect(migration).toContain("CONSTRAINT analyze_runs_id_project_id_unique UNIQUE (id, project_id)");
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_assemblies_id_project_id_unique UNIQUE (id, project_id)",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_claims_id_project_id_unique UNIQUE (id, project_id)",
+    );
     expect(migration).toContain(
       [
         "CREATE TABLE IF NOT EXISTS analyze_review_assemblies (",
@@ -117,7 +125,7 @@ describe("initial migration", () => {
     expect(migration).toContain("analyze_review_claim_evidence_claim_idx");
     expect(migration).toContain("analyze_review_claim_evidence_proposal_idx");
     expect(migration).toContain(
-      "FOREIGN KEY (analyze_run_id) REFERENCES analyze_runs(id) ON DELETE CASCADE",
+      "CONSTRAINT analyze_review_assemblies_run_project_fk FOREIGN KEY (analyze_run_id, project_id) REFERENCES analyze_runs(id, project_id) ON DELETE CASCADE",
     );
     expect(migration).toContain(
       "assembly_id uuid NOT NULL REFERENCES analyze_review_assemblies(id) ON DELETE CASCADE",
@@ -126,7 +134,23 @@ describe("initial migration", () => {
       "claim_id uuid NOT NULL REFERENCES analyze_review_claims(id) ON DELETE CASCADE",
     );
     expect(
-      migration.match(/FOREIGN KEY \(proposal_id\) REFERENCES ai_proposals\(id\) ON DELETE CASCADE/g),
+      migration.match(/proposal_id uuid NOT NULL REFERENCES ai_proposals\(id\) ON DELETE CASCADE/g),
     ).toHaveLength(2);
+    expect(migration).toContain("project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE");
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_assembly_inputs_assembly_project_fk FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_assembly_inputs_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_claims_assembly_project_fk FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_claim_evidence_claim_project_fk FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_claim_evidence_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE",
+    );
   });
 });

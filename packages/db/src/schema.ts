@@ -315,6 +315,7 @@ export const aiProposals = pgTable(
   (table) => ({
     projectIdx: index("ai_proposals_project_id_idx").on(table.projectId),
     projectStatusIdx: index("ai_proposals_project_status_idx").on(table.projectId, table.status),
+    idProjectUnique: unique("ai_proposals_id_project_id_unique").on(table.id, table.projectId),
   }),
 );
 
@@ -346,6 +347,7 @@ export const analyzeRuns = pgTable(
       table.createdAt,
     ),
     indexRunIdx: index("analyze_runs_index_run_id_idx").on(table.indexRunId),
+    idProjectUnique: unique("analyze_runs_id_project_id_unique").on(table.id, table.projectId),
     oneActivePerProjectIdx: uniqueIndex("analyze_runs_one_active_per_project_idx")
       .on(table.projectId)
       .where(sql`${table.status} in ('queued', 'running')`),
@@ -381,6 +383,15 @@ export const analyzeReviewAssemblies = pgTable(
       table.analyzeRunId,
       table.status,
     ),
+    idProjectUnique: unique("analyze_review_assemblies_id_project_id_unique").on(
+      table.id,
+      table.projectId,
+    ),
+    analyzeRunProjectFk: foreignKey({
+      name: "analyze_review_assemblies_run_project_fk",
+      columns: [table.analyzeRunId, table.projectId],
+      foreignColumns: [analyzeRuns.id, analyzeRuns.projectId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -393,6 +404,9 @@ export const analyzeReviewAssemblyInputs = pgTable(
     proposalId: uuid("proposal_id")
       .notNull()
       .references(() => aiProposals.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     role: text("role").notNull(),
     createdAt: createdAt(),
   },
@@ -400,6 +414,16 @@ export const analyzeReviewAssemblyInputs = pgTable(
     pk: primaryKey({ columns: [table.assemblyId, table.proposalId] }),
     assemblyIdx: index("analyze_review_assembly_inputs_assembly_idx").on(table.assemblyId),
     proposalIdx: index("analyze_review_assembly_inputs_proposal_idx").on(table.proposalId),
+    assemblyProjectFk: foreignKey({
+      name: "analyze_review_assembly_inputs_assembly_project_fk",
+      columns: [table.assemblyId, table.projectId],
+      foreignColumns: [analyzeReviewAssemblies.id, analyzeReviewAssemblies.projectId],
+    }).onDelete("cascade"),
+    proposalProjectFk: foreignKey({
+      name: "analyze_review_assembly_inputs_proposal_project_fk",
+      columns: [table.proposalId, table.projectId],
+      foreignColumns: [aiProposals.id, aiProposals.projectId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -410,6 +434,9 @@ export const analyzeReviewClaims = pgTable(
     assemblyId: uuid("assembly_id")
       .notNull()
       .references(() => analyzeReviewAssemblies.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     text: text("text").notNull(),
     kind: text("kind").notNull(),
     confidence: doublePrecision("confidence"),
@@ -419,6 +446,15 @@ export const analyzeReviewClaims = pgTable(
   },
   (table) => ({
     assemblyIdx: index("analyze_review_claims_assembly_idx").on(table.assemblyId),
+    idProjectUnique: unique("analyze_review_claims_id_project_id_unique").on(
+      table.id,
+      table.projectId,
+    ),
+    assemblyProjectFk: foreignKey({
+      name: "analyze_review_claims_assembly_project_fk",
+      columns: [table.assemblyId, table.projectId],
+      foreignColumns: [analyzeReviewAssemblies.id, analyzeReviewAssemblies.projectId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -432,6 +468,9 @@ export const analyzeReviewClaimEvidence = pgTable(
     proposalId: uuid("proposal_id")
       .notNull()
       .references(() => aiProposals.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
     sourceFilePath: text("source_file_path").notNull(),
     symbolName: text("symbol_name"),
     startLine: integer("start_line"),
@@ -443,6 +482,16 @@ export const analyzeReviewClaimEvidence = pgTable(
   (table) => ({
     claimIdx: index("analyze_review_claim_evidence_claim_idx").on(table.claimId),
     proposalIdx: index("analyze_review_claim_evidence_proposal_idx").on(table.proposalId),
+    claimProjectFk: foreignKey({
+      name: "analyze_review_claim_evidence_claim_project_fk",
+      columns: [table.claimId, table.projectId],
+      foreignColumns: [analyzeReviewClaims.id, analyzeReviewClaims.projectId],
+    }).onDelete("cascade"),
+    proposalProjectFk: foreignKey({
+      name: "analyze_review_claim_evidence_proposal_project_fk",
+      columns: [table.proposalId, table.projectId],
+      foreignColumns: [aiProposals.id, aiProposals.projectId],
+    }).onDelete("cascade"),
   }),
 );
 

@@ -314,11 +314,25 @@ CREATE TABLE IF NOT EXISTS ai_proposals (
   confidence double precision,
   status text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  reviewed_at timestamptz
+  reviewed_at timestamptz,
+  CONSTRAINT ai_proposals_id_project_id_unique UNIQUE (id, project_id)
 );
 
 CREATE INDEX IF NOT EXISTS ai_proposals_project_id_idx ON ai_proposals(project_id);
 CREATE INDEX IF NOT EXISTS ai_proposals_project_status_idx ON ai_proposals(project_id, status);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'ai_proposals_id_project_id_unique'
+      AND conrelid = 'ai_proposals'::regclass
+  ) THEN
+    ALTER TABLE ai_proposals
+      ADD CONSTRAINT ai_proposals_id_project_id_unique UNIQUE (id, project_id);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS agent_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -377,7 +391,8 @@ CREATE TABLE IF NOT EXISTS analyze_runs (
   error_message text,
   created_at timestamptz NOT NULL DEFAULT now(),
   started_at timestamptz,
-  finished_at timestamptz
+  finished_at timestamptz,
+  CONSTRAINT analyze_runs_id_project_id_unique UNIQUE (id, project_id)
 );
 
 ALTER TABLE analyze_runs ADD COLUMN IF NOT EXISTS proposal_ids_json jsonb NOT NULL DEFAULT '[]'::jsonb;
@@ -387,6 +402,19 @@ CREATE INDEX IF NOT EXISTS analyze_runs_project_status_idx ON analyze_runs(proje
 CREATE INDEX IF NOT EXISTS analyze_runs_project_created_at_idx ON analyze_runs(project_id, created_at);
 CREATE INDEX IF NOT EXISTS analyze_runs_index_run_id_idx ON analyze_runs(index_run_id);
 CREATE UNIQUE INDEX IF NOT EXISTS analyze_runs_one_active_per_project_idx ON analyze_runs(project_id) WHERE status IN ('queued', 'running');
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_runs_id_project_id_unique'
+      AND conrelid = 'analyze_runs'::regclass
+  ) THEN
+    ALTER TABLE analyze_runs
+      ADD CONSTRAINT analyze_runs_id_project_id_unique UNIQUE (id, project_id);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS analyze_review_assemblies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -403,42 +431,152 @@ CREATE TABLE IF NOT EXISTS analyze_review_assemblies (
   updated_at timestamptz NOT NULL DEFAULT now(),
   accepted_at timestamptz,
   discarded_at timestamptz,
-  FOREIGN KEY (analyze_run_id) REFERENCES analyze_runs(id) ON DELETE CASCADE
+  FOREIGN KEY (analyze_run_id) REFERENCES analyze_runs(id) ON DELETE CASCADE,
+  CONSTRAINT analyze_review_assemblies_id_project_id_unique UNIQUE (id, project_id),
+  CONSTRAINT analyze_review_assemblies_run_project_fk FOREIGN KEY (analyze_run_id, project_id) REFERENCES analyze_runs(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS analyze_review_assemblies_project_idx ON analyze_review_assemblies(project_id);
 CREATE INDEX IF NOT EXISTS analyze_review_assemblies_run_idx ON analyze_review_assemblies(analyze_run_id);
 CREATE INDEX IF NOT EXISTS analyze_review_assemblies_run_status_idx ON analyze_review_assemblies(analyze_run_id, status);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_assemblies_id_project_id_unique'
+      AND conrelid = 'analyze_review_assemblies'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_assemblies
+      ADD CONSTRAINT analyze_review_assemblies_id_project_id_unique UNIQUE (id, project_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_assemblies_run_project_fk'
+      AND conrelid = 'analyze_review_assemblies'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_assemblies
+      ADD CONSTRAINT analyze_review_assemblies_run_project_fk
+      FOREIGN KEY (analyze_run_id, project_id) REFERENCES analyze_runs(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS analyze_review_assembly_inputs (
   assembly_id uuid NOT NULL REFERENCES analyze_review_assemblies(id) ON DELETE CASCADE,
-  proposal_id uuid NOT NULL,
+  proposal_id uuid NOT NULL REFERENCES ai_proposals(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   role text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (assembly_id, proposal_id),
-  FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE
+  CONSTRAINT analyze_review_assembly_inputs_assembly_project_fk FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE CASCADE,
+  CONSTRAINT analyze_review_assembly_inputs_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS analyze_review_assembly_inputs_assembly_idx ON analyze_review_assembly_inputs(assembly_id);
 CREATE INDEX IF NOT EXISTS analyze_review_assembly_inputs_proposal_idx ON analyze_review_assembly_inputs(proposal_id);
 
+ALTER TABLE analyze_review_assembly_inputs ADD COLUMN IF NOT EXISTS project_id uuid REFERENCES projects(id) ON DELETE CASCADE;
+
+UPDATE analyze_review_assembly_inputs
+SET project_id = analyze_review_assemblies.project_id
+FROM analyze_review_assemblies
+WHERE analyze_review_assembly_inputs.assembly_id = analyze_review_assemblies.id
+  AND analyze_review_assembly_inputs.project_id IS NULL;
+
+ALTER TABLE analyze_review_assembly_inputs ALTER COLUMN project_id SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_assembly_inputs_assembly_project_fk'
+      AND conrelid = 'analyze_review_assembly_inputs'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_assembly_inputs
+      ADD CONSTRAINT analyze_review_assembly_inputs_assembly_project_fk
+      FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_assembly_inputs_proposal_project_fk'
+      AND conrelid = 'analyze_review_assembly_inputs'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_assembly_inputs
+      ADD CONSTRAINT analyze_review_assembly_inputs_proposal_project_fk
+      FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS analyze_review_claims (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   assembly_id uuid NOT NULL REFERENCES analyze_review_assemblies(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   text text NOT NULL,
   kind text NOT NULL,
   confidence double precision,
   sort_order integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT analyze_review_claims_id_project_id_unique UNIQUE (id, project_id),
+  CONSTRAINT analyze_review_claims_assembly_project_fk FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS analyze_review_claims_assembly_idx ON analyze_review_claims(assembly_id);
 
+ALTER TABLE analyze_review_claims ADD COLUMN IF NOT EXISTS project_id uuid REFERENCES projects(id) ON DELETE CASCADE;
+
+UPDATE analyze_review_claims
+SET project_id = analyze_review_assemblies.project_id
+FROM analyze_review_assemblies
+WHERE analyze_review_claims.assembly_id = analyze_review_assemblies.id
+  AND analyze_review_claims.project_id IS NULL;
+
+ALTER TABLE analyze_review_claims ALTER COLUMN project_id SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_claims_id_project_id_unique'
+      AND conrelid = 'analyze_review_claims'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_claims
+      ADD CONSTRAINT analyze_review_claims_id_project_id_unique UNIQUE (id, project_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_claims_assembly_project_fk'
+      AND conrelid = 'analyze_review_claims'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_claims
+      ADD CONSTRAINT analyze_review_claims_assembly_project_fk
+      FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   claim_id uuid NOT NULL REFERENCES analyze_review_claims(id) ON DELETE CASCADE,
-  proposal_id uuid NOT NULL,
+  proposal_id uuid NOT NULL REFERENCES ai_proposals(id) ON DELETE CASCADE,
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   source_file_path text NOT NULL,
   symbol_name text,
   start_line integer,
@@ -446,8 +584,47 @@ CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence (
   provenance text NOT NULL,
   confidence double precision,
   created_at timestamptz NOT NULL DEFAULT now(),
-  FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE
+  CONSTRAINT analyze_review_claim_evidence_claim_project_fk FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id) ON DELETE CASCADE,
+  CONSTRAINT analyze_review_claim_evidence_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS analyze_review_claim_evidence_claim_idx ON analyze_review_claim_evidence(claim_id);
 CREATE INDEX IF NOT EXISTS analyze_review_claim_evidence_proposal_idx ON analyze_review_claim_evidence(proposal_id);
+
+ALTER TABLE analyze_review_claim_evidence ADD COLUMN IF NOT EXISTS project_id uuid REFERENCES projects(id) ON DELETE CASCADE;
+
+UPDATE analyze_review_claim_evidence
+SET project_id = analyze_review_claims.project_id
+FROM analyze_review_claims
+WHERE analyze_review_claim_evidence.claim_id = analyze_review_claims.id
+  AND analyze_review_claim_evidence.project_id IS NULL;
+
+ALTER TABLE analyze_review_claim_evidence ALTER COLUMN project_id SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_claim_evidence_claim_project_fk'
+      AND conrelid = 'analyze_review_claim_evidence'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_claim_evidence
+      ADD CONSTRAINT analyze_review_claim_evidence_claim_project_fk
+      FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_claim_evidence_proposal_project_fk'
+      AND conrelid = 'analyze_review_claim_evidence'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_claim_evidence
+      ADD CONSTRAINT analyze_review_claim_evidence_proposal_project_fk
+      FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE;
+  END IF;
+END $$;

@@ -2,6 +2,8 @@ import type { InferSelectModel } from "drizzle-orm";
 import type {
   aiProposals,
   analyzeReviewAssemblies,
+  analyzeReviewAssemblyInputs,
+  analyzeReviewClaimEvidence,
   analyzeReviewClaims,
   analyzeRuns,
   indexRuns,
@@ -22,7 +24,9 @@ type SourceSpecLink = InferSelectModel<typeof sourceSpecLinks>;
 type IndexRun = InferSelectModel<typeof indexRuns>;
 type AnalyzeRun = InferSelectModel<typeof analyzeRuns>;
 type AnalyzeReviewAssembly = InferSelectModel<typeof analyzeReviewAssemblies>;
+type AnalyzeReviewAssemblyInput = InferSelectModel<typeof analyzeReviewAssemblyInputs>;
 type AnalyzeReviewClaim = InferSelectModel<typeof analyzeReviewClaims>;
+type AnalyzeReviewClaimEvidence = InferSelectModel<typeof analyzeReviewClaimEvidence>;
 
 type _SpecLinkConfidenceIsNumberOrNull = Expect<Equal<SpecLink["confidence"], number | null>>;
 type _AiProposalConfidenceIsNumberOrNull = Expect<Equal<AiProposal["confidence"], number | null>>;
@@ -35,6 +39,13 @@ type _AnalyzeReviewAssemblyRenderedMarkdownIsNullable = Expect<
 >;
 type _AnalyzeReviewClaimConfidenceIsNullable = Expect<
   Equal<AnalyzeReviewClaim["confidence"], number | null>
+>;
+type _AnalyzeReviewAssemblyInputProjectIdIsString = Expect<
+  Equal<AnalyzeReviewAssemblyInput["projectId"], string>
+>;
+type _AnalyzeReviewClaimProjectIdIsString = Expect<Equal<AnalyzeReviewClaim["projectId"], string>>;
+type _AnalyzeReviewClaimEvidenceProjectIdIsString = Expect<
+  Equal<AnalyzeReviewClaimEvidence["projectId"], string>
 >;
 
 const _sourceSpecLink = null as unknown as SourceSpecLink;
