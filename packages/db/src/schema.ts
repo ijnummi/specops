@@ -353,3 +353,33 @@ export const agentRuns = pgTable(
     ),
   }),
 );
+
+export const diffReviews = pgTable(
+  "diff_reviews",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    reviewType: text("review_type").notNull(),
+    baseRef: text("base_ref"),
+    headRef: text("head_ref"),
+    baseCommit: text("base_commit"),
+    headCommit: text("head_commit"),
+    changedFilesJson: jsonb("changed_files_json")
+      .notNull()
+      .default(sql`'{"specs":[],"source":[],"tests":[],"other":[]}'::jsonb`),
+    reviewSummaryJson: jsonb("review_summary_json").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    projectIdx: index("diff_reviews_project_id_idx").on(table.projectId),
+    projectStatusIdx: index("diff_reviews_project_status_idx").on(table.projectId, table.status),
+    projectCreatedAtIdx: index("diff_reviews_project_created_at_idx").on(
+      table.projectId,
+      table.createdAt,
+    ),
+  }),
+);

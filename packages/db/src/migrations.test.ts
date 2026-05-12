@@ -43,4 +43,26 @@ describe("initial migration", () => {
     expect(migration).toContain("agent_runs_project_id_idx");
     expect(migration).toContain("agent_runs_project_status_idx");
   });
+
+  it("creates diff review storage and lookup indexes", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS diff_reviews");
+    expect(migration).toContain("project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE");
+    expect(migration).toContain("status text NOT NULL");
+    expect(migration).toContain("review_type text NOT NULL");
+    expect(migration).toContain("base_ref text");
+    expect(migration).toContain("head_ref text");
+    expect(migration).toContain("base_commit text");
+    expect(migration).toContain("head_commit text");
+    expect(migration).toContain(
+      "changed_files_json jsonb NOT NULL DEFAULT '{\"specs\":[],\"source\":[],\"tests\":[],\"other\":[]}'::jsonb",
+    );
+    expect(migration).toContain("review_summary_json jsonb NOT NULL DEFAULT '{}'::jsonb");
+    expect(migration).toContain("created_at timestamptz NOT NULL DEFAULT now()");
+    expect(migration).toContain("updated_at timestamptz NOT NULL DEFAULT now()");
+    expect(migration).toContain("diff_reviews_project_id_idx");
+    expect(migration).toContain("diff_reviews_project_status_idx");
+    expect(migration).toContain("diff_reviews_project_created_at_idx");
+  });
 });

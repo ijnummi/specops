@@ -343,3 +343,22 @@ CREATE INDEX IF NOT EXISTS agent_runs_project_id_idx ON agent_runs(project_id);
 CREATE INDEX IF NOT EXISTS agent_runs_project_status_idx ON agent_runs(project_id, status);
 CREATE INDEX IF NOT EXISTS agent_runs_project_task_entity_id_idx ON agent_runs(project_id, task_entity_id);
 CREATE INDEX IF NOT EXISTS agent_runs_project_started_at_idx ON agent_runs(project_id, started_at);
+
+CREATE TABLE IF NOT EXISTS diff_reviews (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  status text NOT NULL,
+  review_type text NOT NULL,
+  base_ref text,
+  head_ref text,
+  base_commit text,
+  head_commit text,
+  changed_files_json jsonb NOT NULL DEFAULT '{"specs":[],"source":[],"tests":[],"other":[]}'::jsonb,
+  review_summary_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS diff_reviews_project_id_idx ON diff_reviews(project_id);
+CREATE INDEX IF NOT EXISTS diff_reviews_project_status_idx ON diff_reviews(project_id, status);
+CREATE INDEX IF NOT EXISTS diff_reviews_project_created_at_idx ON diff_reviews(project_id, created_at);
