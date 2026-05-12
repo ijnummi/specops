@@ -328,6 +328,7 @@ export const analyzeRuns = pgTable(
     currentStep: text("current_step"),
     stepsJson: jsonb("steps_json").notNull().default(sql`'[]'::jsonb`),
     selectionJson: jsonb("selection_json"),
+    proposalIdsJson: jsonb("proposal_ids_json").notNull().default(sql`'[]'::jsonb`),
     sourceProposalCount: integer("source_proposal_count").notNull().default(0),
     aiProposalCount: integer("ai_proposal_count").notNull().default(0),
     indexRunId: uuid("index_run_id").references(() => indexRuns.id, { onDelete: "set null" }),

@@ -137,6 +137,7 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
   async function executeAnalyzeRun(projectId: string, runId: string): Promise<void> {
     let steps = await loadRunSteps(projectId, runId);
     let currentStep: AnalyzeRunStepName | null = null;
+    let proposalIds = readProposalIds((await getAnalyzeRunRow(projectId, runId)).proposalIdsJson);
 
     try {
       await db
@@ -167,7 +168,14 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
       await runStep("source_proposals", async () => {
         try {
           const proposals = await createProposalService(db).generateSourceImportProposals(projectId);
-          await updateRun({ sourceProposalCount: proposals.length });
+          proposalIds = appendProposalIds(
+            proposalIds,
+            proposals.map((proposal) => proposal.id)
+          );
+          await updateRun({
+            sourceProposalCount: proposals.length,
+            proposalIdsJson: proposalIds
+          });
           return {
             status: "succeeded",
             counts: { sourceProposalCount: proposals.length }
@@ -221,7 +229,14 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
             temperature: aiPrefillDefaults.temperature
           });
 
-          await updateRun({ aiProposalCount: result.proposals.length });
+          proposalIds = appendProposalIds(
+            proposalIds,
+            result.proposals.map((proposal) => proposal.id)
+          );
+          await updateRun({
+            aiProposalCount: result.proposals.length,
+            proposalIdsJson: proposalIds
+          });
           return {
             status: "succeeded",
             counts: {
@@ -459,6 +474,7 @@ function mapAnalyzeRun(row: AnalyzeRunRow): AnalyzeRunDetailDto {
     currentStep: row.currentStep,
     steps: readSteps(row.stepsJson),
     selection: readSelection(row.selectionJson),
+    proposalIds: readProposalIds(row.proposalIdsJson),
     sourceProposalCount: row.sourceProposalCount,
     aiProposalCount: row.aiProposalCount,
     indexRunId: row.indexRunId,
@@ -480,6 +496,14 @@ function readSelection(value: unknown): AnalyzeRunSelectionSummary | null {
   }
 
   return analyzeRunSelectionSummarySchema.parse(value);
+}
+
+function readProposalIds(value: unknown): string[] {
+  return z.array(z.string().uuid()).parse(value);
+}
+
+function appendProposalIds(current: string[], next: string[]): string[] {
+  return [...new Set([...current, ...next])];
 }
 
 function toIso(value: Date | string | null): string | null {

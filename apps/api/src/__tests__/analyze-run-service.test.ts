@@ -87,6 +87,10 @@ describeWithDb("createAnalyzeRunService", () => {
     expect(finished.indexRunId).toEqual(expect.any(String));
     expect(finished.sourceProposalCount).toBeGreaterThan(0);
     expect(finished.aiProposalCount).toBe(1);
+    expect(finished.proposalIds).toHaveLength(
+      finished.sourceProposalCount + finished.aiProposalCount
+    );
+    expect(new Set(finished.proposalIds).size).toBe(finished.proposalIds.length);
     expect(finished.selection).toEqual(
       expect.objectContaining({
         selectedPaths: expect.arrayContaining(["src/routes/projects.ts"]),

@@ -10,6 +10,8 @@ import type { AnalyzeRunSelectionCategory } from "./analyze-runs.js";
 const analyzeRunId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
 const indexRunId = "33333333-3333-4333-8333-333333333333";
+const sourceProposalId = "44444444-4444-4444-8444-444444444444";
+const aiProposalId = "55555555-5555-4555-8555-555555555555";
 
 const categoryTypecheck: AnalyzeRunSelectionCategory = {
   category: "entrypoints_routes",
@@ -42,6 +44,7 @@ describe("analyze run contracts", () => {
         categories: [{ category: "entrypoints_routes", count: 1 }],
         diagnostics: [{ level: "info", message: "Partial AI coverage." }],
       },
+      proposalIds: [sourceProposalId, aiProposalId],
       sourceProposalCount: 2,
       aiProposalCount: 1,
       indexRunId,
@@ -54,6 +57,7 @@ describe("analyze run contracts", () => {
     expect(parsed.status).toBe("running");
     expect(parsed.steps[0]?.counts.sourceFileCount).toBe(4);
     expect(parsed.selection?.skippedHighSignalFileCount).toBe(2);
+    expect(parsed.proposalIds).toEqual([sourceProposalId, aiProposalId]);
   });
 
   it("allows empty selection diagnostics", () => {
@@ -101,6 +105,7 @@ describe("analyze run contracts", () => {
         currentStep: "index",
         steps: [],
         selection: null,
+        proposalIds: [],
         sourceProposalCount: 0,
         aiProposalCount: 0,
         indexRunId,
@@ -136,6 +141,7 @@ describe("analyze run contracts", () => {
           },
         ],
         selection: null,
+        proposalIds: [],
         sourceProposalCount: 0,
         aiProposalCount: 0,
         indexRunId: null,
@@ -156,6 +162,7 @@ describe("analyze run contracts", () => {
         currentStep: "index",
         steps: [],
         selection: null,
+        proposalIds: [],
         sourceProposalCount: 0,
         aiProposalCount: 0,
         indexRunId: null,
@@ -209,12 +216,34 @@ describe("analyze run contracts", () => {
           },
         ],
         selection: null,
+        proposalIds: [],
         sourceProposalCount: 0,
         aiProposalCount: 0,
         indexRunId: null,
         errorMessage: null,
         createdAt: "2026-05-12T09:59:59.000Z",
         startedAt: "2026-05-12T10:00:00.000Z",
+        finishedAt: null,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects malformed proposal IDs", () => {
+    expect(() =>
+      analyzeRunDetailSchema.parse({
+        id: analyzeRunId,
+        projectId,
+        status: "running",
+        currentStep: "index",
+        steps: [],
+        selection: null,
+        proposalIds: ["proposal-1"],
+        sourceProposalCount: 0,
+        aiProposalCount: 0,
+        indexRunId: null,
+        errorMessage: null,
+        createdAt: "2026-05-12T09:59:59.000Z",
+        startedAt: null,
         finishedAt: null,
       }),
     ).toThrow();

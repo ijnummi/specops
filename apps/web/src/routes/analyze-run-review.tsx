@@ -14,6 +14,7 @@ import type {
 
 import {
   acceptProposals,
+  analyzeRunQuery,
   patchProposal,
   proposalQuery,
   proposalsQuery,
@@ -55,10 +56,12 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     () => ({})
   );
 
+  const run = useQuery(analyzeRunQuery(projectId, runId));
   const sourceProposals = useQuery(
     proposalsQuery(projectId, { proposalType: "source_spec_entity" })
   );
   const aiProposals = useQuery(proposalsQuery(projectId, { proposalType: "ai_spec_entity" }));
+  const runProposalIds = useMemo(() => new Set(run.data?.proposalIds ?? []), [run.data]);
   const allProposals = useMemo(
     () =>
       [...(sourceProposals.data ?? []), ...(aiProposals.data ?? [])].sort(
@@ -66,20 +69,24 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       ),
     [aiProposals.data, sourceProposals.data]
   );
-  const proposalsError = sourceProposals.error ?? aiProposals.error;
-  const proposalsLoading = sourceProposals.isLoading || aiProposals.isLoading;
+  const runProposals = useMemo(
+    () => allProposals.filter((proposal) => runProposalIds.has(proposal.id)),
+    [allProposals, runProposalIds]
+  );
+  const proposalsError = run.error ?? sourceProposals.error ?? aiProposals.error;
+  const proposalsLoading = run.isLoading || sourceProposals.isLoading || aiProposals.isLoading;
   const visibleProposals = useMemo(
     () =>
-      allProposals.filter(
+      runProposals.filter(
         (proposal) =>
           matchesStatusFilter(proposal.status, statusFilter) &&
           (typeFilter === "all" || proposal.proposalType === typeFilter)
       ),
-    [allProposals, statusFilter, typeFilter]
+    [runProposals, statusFilter, typeFilter]
   );
   const allProposalIds = useMemo(
-    () => new Set(allProposals.map((proposal) => proposal.id)),
-    [allProposals]
+    () => new Set(runProposals.map((proposal) => proposal.id)),
+    [runProposals]
   );
   const visibleProposalIds = useMemo(
     () => new Set(visibleProposals.map((proposal) => proposal.id)),
@@ -88,33 +95,33 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
   const pendingProposalIds = useMemo(
     () =>
       new Set(
-        allProposals
+        runProposals
           .filter((proposal) => proposal.status === "pending")
           .map((proposal) => proposal.id)
       ),
-    [allProposals]
+    [runProposals]
   );
   const proposalCounts = useMemo(
     () => ({
-      pending: allProposals.filter((proposal) => proposal.status === "pending").length,
-      accepted: allProposals.filter((proposal) =>
+      pending: runProposals.filter((proposal) => proposal.status === "pending").length,
+      accepted: runProposals.filter((proposal) =>
         matchesStatusFilter(proposal.status, "accepted")
       ).length,
-      rejected: allProposals.filter((proposal) => proposal.status === "rejected").length,
-      obsolete: allProposals.filter((proposal) => proposal.status === "obsolete").length
+      rejected: runProposals.filter((proposal) => proposal.status === "rejected").length,
+      obsolete: runProposals.filter((proposal) => proposal.status === "obsolete").length
     }),
-    [allProposals]
+    [runProposals]
   );
   const typeCounts = useMemo(
     () => ({
-      all: allProposals.length,
-      source_spec_entity: allProposals.filter(
+      all: runProposals.length,
+      source_spec_entity: runProposals.filter(
         (proposal) => proposal.proposalType === "source_spec_entity"
       ).length,
-      ai_spec_entity: allProposals.filter((proposal) => proposal.proposalType === "ai_spec_entity")
+      ai_spec_entity: runProposals.filter((proposal) => proposal.proposalType === "ai_spec_entity")
         .length
     }),
-    [allProposals]
+    [runProposals]
   );
   const effectiveSelectedProposalId =
     selectedProposalId && visibleProposalIds.has(selectedProposalId)
@@ -163,16 +170,16 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
     });
   }, [allProposalIds, pendingProposalIds]);
 
-  const invalidateAnalyzeReview = async (proposalId?: string | null) => {
+  const invalidateAnalyzeReview = async (proposalIds: string[] = []) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectOverview(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectHealth(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.proposalsRoot(projectId) }),
-      proposalId
-        ? queryClient.invalidateQueries({ queryKey: queryKeys.proposal(projectId, proposalId) })
-        : Promise.resolve(),
+      ...proposalIds.map((proposalId) =>
+        queryClient.invalidateQueries({ queryKey: queryKeys.proposal(projectId, proposalId) })
+      ),
       queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) })
@@ -180,13 +187,12 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
   };
 
   const acceptMutation = useMutation({
-    mutationFn: () => acceptProposals(projectId, { proposalIds: [...checkedProposalIds] }),
-    onSuccess: async () => {
-      const proposalId = effectiveSelectedProposalId;
+    mutationFn: (proposalIds: string[]) => acceptProposals(projectId, { proposalIds }),
+    onSuccess: async (_accepted, proposalIds) => {
       setSelectedProposalId(null);
       setCheckedProposalIds(new Set());
       setMarkdownDrafts({});
-      await invalidateAnalyzeReview(proposalId);
+      await invalidateAnalyzeReview(proposalIds);
     }
   });
   const rejectMutation = useMutation({
@@ -202,7 +208,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
         const { [proposalId]: _removed, ...next } = current;
         return next;
       });
-      await invalidateAnalyzeReview(proposalId);
+      await invalidateAnalyzeReview([proposalId]);
     }
   });
   const saveMutation = useMutation({
@@ -216,7 +222,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
           savedMarkdown: updated.payload.markdown
         }
       }));
-      await invalidateAnalyzeReview(updated.id);
+      await invalidateAnalyzeReview([updated.id]);
     }
   });
 
@@ -282,20 +288,19 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
               if (isAcceptDisabled) {
                 return;
               }
-              acceptMutation.mutate();
+              acceptMutation.mutate([...checkedProposalIds]);
             }}
           >
             <Check className="h-4 w-4" aria-hidden="true" />
             Accept selected
           </button>
         </div>
-        <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Proposal status">
+        <div className="flex flex-wrap items-center gap-1" aria-label="Proposal status filters">
           {proposalStatusFilters.map((filter) => (
             <button
               key={filter}
               type="button"
-              role="tab"
-              aria-selected={statusFilter === filter}
+              aria-pressed={statusFilter === filter}
               disabled={filter !== statusFilter && isFilterDisabled}
               className={filterButtonClass(statusFilter === filter)}
               onClick={() => {
@@ -310,13 +315,12 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Proposal type">
+        <div className="flex flex-wrap items-center gap-1" aria-label="Proposal type filters">
           {proposalTypeFilters.map((filter) => (
             <button
               key={filter}
               type="button"
-              role="tab"
-              aria-selected={typeFilter === filter}
+              aria-pressed={typeFilter === filter}
               disabled={filter !== typeFilter && isFilterDisabled}
               className={filterButtonClass(typeFilter === filter)}
               onClick={() => {
@@ -345,6 +349,10 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
             <div className="p-3 text-sm text-red-700">{proposalsError.message}</div>
           ) : proposalsLoading ? (
             <p className="p-3 text-sm text-slate-500">Loading proposals...</p>
+          ) : (run.data?.proposalIds.length ?? 0) === 0 ? (
+            <p className="p-3 text-sm text-slate-500">
+              This analyze run did not generate reviewable proposals.
+            </p>
           ) : visibleProposals.length === 0 ? (
             <p className="p-3 text-sm text-slate-500">No matching proposals.</p>
           ) : (

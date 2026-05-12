@@ -370,6 +370,7 @@ CREATE TABLE IF NOT EXISTS analyze_runs (
   current_step text,
   steps_json jsonb NOT NULL DEFAULT '[]'::jsonb,
   selection_json jsonb,
+  proposal_ids_json jsonb NOT NULL DEFAULT '[]'::jsonb,
   source_proposal_count integer NOT NULL DEFAULT 0,
   ai_proposal_count integer NOT NULL DEFAULT 0,
   index_run_id uuid REFERENCES index_runs(id) ON DELETE SET NULL,
@@ -378,6 +379,8 @@ CREATE TABLE IF NOT EXISTS analyze_runs (
   started_at timestamptz,
   finished_at timestamptz
 );
+
+ALTER TABLE analyze_runs ADD COLUMN IF NOT EXISTS proposal_ids_json jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS analyze_runs_project_id_idx ON analyze_runs(project_id);
 CREATE INDEX IF NOT EXISTS analyze_runs_project_status_idx ON analyze_runs(project_id, status);

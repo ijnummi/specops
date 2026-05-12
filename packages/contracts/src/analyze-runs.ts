@@ -59,6 +59,7 @@ export const analyzeRunDetailSchema = z.object({
   currentStep: analyzeRunStepNameSchema.nullable(),
   steps: z.array(analyzeRunStepSchema),
   selection: analyzeRunSelectionSummarySchema.nullable(),
+  proposalIds: z.array(z.string().uuid()),
   sourceProposalCount: z.number().int().min(0),
   aiProposalCount: z.number().int().min(0),
   indexRunId: z.string().uuid().nullable(),
