@@ -780,6 +780,346 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("creates, lists, reads, and updates a working tree diff review", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'changed'; }\n"
+    );
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "working_tree" }
+    });
+    const created = createResponse.json() as {
+      id: string;
+      status: string;
+      reviewType: string;
+      changedFiles: { specs: string[]; source: string[]; tests: string[]; other: string[] };
+      changedFileCount: number;
+      reviewSummary: {
+        affectedSpecs: Array<{ entityId: string; reason: string }>;
+        relatedTasks: Array<{ entityId: string; reason: string }>;
+        findings: Array<{ kind: string; entityId: string | null; filePath: string | null }>;
+      };
+      findingCounts: { review: number };
+    };
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(created).toMatchObject({
+      status: "ready_for_review",
+      reviewType: "working_tree",
+      changedFiles: {
+        specs: [],
+        source: ["src/review-service.ts"],
+        tests: [],
+        other: []
+      },
+      changedFileCount: 1,
+      reviewSummary: {
+        affectedSpecs: [{ entityId: "uc.review", reason: "linked_source" }],
+        relatedTasks: [{ entityId: "task.review", reason: "generated_from" }]
+      }
+    });
+    expect(created.reviewSummary.findings.map((finding) => finding.kind)).toEqual(
+      expect.arrayContaining([
+        "source_changed_without_spec",
+        "possible_missing_test_change",
+        "related_task_may_be_stale"
+      ])
+    );
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/diff-reviews`
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toEqual([
+      expect.objectContaining({
+        id: created.id,
+        status: "ready_for_review",
+        changedFileCount: 1,
+        findingCounts: expect.objectContaining({ review: expect.any(Number) })
+      })
+    ]);
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/diff-reviews/${created.id}`
+    });
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toMatchObject({
+      id: created.id,
+      changedFiles: created.changedFiles
+    });
+
+    const updateResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/diff-reviews/${created.id}`,
+      payload: { status: "accepted" }
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toMatchObject({ id: created.id, status: "accepted" });
+  });
+
+  it("creates a staged diff review from staged files only", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'staged'; }\n"
+    );
+    await git(project.repoPath, ["add", "src/review-service.ts"]);
+    await writeFile(
+      path.join(project.repoPath, "src", "unlinked-service.ts"),
+      "export function unlinkedService() { return 'unstaged'; }\n"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "staged" }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      changedFiles: {
+        specs: [],
+        source: ["src/review-service.ts"],
+        tests: [],
+        other: []
+      },
+      changedFileCount: 1
+    });
+  });
+
+  it("creates a ref range diff review with resolved commits and changed files", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+    const { stdout: baseStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: project.repoPath
+    });
+    const baseCommit = baseStdout.trim();
+    await writeFile(
+      path.join(project.repoPath, "src", "review-service.ts"),
+      "export function reviewService() { return 'committed'; }\n"
+    );
+    await git(project.repoPath, ["add", "src/review-service.ts"]);
+    await git(project.repoPath, ["commit", "-m", "Change review service"]);
+    const { stdout: headStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: project.repoPath
+    });
+    const headCommit = headStdout.trim();
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "ref_range", baseRef: "HEAD~1", headRef: "HEAD" }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      reviewType: "ref_range",
+      baseRef: "HEAD~1",
+      headRef: "HEAD",
+      baseCommit,
+      headCommit,
+      changedFiles: {
+        specs: [],
+        source: ["src/review-service.ts"],
+        tests: [],
+        other: []
+      }
+    });
+  });
+
+  it("returns 400 for an invalid diff review ref range", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "ref_range", baseRef: "missing-ref", headRef: "HEAD" }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "bad_request",
+        message: "Invalid Git ref",
+        details: { ref: "missing-ref" }
+      }
+    });
+  });
+
+  it("creates a no-Git diff review with a git_comparison_unavailable finding", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.review.md",
+      specEntityMarkdown({
+        id: "uc.review",
+        type: "use_case",
+        title: "Review Loop",
+        status: "draft",
+        body: "# Review Loop\n"
+      })
+    );
+    await createIndexerService(db).indexProject(project.id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "working_tree" }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      baseCommit: null,
+      headCommit: null,
+      changedFiles: { specs: [], source: [], tests: [], other: [] },
+      reviewSummary: {
+        findings: [
+          expect.objectContaining({
+            severity: "info",
+            kind: "git_comparison_unavailable",
+            entityId: null,
+            filePath: null
+          })
+        ]
+      }
+    });
+  });
+
+  it("rejects diff review status changes after a terminal status", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "working_tree" }
+    });
+    const created = createResponse.json() as { id: string };
+    const acceptResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/diff-reviews/${created.id}`,
+      payload: { status: "accepted" }
+    });
+    const rejectResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/diff-reviews/${created.id}`,
+      payload: { status: "needs_followup" }
+    });
+
+    expect(acceptResponse.statusCode).toBe(200);
+    expect(rejectResponse.statusCode).toBe(400);
+    expect(rejectResponse.json()).toMatchObject({
+      error: {
+        code: "bad_request",
+        message: "Diff review already has a terminal status"
+      }
+    });
+  });
+
+  it("reports diff review findings for unlinked source, spec tasks, validation, and readiness", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createDiffReviewProject(db);
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.orphan.md",
+      specEntityMarkdown({
+        id: "uc.orphan",
+        type: "use_case",
+        title: "Orphan Spec",
+        status: "draft",
+        body: "# Orphan Spec\n"
+      })
+    );
+    await createIndexerService(db).indexProject(project.id);
+    await pool.query(
+      "insert into validation_messages (project_id, entity_id, file_path, level, code, message) values ($1, 'uc.orphan', 'use-cases/uc.orphan.md', 'error', 'review_error', 'Orphan spec is invalid')",
+      [project.id]
+    );
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "Add orphan spec"]);
+    await writeFile(
+      path.join(project.repoPath, "src", "unlinked-service.ts"),
+      "export function unlinkedService() { return 'changed'; }\n"
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/uc.orphan.md",
+      specEntityMarkdown({
+        id: "uc.orphan",
+        type: "use_case",
+        title: "Orphan Spec",
+        status: "draft",
+        body: "# Orphan Spec\n\nChanged.\n"
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/diff-reviews`,
+      payload: { reviewType: "working_tree" }
+    });
+    const body = response.json() as {
+      reviewSummary: {
+        affectedSpecs: Array<{ entityId: string; reason: string }>;
+        relatedTasks: Array<{ entityId: string; reason: string }>;
+        findings: Array<{ severity: string; kind: string; entityId: string | null; filePath: string | null }>;
+      };
+    };
+
+    expect(response.statusCode).toBe(201);
+    expect(body.reviewSummary.affectedSpecs).toContainEqual(
+      expect.objectContaining({ entityId: "uc.orphan", reason: "changed_spec" })
+    );
+    expect(body.reviewSummary.relatedTasks).not.toContainEqual(
+      expect.objectContaining({ entityId: "task.review" })
+    );
+    expect(body.reviewSummary.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "unlinked_source_changed",
+          severity: "context",
+          filePath: "src/unlinked-service.ts"
+        }),
+        expect.objectContaining({
+          kind: "possible_missing_test_change",
+          severity: "review"
+        }),
+        expect.objectContaining({
+          kind: "changed_spec_has_no_task",
+          severity: "review",
+          entityId: "uc.orphan"
+        }),
+        expect.objectContaining({
+          kind: "validation_warning",
+          severity: "blocker",
+          entityId: "uc.orphan"
+        }),
+        expect.objectContaining({
+          kind: "readiness_warning",
+          severity: "blocker",
+          entityId: "uc.orphan"
+        })
+      ])
+    );
+  });
+
   it("returns a populated project overview", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -5009,6 +5349,21 @@ Let customers buy products and receive confirmation while keeping payment and or
       "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash) values ($1, $2, 'src/review-service.ts', 'uc.review', 'reviewService', 'function', 1, null, 'review-link-hash')",
       [project.id, sourceFileResult.rows[0]!.id]
     );
+
+    return project;
+  }
+
+  async function createDiffReviewProject(db: ReturnType<typeof createDb>) {
+    const project = await createLinkedReviewProject(db, {
+      useCaseBody: "# Review Loop\n\nReview source changes before acceptance."
+    });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "unlinked-service.ts"),
+      "export function unlinkedService() { return 'ready'; }\n"
+    );
+    await git(project.repoPath, ["add", "."]);
+    await git(project.repoPath, ["commit", "-m", "Add unlinked service"]);
 
     return project;
   }

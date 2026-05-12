@@ -6,6 +6,12 @@ import type {
   AgentRunFindingSeverity,
   AgentRunReview,
   AgentRunSummary,
+  DiffReviewAffectedSpec,
+  DiffReviewChangedFiles,
+  DiffReviewFinding,
+  DiffReviewFindingSeverity,
+  DiffReviewRelatedTask,
+  DiffReviewSummary,
   ProjectReadinessQueueItemDto
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
@@ -23,6 +29,8 @@ type SpecLinkRow = typeof specLinks.$inferSelect;
 type ValidationMessageRow = typeof validationMessages.$inferSelect;
 
 type AffectedReason = AgentRunReview["affectedSpecs"][number]["reason"];
+type DiffAffectedReason = DiffReviewAffectedSpec["reason"];
+type DiffRelatedTaskReason = DiffReviewRelatedTask["reason"];
 
 export const EMPTY_CHANGED_FILES: AgentRunChangedFiles = {
   specs: [],
@@ -39,6 +47,14 @@ export const EMPTY_REVIEW: AgentRunReview = {
     contextEntityIds: [],
     missingEntityIds: []
   },
+  findings: [],
+  suggestedValidationCommands: []
+};
+
+export const EMPTY_DIFF_REVIEW_SUMMARY: DiffReviewSummary = {
+  changedFiles: EMPTY_CHANGED_FILES,
+  affectedSpecs: [],
+  relatedTasks: [],
   findings: [],
   suggestedValidationCommands: []
 };
@@ -105,6 +121,74 @@ export async function buildAgentRunReviewSummary(input: {
     changedFiles: input.changedFiles,
     affectedSpecs,
     taskContext,
+    findings,
+    suggestedValidationCommands: commonInputs.suggestedValidationCommands
+  };
+}
+
+export async function buildDiffReviewSummary(input: {
+  db: Db;
+  project: ProjectRow;
+  changedFiles: DiffReviewChangedFiles;
+  gitComparisonUnavailable: boolean;
+}): Promise<DiffReviewSummary> {
+  const [entities, sourceLinks, taskLinks] = await Promise.all([
+    input.db.select().from(specEntities).where(eq(specEntities.projectId, input.project.id)),
+    input.changedFiles.source.length > 0
+      ? input.db
+          .select()
+          .from(sourceSpecLinks)
+          .where(
+            and(
+              eq(sourceSpecLinks.projectId, input.project.id),
+              inArray(sourceSpecLinks.filePath, input.changedFiles.source)
+            )
+          )
+      : Promise.resolve([]),
+    input.db
+      .select()
+      .from(specLinks)
+      .where(
+        and(
+          eq(specLinks.projectId, input.project.id),
+          inArray(specLinks.linkType, ["generated_from", "uses"])
+        )
+      )
+  ]);
+  const entitiesById = new Map(entities.map((entity) => [entity.entityId, entity]));
+  const affectedSpecs = collectDiffAffectedSpecs({
+    project: input.project,
+    changedFiles: input.changedFiles,
+    entitiesById,
+    sourceLinks
+  });
+  const relatedTasks = collectDiffRelatedTasks({
+    project: input.project,
+    changedFiles: input.changedFiles,
+    entitiesById,
+    affectedSpecs,
+    taskLinks
+  });
+  const commonInputs = await loadCommonReviewInputs({
+    db: input.db,
+    project: input.project,
+    affectedEntityIds: affectedSpecs.map((spec) => spec.entityId)
+  });
+  const findings = collectDiffReviewFindings({
+    changedFiles: input.changedFiles,
+    sourceLinks,
+    affectedSpecs,
+    relatedTasks,
+    taskLinks,
+    validationMessages: commonInputs.validationMessages,
+    readinessByEntityId: commonInputs.readinessByEntityId,
+    gitComparisonUnavailable: input.gitComparisonUnavailable
+  });
+
+  return {
+    changedFiles: input.changedFiles,
+    affectedSpecs,
+    relatedTasks,
     findings,
     suggestedValidationCommands: commonInputs.suggestedValidationCommands
   };
@@ -206,6 +290,27 @@ export function readReviewSummary(
       missingEntityIds: readStringArray(taskContext.missingEntityIds)
     },
     findings: Array.isArray(record.findings) ? record.findings.filter(isFinding) : fallback.findings,
+    suggestedValidationCommands: readStringArrayInOrder(record.suggestedValidationCommands)
+  };
+}
+
+export function readDiffReviewSummary(
+  value: unknown,
+  changedFiles: DiffReviewChangedFiles
+): DiffReviewSummary {
+  const record = readRecord(value);
+
+  return {
+    changedFiles: readChangedFiles(record.changedFiles ?? changedFiles),
+    affectedSpecs: Array.isArray(record.affectedSpecs)
+      ? record.affectedSpecs.filter(isDiffAffectedSpec)
+      : [],
+    relatedTasks: Array.isArray(record.relatedTasks)
+      ? record.relatedTasks.filter(isDiffRelatedTask)
+      : [],
+    findings: Array.isArray(record.findings)
+      ? record.findings.filter(isDiffFinding)
+      : [],
     suggestedValidationCommands: readStringArrayInOrder(record.suggestedValidationCommands)
   };
 }
@@ -352,6 +457,100 @@ function collectAffectedSpecs(input: {
   return [...affected.values()].sort((left, right) => {
     const reasonRank = reasonRankFor(left.reason) - reasonRankFor(right.reason);
     return reasonRank === 0 ? left.entityId.localeCompare(right.entityId) : reasonRank;
+  });
+}
+
+function collectDiffAffectedSpecs(input: {
+  project: ProjectRow;
+  changedFiles: DiffReviewChangedFiles;
+  entitiesById: Map<string, SpecEntityRow>;
+  sourceLinks: SourceSpecLinkRow[];
+}): DiffReviewAffectedSpec[] {
+  const affected = new Map<string, DiffReviewAffectedSpec>();
+  const specopsPrefix = toRepoRelativeSpecopsPrefix(input.project);
+  const entitiesByFilePath = new Map(
+    [...input.entitiesById.values()].map((entity) => [entity.filePath, entity])
+  );
+  const add = (entityId: string, reason: DiffAffectedReason) => {
+    const entity = input.entitiesById.get(entityId);
+    if (!entity) {
+      return;
+    }
+
+    const existing = affected.get(entity.entityId);
+    if (existing && diffAffectedReasonRankFor(existing.reason) <= diffAffectedReasonRankFor(reason)) {
+      return;
+    }
+
+    affected.set(entity.entityId, {
+      entityId: entity.entityId,
+      title: entity.title,
+      type: entity.type,
+      filePath: entity.filePath,
+      reason
+    });
+  };
+
+  for (const changedSpecFile of input.changedFiles.specs) {
+    const entity = entitiesByFilePath.get(stripSpecopsPrefix(changedSpecFile, specopsPrefix));
+    if (entity) {
+      add(entity.entityId, "changed_spec");
+    }
+  }
+
+  for (const sourceLink of input.sourceLinks) {
+    add(sourceLink.entityId, "linked_source");
+  }
+
+  return [...affected.values()].sort((left, right) => {
+    const reasonRank = diffAffectedReasonRankFor(left.reason) - diffAffectedReasonRankFor(right.reason);
+    return reasonRank === 0 ? left.entityId.localeCompare(right.entityId) : reasonRank;
+  });
+}
+
+function collectDiffRelatedTasks(input: {
+  project: ProjectRow;
+  changedFiles: DiffReviewChangedFiles;
+  entitiesById: Map<string, SpecEntityRow>;
+  affectedSpecs: DiffReviewAffectedSpec[];
+  taskLinks: SpecLinkRow[];
+}): DiffReviewRelatedTask[] {
+  const related = new Map<string, DiffReviewRelatedTask>();
+  const affectedEntityIds = new Set(input.affectedSpecs.map((spec) => spec.entityId));
+  const specopsPrefix = toRepoRelativeSpecopsPrefix(input.project);
+  const changedTaskPaths = new Set(
+    input.changedFiles.specs.map((filePath) => stripSpecopsPrefix(filePath, specopsPrefix))
+  );
+  const add = (task: SpecEntityRow, reason: DiffRelatedTaskReason) => {
+    related.set(`${task.entityId}:${reason}`, {
+      entityId: task.entityId,
+      title: task.title,
+      status: task.status,
+      filePath: task.filePath,
+      reason
+    });
+  };
+
+  for (const link of input.taskLinks) {
+    if (!affectedEntityIds.has(link.toEntityId)) {
+      continue;
+    }
+
+    const task = input.entitiesById.get(link.fromEntityId);
+    if (task?.type === "agent_task") {
+      add(task, link.linkType as DiffRelatedTaskReason);
+    }
+  }
+
+  for (const entity of input.entitiesById.values()) {
+    if (entity.type === "agent_task" && changedTaskPaths.has(entity.filePath)) {
+      add(entity, "changed_task");
+    }
+  }
+
+  return [...related.values()].sort((left, right) => {
+    const entityRank = left.entityId.localeCompare(right.entityId);
+    return entityRank === 0 ? left.reason.localeCompare(right.reason) : entityRank;
   });
 }
 
@@ -521,6 +720,161 @@ function collectAgentRunFindings(input: {
   return findings.sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function collectDiffReviewFindings(input: {
+  changedFiles: DiffReviewChangedFiles;
+  sourceLinks: SourceSpecLinkRow[];
+  affectedSpecs: DiffReviewAffectedSpec[];
+  relatedTasks: DiffReviewRelatedTask[];
+  taskLinks: SpecLinkRow[];
+  validationMessages: ValidationMessageRow[];
+  readinessByEntityId: Map<string, ProjectReadinessQueueItemDto>;
+  gitComparisonUnavailable: boolean;
+}): DiffReviewFinding[] {
+  const findings: DiffReviewFinding[] = [];
+  const addFinding = (
+    kind: DiffReviewFinding["kind"],
+    severity: DiffReviewFindingSeverity,
+    message: string,
+    suggestedFollowUp: string,
+    entityId: string | null,
+    filePath: string | null
+  ) => {
+    findings.push({
+      id: `${kind}:${entityId ?? filePath ?? "project"}`,
+      severity,
+      kind,
+      message,
+      suggestedFollowUp,
+      entityId,
+      filePath
+    });
+  };
+
+  if (input.gitComparisonUnavailable) {
+    addFinding(
+      "git_comparison_unavailable",
+      "info",
+      "Git comparison was unavailable for this diff review.",
+      "Review the changed file list manually before accepting this review.",
+      null,
+      null
+    );
+  }
+
+  if (
+    input.changedFiles.source.length > 0 &&
+    input.sourceLinks.length > 0 &&
+    input.changedFiles.specs.length === 0
+  ) {
+    addFinding(
+      "source_changed_without_spec",
+      "review",
+      "Source files changed without a spec file update.",
+      "Confirm the linked spec still reflects the implementation change.",
+      null,
+      null
+    );
+  }
+
+  const linkedSourceFiles = new Set(input.sourceLinks.map((link) => link.filePath));
+  for (const filePath of input.changedFiles.source) {
+    if (!linkedSourceFiles.has(filePath)) {
+      addFinding(
+        "unlinked_source_changed",
+        "context",
+        `Source file ${filePath} changed without an indexed spec link.`,
+        "Add a source-to-spec annotation or verify the change manually.",
+        null,
+        filePath
+      );
+    }
+  }
+
+  if (input.changedFiles.source.length > 0 && input.changedFiles.tests.length === 0) {
+    addFinding(
+      "possible_missing_test_change",
+      "review",
+      "Source files changed without a test file update.",
+      "Confirm existing tests cover the change or add focused coverage.",
+      null,
+      input.changedFiles.source[0] ?? null
+    );
+  }
+
+  const relatedTaskIds = new Set(input.relatedTasks.map((task) => task.entityId));
+  const taskLinkedSpecIds = new Set(
+    input.taskLinks
+      .filter(
+        (link) =>
+          relatedTaskIds.has(link.fromEntityId) &&
+          (link.linkType === "generated_from" || link.linkType === "uses")
+      )
+      .map((link) => link.toEntityId)
+  );
+  for (const spec of input.affectedSpecs.filter((item) => item.reason === "changed_spec")) {
+    if (spec.type === "agent_task") {
+      continue;
+    }
+
+    if (!taskLinkedSpecIds.has(spec.entityId)) {
+      addFinding(
+        "changed_spec_has_no_task",
+        "review",
+        `Changed spec ${spec.entityId} has no related agent task.`,
+        "Create or update an agent task that tracks this spec change.",
+        spec.entityId,
+        spec.filePath
+      );
+    }
+  }
+
+  const staleTaskIds = new Set<string>();
+  for (const task of input.relatedTasks.filter((item) => item.reason !== "changed_task")) {
+    if (staleTaskIds.has(task.entityId)) {
+      continue;
+    }
+    staleTaskIds.add(task.entityId);
+    addFinding(
+      "related_task_may_be_stale",
+      "review",
+      `Related task ${task.entityId} may be stale after this diff.`,
+      "Review the task against the affected specs before accepting this review.",
+      task.entityId,
+      task.filePath
+    );
+  }
+
+  for (const message of input.validationMessages) {
+    findings.push({
+      id: `validation_warning:${message.entityId ?? message.filePath ?? "project"}:${message.id}`,
+      severity: message.level === "error" ? "blocker" : "review",
+      kind: "validation_warning",
+      message: message.message,
+      suggestedFollowUp: "Resolve the affected spec validation message before accepting this review.",
+      entityId: message.entityId,
+      filePath: message.filePath
+    });
+  }
+
+  for (const spec of input.affectedSpecs) {
+    const readiness = input.readinessByEntityId.get(spec.entityId);
+    if (!readiness || readiness.readiness === "ready") {
+      continue;
+    }
+
+    addFinding(
+      "readiness_warning",
+      readiness.readiness === "blocked" ? "blocker" : "review",
+      `Affected spec ${spec.entityId} readiness is ${readiness.readiness}.`,
+      "Resolve affected spec readiness checks before accepting this review.",
+      spec.entityId,
+      spec.filePath
+    );
+  }
+
+  return findings.sort(compareDiffFindings);
+}
+
 function deriveTaskContext(
   task: SpecEntityRow,
   indexedLinks: SpecLinkRow[],
@@ -557,7 +911,44 @@ function isAffectedSpec(value: unknown): value is AgentRunReview["affectedSpecs"
   );
 }
 
+function isDiffAffectedSpec(value: unknown): value is DiffReviewAffectedSpec {
+  const record = readRecord(value);
+  return (
+    typeof record.entityId === "string" &&
+    typeof record.title === "string" &&
+    typeof record.type === "string" &&
+    typeof record.filePath === "string" &&
+    (record.reason === "changed_spec" || record.reason === "linked_source")
+  );
+}
+
+function isDiffRelatedTask(value: unknown): value is DiffReviewRelatedTask {
+  const record = readRecord(value);
+  return (
+    typeof record.entityId === "string" &&
+    typeof record.title === "string" &&
+    typeof record.status === "string" &&
+    typeof record.filePath === "string" &&
+    (record.reason === "generated_from" ||
+      record.reason === "uses" ||
+      record.reason === "changed_task")
+  );
+}
+
 function isFinding(value: unknown): value is AgentRunFinding {
+  const record = readRecord(value);
+  return (
+    typeof record.id === "string" &&
+    isFindingSeverity(record.severity) &&
+    typeof record.kind === "string" &&
+    typeof record.message === "string" &&
+    typeof record.suggestedFollowUp === "string" &&
+    (typeof record.entityId === "string" || record.entityId === null) &&
+    (typeof record.filePath === "string" || record.filePath === null)
+  );
+}
+
+function isDiffFinding(value: unknown): value is DiffReviewFinding {
   const record = readRecord(value);
   return (
     typeof record.id === "string" &&
@@ -594,4 +985,25 @@ function reasonRankFor(reason: AffectedReason): number {
   if (reason === "changed_spec") return 0;
   if (reason === "linked_source") return 1;
   return 2;
+}
+
+function diffAffectedReasonRankFor(reason: DiffAffectedReason): number {
+  return reason === "changed_spec" ? 0 : 1;
+}
+
+function diffFindingSeverityRankFor(severity: DiffReviewFindingSeverity): number {
+  if (severity === "blocker") return 0;
+  if (severity === "review") return 1;
+  if (severity === "context") return 2;
+  return 3;
+}
+
+function compareDiffFindings(left: DiffReviewFinding, right: DiffReviewFinding): number {
+  return (
+    diffFindingSeverityRankFor(left.severity) - diffFindingSeverityRankFor(right.severity) ||
+    left.kind.localeCompare(right.kind) ||
+    (left.entityId ?? "").localeCompare(right.entityId ?? "") ||
+    (left.filePath ?? "").localeCompare(right.filePath ?? "") ||
+    left.message.localeCompare(right.message)
+  );
 }
