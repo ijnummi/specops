@@ -101,12 +101,22 @@ describe("initial migration", () => {
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_assembly_inputs");
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claims");
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence");
+    expect(migration).toContain("analyze_review_assemblies_project_idx");
     expect(migration).toContain("analyze_review_assemblies_run_idx");
+    expect(migration).toContain("analyze_review_assemblies_run_status_idx");
     expect(migration).toContain("analyze_review_assembly_inputs_assembly_idx");
+    expect(migration).toContain("analyze_review_assembly_inputs_proposal_idx");
     expect(migration).toContain("analyze_review_claims_assembly_idx");
     expect(migration).toContain("analyze_review_claim_evidence_claim_idx");
+    expect(migration).toContain("analyze_review_claim_evidence_proposal_idx");
     expect(migration).toContain(
       "FOREIGN KEY (analyze_run_id) REFERENCES analyze_runs(id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "assembly_id uuid NOT NULL REFERENCES analyze_review_assemblies(id) ON DELETE CASCADE",
+    );
+    expect(migration).toContain(
+      "claim_id uuid NOT NULL REFERENCES analyze_review_claims(id) ON DELETE CASCADE",
     );
     expect(migration).toContain(
       "FOREIGN KEY (proposal_id) REFERENCES ai_proposals(id) ON DELETE CASCADE",
