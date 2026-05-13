@@ -575,7 +575,7 @@ function aiProposalDetail() {
     },
     evidence: {
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       promptVersion: "ai-prefill-v1",
       selectedSourceFiles: [
         {

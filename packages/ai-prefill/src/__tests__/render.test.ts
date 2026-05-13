@@ -8,7 +8,7 @@ describe("renderAiSpecEntityProposal", () => {
     const proposal = renderAiSpecEntityProposal({
       candidate: candidate(),
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       packet: promptPacket(),
       warnings: ["Rejected proposal 2: invalid shape"]
     });
@@ -41,7 +41,7 @@ describe("renderAiSpecEntityProposal", () => {
     expect(proposal.payload.markdown).toBe(proposal.payload.generatedMarkdown);
     expect(proposal.evidence).toEqual({
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       promptVersion: "ai-prefill-v1",
       selectedSourceFiles: [
         {
@@ -101,7 +101,7 @@ describe("renderAiSpecEntityProposal", () => {
         confidence: null
       },
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       packet: promptPacket()
     });
 
@@ -139,7 +139,7 @@ Users can create, list, and update projects.
           title: "Project"
         },
         provider: "ollama",
-        model: "qwen2.5-coder:7b",
+        model: "gemma4",
         packet: promptPacket()
       }).payload.filePath
     ).toBe("domain/domain.project.md");
@@ -153,7 +153,7 @@ Users can create, list, and update projects.
           title: "Project service"
         },
         provider: "ollama",
-        model: "qwen2.5-coder:7b",
+        model: "gemma4",
         packet: promptPacket()
       }).payload.filePath
     ).toBe("interfaces/interface.project-service.md");

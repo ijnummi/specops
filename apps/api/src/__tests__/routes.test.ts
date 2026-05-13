@@ -5595,7 +5595,7 @@ Let customers buy products and receive confirmation while keeping payment and or
   function aiProposalEvidence() {
     return {
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       promptVersion: "ai-prefill-v1",
       selectedSourceFiles: [
         {

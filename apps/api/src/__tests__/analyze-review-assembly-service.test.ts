@@ -439,7 +439,7 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
         },
         evidenceJson: {
           provider: "ollama",
-          model: "qwen2.5-coder:7b",
+          model: "gemma4",
           promptVersion: "ai-prefill-v1",
           selectedSourceFiles: [],
           claims: [],
@@ -1194,7 +1194,7 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
       };
       const evidence: AiSpecEntityProposalEvidence = {
         provider: "ollama",
-        model: "qwen2.5-coder:7b",
+        model: "gemma4",
         promptVersion: "ai-prefill-v1",
         selectedSourceFiles: [
           {

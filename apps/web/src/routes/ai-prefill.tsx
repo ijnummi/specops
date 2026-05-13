@@ -26,7 +26,7 @@ type ProposalMarkdownDraft = {
 type ProposalStatusFilter = "pending" | "accepted" | "rejected" | "obsolete";
 
 const defaultProvider: AiProvider = "ollama";
-const defaultModel = "qwen2.5-coder:7b";
+const defaultModel = "gemma4";
 const proposalStatusFilters = [
   "pending",
   "accepted",

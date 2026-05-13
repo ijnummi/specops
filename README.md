@@ -106,7 +106,7 @@ Ollama is the default local provider:
 
 ```sh
 ollama serve
-ollama pull qwen2.5-coder:7b
+ollama pull gemma4
 ```
 
 OpenAI can be enabled by setting `OPENAI_API_KEY` and choosing the OpenAI provider in the UI.

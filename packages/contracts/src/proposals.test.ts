@@ -102,14 +102,14 @@ describe("proposal contracts", () => {
     const parsed = aiPrefillGenerateRequestSchema.parse({
       sourceFileIds: ["source-file-1"],
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       temperature: 0.1
     });
 
     expect(parsed).toEqual({
       sourceFileIds: ["source-file-1"],
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       temperature: 0.1
     });
   });
@@ -119,7 +119,7 @@ describe("proposal contracts", () => {
       aiPrefillGenerateRequestSchema.parse({
         sourceFileIds: ["source-file-1"],
         provider: "ollama",
-        model: "qwen2.5-coder:7b"
+        model: "gemma4"
       }).temperature
     ).toBe(0.1);
   });
@@ -129,7 +129,7 @@ describe("proposal contracts", () => {
       aiPrefillGenerateRequestSchema.parse({
         sourceFileIds: [],
         provider: "ollama",
-        model: "qwen2.5-coder:7b"
+        model: "gemma4"
       })
     ).toThrow();
   });
@@ -139,7 +139,7 @@ describe("proposal contracts", () => {
       aiPrefillGenerateRequestSchema.parse({
         sourceFileIds: ["source-file-1"],
         provider: "ollama",
-        model: "qwen2.5-coder:7b",
+        model: "gemma4",
         temperature: 2.1
       })
     ).toThrow();
@@ -285,7 +285,7 @@ function aiPayload() {
 function aiEvidence() {
   return {
     provider: "ollama",
-    model: "qwen2.5-coder:7b",
+    model: "gemma4",
     promptVersion: "ai-prefill-v1",
     selectedSourceFiles: [
       {

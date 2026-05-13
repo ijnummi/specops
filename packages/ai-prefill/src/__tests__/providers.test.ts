@@ -24,13 +24,13 @@ describe("createAiPrefillProvider", () => {
     });
     const result = await provider.generateSpecProposals({
       packet: packet(),
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       temperature: 0.2
     });
 
     expect(result).toEqual({
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       text: "{\"proposals\":[]}"
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -39,7 +39,7 @@ describe("createAiPrefillProvider", () => {
     expect(init?.headers).toEqual({ "content-type": "application/json" });
     expect(init?.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(String(init?.body))).toEqual({
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       messages: packet().messages,
       stream: false,
       format: "json",
@@ -104,7 +104,7 @@ describe("createAiPrefillProvider", () => {
     await expect(
       provider.generateSpecProposals({
         packet: packet(),
-        model: "qwen2.5-coder:7b",
+        model: "gemma4",
         temperature: 0.1
       })
     ).rejects.toThrow("AI provider request failed with status 503");
@@ -121,7 +121,7 @@ describe("createAiPrefillProvider", () => {
     await expect(
       provider.generateSpecProposals({
         packet: packet(),
-        model: "qwen2.5-coder:7b",
+        model: "gemma4",
         temperature: 0.1
       })
     ).rejects.toThrow("Ollama response did not include message content");

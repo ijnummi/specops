@@ -74,9 +74,15 @@ describeWithDb("createAnalyzeRunService", () => {
   it("executes all steps and stores index, source, selection, and AI proposal counts", async () => {
     const project = await createProjectFixture();
     await writeAnalyzeSource(project.repoPath);
+    const requestedModels: string[] = [];
     const service = createAnalyzeRunService(db, {
       aiPrefillConfig: aiPrefillConfig(),
-      aiPrefillProviderFactory: successfulProviderFactory()
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          requestedModels.push(input.model);
+          return aiPrefillProviderResult(input.model);
+        }
+      })
     });
 
     const started = await service.startAnalyzeRun(project.id);
@@ -87,6 +93,7 @@ describeWithDb("createAnalyzeRunService", () => {
     expect(finished.indexRunId).toEqual(expect.any(String));
     expect(finished.sourceProposalCount).toBeGreaterThan(0);
     expect(finished.aiProposalCount).toBe(1);
+    expect(requestedModels).toEqual(["gemma4"]);
     expect(finished.proposalIds).toHaveLength(
       finished.sourceProposalCount + finished.aiProposalCount
     );

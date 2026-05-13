@@ -151,7 +151,7 @@ describe("api queries", () => {
   it("posts ai prefill generation requests", async () => {
     const input = {
       provider: "ollama" as const,
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       sourceFileIds: ["source-file-1"],
       temperature: 0.1
     };

@@ -56,7 +56,7 @@ const stepNames: AnalyzeRunStepName[] = [
 ];
 const aiPrefillDefaults = {
   provider: "ollama" as const,
-  model: "qwen2.5-coder:7b",
+  model: "gemma4",
   temperature: 0.1
 };
 

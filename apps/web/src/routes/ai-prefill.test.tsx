@@ -210,7 +210,7 @@ describe("AiPrefillPage", () => {
 
     expect(mocks.generateAiPrefillProposals).toHaveBeenCalledWith("project-1", {
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       sourceFileIds: ["source-file-1"],
       temperature: 0.1
     });
@@ -247,7 +247,7 @@ describe("AiPrefillPage", () => {
 
     expect(container.textContent).toContain("AI evidence");
     expect(container.textContent).toContain("ollama");
-    expect(container.textContent).toContain("qwen2.5-coder:7b");
+    expect(container.textContent).toContain("gemma4");
     expect(container.textContent).toContain("ai-prefill-v1");
     expect(container.textContent).toContain("Project routes create and list projects.");
     expect(container.textContent).toContain("apps/api/src/routes/projects.ts");
@@ -519,7 +519,7 @@ function aiProposalDetail() {
     },
     evidence: {
       provider: "ollama",
-      model: "qwen2.5-coder:7b",
+      model: "gemma4",
       promptVersion: "ai-prefill-v1",
       selectedSourceFiles: [
         {
