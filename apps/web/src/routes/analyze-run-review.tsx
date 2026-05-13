@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import type {
   AnalyzeReviewAttachInputRequest,
+  AnalyzeReviewAcceptResponse,
   AnalyzeReviewAcceptFailure,
   AnalyzeReviewCreateAssemblyRequest,
   AnalyzeReviewCreateClaimRequest,
@@ -32,6 +33,7 @@ type AnalyzeRunReviewPageProps = {
 export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageProps) {
   const queryClient = useQueryClient();
   const [acceptFailures, setAcceptFailures] = useState<AnalyzeReviewAcceptFailure[]>([]);
+  const [acceptResponse, setAcceptResponse] = useState<AnalyzeReviewAcceptResponse | null>(null);
   const review = useQuery(analyzeReviewAssembliesQuery(projectId, runId));
 
   const invalidateReviewAssemblies = async () => {
@@ -111,6 +113,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       acceptAnalyzeReviewAssemblies(projectId, runId, { assemblyIds }),
     onSuccess: async (response) => {
       setAcceptFailures(response.failures);
+      setAcceptResponse(response);
       await invalidateAcceptedData();
     }
   });
@@ -148,33 +151,42 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       ) : review.isLoading ? (
         <p className="panel-section text-sm text-slate-500">Loading review assemblies...</p>
       ) : review.data ? (
-        <AnalyzeReviewWorkspace
-          projectId={projectId}
-          runId={runId}
-          review={review.data}
-          acceptFailures={acceptFailures}
-          mutationPending={mutationPending}
-          onAcceptAssemblies={(assemblyIds) => {
-            setAcceptFailures([]);
-            acceptMutation.mutate(assemblyIds);
-          }}
-          onAttachInput={(assemblyId, input) =>
-            attachInputMutation.mutate({ assemblyId, input })
-          }
-          onCreateAssembly={(input) => createAssemblyMutation.mutate(input)}
-          onCreateClaim={(assemblyId, input) =>
-            createClaimMutation.mutate({ assemblyId, input })
-          }
-          onPatchAssembly={(assemblyId, input) =>
-            patchAssemblyMutation.mutate({ assemblyId, input })
-          }
-          onPatchClaim={(assemblyId, claimId, input) =>
-            patchClaimMutation.mutate({ assemblyId, claimId, input })
-          }
-          onRemoveInput={(assemblyId, proposalId) =>
-            removeInputMutation.mutate({ assemblyId, proposalId })
-          }
-        />
+        <>
+          {acceptResponse ? (
+            <p className="panel-section mb-3 text-sm text-emerald-700">
+              Saved {acceptResponse.acceptedAssemblyIds.length} assemblies and{" "}
+              {acceptResponse.annotationCount} source/spec annotations.
+            </p>
+          ) : null}
+          <AnalyzeReviewWorkspace
+            projectId={projectId}
+            runId={runId}
+            review={review.data}
+            acceptFailures={acceptFailures}
+            mutationPending={mutationPending}
+            onAcceptAssemblies={(assemblyIds) => {
+              setAcceptFailures([]);
+              setAcceptResponse(null);
+              acceptMutation.mutate(assemblyIds);
+            }}
+            onAttachInput={(assemblyId, input) =>
+              attachInputMutation.mutate({ assemblyId, input })
+            }
+            onCreateAssembly={(input) => createAssemblyMutation.mutate(input)}
+            onCreateClaim={(assemblyId, input) =>
+              createClaimMutation.mutate({ assemblyId, input })
+            }
+            onPatchAssembly={(assemblyId, input) =>
+              patchAssemblyMutation.mutate({ assemblyId, input })
+            }
+            onPatchClaim={(assemblyId, claimId, input) =>
+              patchClaimMutation.mutate({ assemblyId, claimId, input })
+            }
+            onRemoveInput={(assemblyId, proposalId) =>
+              removeInputMutation.mutate({ assemblyId, proposalId })
+            }
+          />
+        </>
       ) : (
         <p className="panel-section text-sm text-slate-500">Review assemblies are unavailable.</p>
       )}

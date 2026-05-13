@@ -105,6 +105,7 @@ describe("analyze review assembly contracts", () => {
   it("parses an accept response with partial validation failures", () => {
     const response = analyzeReviewAcceptResponseSchema.parse({
       acceptedAssemblyIds: ["11111111-1111-4111-8111-111111111111"],
+      annotationCount: 2,
       failures: [
         {
           assemblyId: "22222222-2222-4222-8222-222222222222",
@@ -122,6 +123,17 @@ describe("analyze review assembly contracts", () => {
     });
 
     expect(response.failures[0]?.messages[0]?.code).toBe("fact_missing_evidence");
+    expect(response.annotationCount).toBe(2);
+  });
+
+  it("defaults accept response annotation count to zero", () => {
+    const response = analyzeReviewAcceptResponseSchema.parse({
+      acceptedAssemblyIds: [],
+      failures: [],
+      indexRun: null
+    });
+
+    expect(response.annotationCount).toBe(0);
   });
 
   it("rejects attach evidence requests with invalid line ranges", () => {

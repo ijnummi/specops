@@ -4,7 +4,13 @@ import path from "node:path";
 
 import type { AiSpecEntityProposalEvidence, AiSpecEntityProposalPayload } from "@specops/contracts";
 import type { Db } from "@specops/db";
-import { aiProposals, analyzeRuns, createDb, projects } from "@specops/db";
+import {
+  aiProposals,
+  analyzeRuns,
+  createDb,
+  projects,
+  sourceSpecAnnotations
+} from "@specops/db";
 import { eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -829,6 +835,49 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(review.assemblies[0]?.acceptedAt).not.toBeNull();
     expect(proposalRow).toMatchObject({ status: "accepted" });
     expect(proposalRow?.reviewedAt).not.toBeNull();
+  });
+
+  it("creates source spec annotations from accepted claim evidence", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Accepted annotations",
+      entityType: "use_case",
+      entityId: "use-case.accepted-annotations",
+      filePath: "use-cases/accepted-annotations.md",
+      summary: "Accepted annotations assembly.",
+      proposalIds: [proposal.id]
+    });
+    const claim = assembly.claims[0]!;
+    const evidence = claim.evidence[0]!;
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const annotations = await db
+      .select()
+      .from(sourceSpecAnnotations)
+      .where(eq(sourceSpecAnnotations.projectId, project.id));
+
+    expect(result.annotationCount).toBeGreaterThan(0);
+    expect(annotations).toHaveLength(result.annotationCount);
+    expect(annotations[0]).toMatchObject({
+      sourceFilePath: evidence.sourceFilePath,
+      symbolName: evidence.symbolName,
+      startLine: evidence.startLine,
+      endLine: evidence.endLine,
+      entityId: assembly.entityId,
+      specFilePath: assembly.filePath,
+      claimId: claim.id,
+      relationshipType: "implements",
+      confidence: evidence.confidence,
+      provenance: evidence.provenance,
+      status: "active",
+      analyzeRunId: run.id,
+      proposalId: proposal.id,
+      assemblyId: assembly.id,
+      claimEvidenceId: evidence.id
+    });
   });
 
   it("does not accept proposals attached only as evidence inputs", async () => {

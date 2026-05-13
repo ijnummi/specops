@@ -15,18 +15,21 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
         {
           text: "Users can accept reviewed assemblies.",
           kind: "fact",
+          id: "11111111-1111-4111-8111-111111111111",
           evidence: [
             {
               sourceFilePath: "apps/api/src/routes/analyze-review-assemblies.ts",
               symbolName: "registerAnalyzeReviewAssemblyRoutes",
               startLine: 20,
-              endLine: 80
+              endLine: 80,
+              relationshipType: "implements"
             }
           ]
         },
         {
           text: "The review model may later feed refresh workflows.",
           kind: "hypothesis",
+          id: "22222222-2222-4222-8222-222222222222",
           evidence: []
         }
       ],
@@ -45,11 +48,19 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
     expect(markdown).toContain("status: draft");
     expect(markdown).toContain("# Review drafts");
     expect(markdown).toContain("## Reviewed Facts");
-    expect(markdown).toContain("Users can accept reviewed assemblies.");
+    expect(markdown).toContain("- Users can accept reviewed assemblies. [^claim-1-1]");
     expect(markdown).toContain("apps/api/src/routes/analyze-review-assemblies.ts:20-80");
-    expect(markdown).toContain("(registerAnalyzeReviewAssemblyRoutes)");
+    expect(markdown).toContain("(`registerAnalyzeReviewAssemblyRoutes`)");
+    expect(markdown).toContain(
+      "[^claim-1-1]: implements `apps/api/src/routes/analyze-review-assemblies.ts:20-80` (`registerAnalyzeReviewAssemblyRoutes`)"
+    );
     expect(markdown).toContain("## Hypotheses and Unknowns");
     expect(markdown).toContain("The review model may later feed refresh workflows.");
+    expect(markdown).toContain("## Source Links");
+    expect(markdown).toContain("### Implements");
+    expect(markdown).toContain(
+      "- `apps/api/src/routes/analyze-review-assemblies.ts:20-80` (`registerAnalyzeReviewAssemblyRoutes`)"
+    );
     expect(markdown).toContain("## Proposed Links");
     expect(markdown).toContain("relates_to: interface.proposal-service");
     expect(markdown).toContain("Assemblies are built from proposal inputs.");
@@ -74,5 +85,69 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
       type: "use_case",
       title
     });
+  });
+
+  it("defaults evidence relationship type to references and groups source links by relationship", () => {
+    const markdown = renderAnalyzeReviewAssemblyMarkdown({
+      entityId: "use-case.review-drafts",
+      entityType: "use_case",
+      title: "Review drafts",
+      summary: "Review generated draft inputs before writing specs.",
+      claims: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          text: "Routes accept reviewed assemblies.",
+          kind: "fact",
+          evidence: [
+            {
+              sourceFilePath: "apps/api/src/routes/analyze-review-assemblies.ts",
+              symbolName: "registerAnalyzeReviewAssemblyRoutes",
+              startLine: 20,
+              endLine: 80,
+              relationshipType: "implements"
+            },
+            {
+              sourceFilePath: "apps/api/src/services/proposal-service.ts",
+              symbolName: "createProposalService",
+              startLine: null,
+              endLine: null
+            }
+          ]
+        },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          text: "Schemas define accepted review payloads.",
+          kind: "fact",
+          evidence: [
+            {
+              sourceFilePath: "packages/contracts/src/analyze-review-assemblies.ts",
+              symbolName: "analyzeReviewAcceptResponseSchema",
+              startLine: 230,
+              endLine: 260,
+              relationshipType: "defines"
+            }
+          ]
+        }
+      ],
+      proposedLinks: []
+    });
+
+    expect(markdown).toContain(
+      "- Routes accept reviewed assemblies. [^claim-1-1] [^claim-1-2]"
+    );
+    expect(markdown).toContain(
+      "- Schemas define accepted review payloads. [^claim-2-1]"
+    );
+    expect(markdown).toContain(
+      "[^claim-1-2]: references `apps/api/src/services/proposal-service.ts` (`createProposalService`)"
+    );
+    expect(markdown.indexOf("### Implements")).toBeLessThan(markdown.indexOf("### Defines"));
+    expect(markdown.indexOf("### Defines")).toBeLessThan(markdown.indexOf("### References"));
+    expect(markdown).toContain(
+      "- `packages/contracts/src/analyze-review-assemblies.ts:230-260` (`analyzeReviewAcceptResponseSchema`)"
+    );
+    expect(markdown).toContain(
+      "- `apps/api/src/services/proposal-service.ts` (`createProposalService`)"
+    );
   });
 });

@@ -1,13 +1,17 @@
 import { stringify } from "yaml";
 
+type RelationshipType = "implements" | "uses" | "defines" | "tests" | "references";
+
 type RenderEvidence = {
   sourceFilePath: string;
   symbolName: string | null;
   startLine: number | null;
   endLine: number | null;
+  relationshipType?: RelationshipType;
 };
 
 type RenderClaim = {
+  id?: string;
   text: string;
   kind: "fact" | "hypothesis";
   evidence: RenderEvidence[];
@@ -31,6 +35,7 @@ type RenderAssemblyInput = {
 export function renderAnalyzeReviewAssemblyMarkdown(input: RenderAssemblyInput): string {
   const facts = input.claims.filter((claim) => claim.kind === "fact");
   const hypotheses = input.claims.filter((claim) => claim.kind === "hypothesis");
+  const evidenceReferences = createEvidenceReferences(input.claims);
   const frontmatter = stringify(
     {
       id: input.entityId,
@@ -51,13 +56,15 @@ export function renderAnalyzeReviewAssemblyMarkdown(input: RenderAssemblyInput):
     "",
     "## Reviewed Facts",
     "",
-    ...renderClaims(facts),
+    ...renderClaims(facts, evidenceReferences),
     "## Hypotheses and Unknowns",
     "",
-    ...renderClaims(hypotheses),
-    "## Source Evidence",
+    ...renderClaims(hypotheses, evidenceReferences),
     "",
-    ...renderEvidence(input.claims),
+    ...renderFootnotes(evidenceReferences),
+    "## Source Links",
+    "",
+    ...renderSourceLinks(evidenceReferences),
     "## Proposed Links",
     "",
     ...renderLinks(input.proposedLinks)
@@ -66,30 +73,55 @@ export function renderAnalyzeReviewAssemblyMarkdown(input: RenderAssemblyInput):
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
 }
 
-function renderClaims(claims: RenderClaim[]): string[] {
+function renderClaims(
+  claims: RenderClaim[],
+  evidenceReferences: EvidenceReference[]
+): string[] {
   if (claims.length === 0) {
     return ["- None recorded.", ""];
   }
 
-  return claims.flatMap((claim) => [`- ${claim.text}`, ""]);
+  return claims.flatMap((claim) => {
+    const footnotes = evidenceReferences
+      .filter((reference) => reference.claim === claim)
+      .map((reference) => `[^${reference.footnoteId}]`);
+    const suffix = footnotes.length > 0 ? ` ${footnotes.join(" ")}` : "";
+    return [`- ${claim.text}${suffix}`, ""];
+  });
 }
 
-function renderEvidence(claims: RenderClaim[]): string[] {
-  const evidence = claims.flatMap((claim) =>
-    claim.evidence.map((item) => ({ claim: claim.text, ...item }))
-  );
+function renderFootnotes(evidenceReferences: EvidenceReference[]): string[] {
+  if (evidenceReferences.length === 0) {
+    return [];
+  }
 
-  if (evidence.length === 0) {
+  return evidenceReferences.flatMap((reference) => [
+    `[^${reference.footnoteId}]: ${reference.relationshipType} \`${reference.location}\`${renderSymbol(reference)}`,
+    ""
+  ]);
+}
+
+function renderSourceLinks(evidenceReferences: EvidenceReference[]): string[] {
+  if (evidenceReferences.length === 0) {
     return ["- None recorded.", ""];
   }
 
-  return evidence.flatMap((item) => {
-    const location =
-      item.startLine && item.endLine
-        ? `${item.sourceFilePath}:${item.startLine}-${item.endLine}`
-        : item.sourceFilePath;
-    const symbol = item.symbolName ? ` (${item.symbolName})` : "";
-    return [`- ${location}${symbol}: ${item.claim}`, ""];
+  return RELATIONSHIP_ORDER.flatMap((relationshipType) => {
+    const group = evidenceReferences.filter(
+      (reference) => reference.relationshipType === relationshipType
+    );
+    if (group.length === 0) {
+      return [];
+    }
+
+    return [
+      `### ${RELATIONSHIP_LABELS[relationshipType]}`,
+      "",
+      ...group.flatMap((reference) => [
+        `- \`${reference.location}\`${renderSymbol(reference)}`,
+        ""
+      ])
+    ];
   });
 }
 
@@ -103,4 +135,49 @@ function renderLinks(links: RenderLink[]): string[] {
     `  - ${link.rationale}`,
     ""
   ]);
+}
+
+type EvidenceReference = RenderEvidence & {
+  claim: RenderClaim;
+  footnoteId: string;
+  location: string;
+  relationshipType: RelationshipType;
+};
+
+const RELATIONSHIP_ORDER: RelationshipType[] = [
+  "implements",
+  "uses",
+  "defines",
+  "tests",
+  "references"
+];
+
+const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
+  implements: "Implements",
+  uses: "Uses",
+  defines: "Defines",
+  tests: "Tests",
+  references: "References"
+};
+
+function createEvidenceReferences(claims: RenderClaim[]): EvidenceReference[] {
+  return claims.flatMap((claim, claimIndex) =>
+    claim.evidence.map((evidence, evidenceIndex) => ({
+      ...evidence,
+      claim,
+      footnoteId: `claim-${claimIndex + 1}-${evidenceIndex + 1}`,
+      location: formatLocation(evidence),
+      relationshipType: evidence.relationshipType ?? "references"
+    }))
+  );
+}
+
+function formatLocation(evidence: RenderEvidence): string {
+  return evidence.startLine && evidence.endLine
+    ? `${evidence.sourceFilePath}:${evidence.startLine}-${evidence.endLine}`
+    : evidence.sourceFilePath;
+}
+
+function renderSymbol(evidence: Pick<RenderEvidence, "symbolName">): string {
+  return evidence.symbolName ? ` (\`${evidence.symbolName}\`)` : "";
 }
