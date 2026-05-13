@@ -165,11 +165,22 @@ function createEvidenceReferences(claims: RenderClaim[]): EvidenceReference[] {
     claim.evidence.map((evidence, evidenceIndex) => ({
       ...evidence,
       claim,
-      footnoteId: `claim-${claimIndex + 1}-${evidenceIndex + 1}`,
+      footnoteId: `${claimFootnoteBase(claim, claimIndex)}-${evidenceIndex + 1}`,
       location: formatLocation(evidence),
       relationshipType: evidence.relationshipType ?? "references"
     }))
   );
+}
+
+function claimFootnoteBase(claim: RenderClaim, claimIndex: number): string {
+  const source = claim.id ?? `${claim.text}-${claimIndex + 1}`;
+  const slug = source
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || `claim-${claimIndex + 1}`;
 }
 
 function formatLocation(evidence: RenderEvidence): string {

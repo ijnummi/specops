@@ -48,11 +48,13 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
     expect(markdown).toContain("status: draft");
     expect(markdown).toContain("# Review drafts");
     expect(markdown).toContain("## Reviewed Facts");
-    expect(markdown).toContain("- Users can accept reviewed assemblies. [^claim-1-1]");
+    expect(markdown).toContain(
+      "- Users can accept reviewed assemblies. [^11111111-1111-4111-8111-111111111111-1]"
+    );
     expect(markdown).toContain("apps/api/src/routes/analyze-review-assemblies.ts:20-80");
     expect(markdown).toContain("(`registerAnalyzeReviewAssemblyRoutes`)");
     expect(markdown).toContain(
-      "[^claim-1-1]: implements `apps/api/src/routes/analyze-review-assemblies.ts:20-80` (`registerAnalyzeReviewAssemblyRoutes`)"
+      "[^11111111-1111-4111-8111-111111111111-1]: implements `apps/api/src/routes/analyze-review-assemblies.ts:20-80` (`registerAnalyzeReviewAssemblyRoutes`)"
     );
     expect(markdown).toContain("## Hypotheses and Unknowns");
     expect(markdown).toContain("The review model may later feed refresh workflows.");
@@ -85,6 +87,40 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
       type: "use_case",
       title
     });
+  });
+
+  it("uses sanitized claim IDs for evidence footnote IDs", () => {
+    const markdown = renderAnalyzeReviewAssemblyMarkdown({
+      entityId: "use-case.review-drafts",
+      entityType: "use_case",
+      title: "Review drafts",
+      summary: "Review generated draft inputs before writing specs.",
+      claims: [
+        {
+          id: "claim.custom-review",
+          text: "Custom claim IDs remain stable in markdown links.",
+          kind: "fact",
+          evidence: [
+            {
+              sourceFilePath: "apps/api/src/services/analyze-review-renderer.ts",
+              symbolName: "renderAnalyzeReviewAssemblyMarkdown",
+              startLine: 1,
+              endLine: 80,
+              relationshipType: "implements"
+            }
+          ]
+        }
+      ],
+      proposedLinks: []
+    });
+
+    expect(markdown).toContain(
+      "- Custom claim IDs remain stable in markdown links. [^claim-custom-review-1]"
+    );
+    expect(markdown).toContain(
+      "[^claim-custom-review-1]: implements `apps/api/src/services/analyze-review-renderer.ts:1-80` (`renderAnalyzeReviewAssemblyMarkdown`)"
+    );
+    expect(markdown).not.toContain("[^claim-1-1]");
   });
 
   it("defaults evidence relationship type to references and groups source links by relationship", () => {
@@ -133,13 +169,13 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
     });
 
     expect(markdown).toContain(
-      "- Routes accept reviewed assemblies. [^claim-1-1] [^claim-1-2]"
+      "- Routes accept reviewed assemblies. [^11111111-1111-4111-8111-111111111111-1] [^11111111-1111-4111-8111-111111111111-2]"
     );
     expect(markdown).toContain(
-      "- Schemas define accepted review payloads. [^claim-2-1]"
+      "- Schemas define accepted review payloads. [^22222222-2222-4222-8222-222222222222-1]"
     );
     expect(markdown).toContain(
-      "[^claim-1-2]: references `apps/api/src/services/proposal-service.ts` (`createProposalService`)"
+      "[^11111111-1111-4111-8111-111111111111-2]: references `apps/api/src/services/proposal-service.ts` (`createProposalService`)"
     );
     expect(markdown.indexOf("### Implements")).toBeLessThan(markdown.indexOf("### Defines"));
     expect(markdown.indexOf("### Defines")).toBeLessThan(markdown.indexOf("### References"));
