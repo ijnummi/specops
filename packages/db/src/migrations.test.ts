@@ -83,6 +83,7 @@ describe("initial migration", () => {
     expect(migration).toContain("created_at timestamptz NOT NULL DEFAULT now()");
     expect(migration).toContain("started_at timestamptz");
     expect(migration).toContain("finished_at timestamptz");
+    expect(migration).toContain("CONSTRAINT index_runs_id_project_id_unique UNIQUE (id, project_id)");
     expect(migration).toContain("analyze_runs_project_id_idx");
     expect(migration).toContain("analyze_runs_project_status_idx");
     expect(migration).toContain("analyze_runs_project_created_at_idx");
@@ -108,6 +109,9 @@ describe("initial migration", () => {
     );
     expect(migration).toContain(
       "CONSTRAINT analyze_review_claims_id_project_id_unique UNIQUE (id, project_id)",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT analyze_review_claim_evidence_id_project_id_unique UNIQUE (id, project_id)",
     );
     expect(migration).toContain(
       [
@@ -162,10 +166,26 @@ describe("initial migration", () => {
     expect(migration).toContain("provenance text NOT NULL");
     expect(migration).toContain("status text NOT NULL");
     expect(migration).toContain("annotation_line integer");
+    expect(migration).toContain("source_file_id uuid");
+    expect(migration).not.toContain("FOREIGN KEY (source_file_id) REFERENCES source_files");
     expect(migration).toContain(
-      "claim_id uuid REFERENCES analyze_review_claims(id) ON DELETE SET NULL",
+      "CONSTRAINT source_spec_annotations_claim_project_fk FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id) ON DELETE SET NULL (claim_id)",
     );
-    expect(migration).toContain("CONSTRAINT source_spec_annotations_source_file_fk");
+    expect(migration).toContain(
+      "CONSTRAINT source_spec_annotations_analyze_run_project_fk FOREIGN KEY (analyze_run_id, project_id) REFERENCES analyze_runs(id, project_id) ON DELETE SET NULL (analyze_run_id)",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT source_spec_annotations_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE SET NULL (proposal_id)",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT source_spec_annotations_assembly_project_fk FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE SET NULL (assembly_id)",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT source_spec_annotations_claim_evidence_project_fk FOREIGN KEY (claim_evidence_id, project_id) REFERENCES analyze_review_claim_evidence(id, project_id) ON DELETE SET NULL (claim_evidence_id)",
+    );
+    expect(migration).toContain(
+      "CONSTRAINT source_spec_annotations_index_run_project_fk FOREIGN KEY (index_run_id, project_id) REFERENCES index_runs(id, project_id) ON DELETE SET NULL (index_run_id)",
+    );
     expect(migration).toContain("source_spec_annotations_project_entity_idx");
     expect(migration).toContain("source_spec_annotations_project_source_file_idx");
     expect(migration).toContain("source_spec_annotations_project_relationship_status_idx");

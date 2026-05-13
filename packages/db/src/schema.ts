@@ -60,6 +60,7 @@ export const indexRuns = pgTable(
   (table) => ({
     projectIdx: index("index_runs_project_id_idx").on(table.projectId),
     projectStartedAtIdx: index("index_runs_project_started_at_idx").on(table.projectId, table.startedAt),
+    idProjectUnique: unique("index_runs_id_project_id_unique").on(table.id, table.projectId),
   }),
 );
 
@@ -482,6 +483,10 @@ export const analyzeReviewClaimEvidence = pgTable(
   (table) => ({
     claimIdx: index("analyze_review_claim_evidence_claim_idx").on(table.claimId),
     proposalIdx: index("analyze_review_claim_evidence_proposal_idx").on(table.proposalId),
+    idProjectUnique: unique("analyze_review_claim_evidence_id_project_id_unique").on(
+      table.id,
+      table.projectId,
+    ),
     claimProjectFk: foreignKey({
       name: "analyze_review_claim_evidence_claim_project_fk",
       columns: [table.claimId, table.projectId],
@@ -502,7 +507,7 @@ export const sourceSpecAnnotations = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    sourceFileId: uuid("source_file_id").references(() => sourceFiles.id, { onDelete: "set null" }),
+    sourceFileId: uuid("source_file_id"),
     sourceFilePath: text("source_file_path").notNull(),
     symbolName: text("symbol_name"),
     symbolKind: text("symbol_kind"),
@@ -512,20 +517,16 @@ export const sourceSpecAnnotations = pgTable(
     sourceContentHash: text("source_content_hash"),
     entityId: text("entity_id").notNull(),
     specFilePath: text("spec_file_path").notNull(),
-    claimId: uuid("claim_id").references(() => analyzeReviewClaims.id, { onDelete: "set null" }),
+    claimId: uuid("claim_id"),
     relationshipType: text("relationship_type").notNull(),
     confidence: doublePrecision("confidence"),
     provenance: text("provenance").notNull(),
     status: text("status").notNull().default("active"),
-    analyzeRunId: uuid("analyze_run_id").references(() => analyzeRuns.id, { onDelete: "set null" }),
-    proposalId: uuid("proposal_id").references(() => aiProposals.id, { onDelete: "set null" }),
-    assemblyId: uuid("assembly_id").references(() => analyzeReviewAssemblies.id, {
-      onDelete: "set null",
-    }),
-    claimEvidenceId: uuid("claim_evidence_id").references(() => analyzeReviewClaimEvidence.id, {
-      onDelete: "set null",
-    }),
-    indexRunId: uuid("index_run_id").references(() => indexRuns.id, { onDelete: "set null" }),
+    analyzeRunId: uuid("analyze_run_id"),
+    proposalId: uuid("proposal_id"),
+    assemblyId: uuid("assembly_id"),
+    claimEvidenceId: uuid("claim_evidence_id"),
+    indexRunId: uuid("index_run_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -548,6 +549,36 @@ export const sourceSpecAnnotations = pgTable(
       table.analyzeRunId,
       table.assemblyId,
     ),
+    claimProjectFk: foreignKey({
+      name: "source_spec_annotations_claim_project_fk",
+      columns: [table.claimId, table.projectId],
+      foreignColumns: [analyzeReviewClaims.id, analyzeReviewClaims.projectId],
+    }),
+    analyzeRunProjectFk: foreignKey({
+      name: "source_spec_annotations_analyze_run_project_fk",
+      columns: [table.analyzeRunId, table.projectId],
+      foreignColumns: [analyzeRuns.id, analyzeRuns.projectId],
+    }),
+    proposalProjectFk: foreignKey({
+      name: "source_spec_annotations_proposal_project_fk",
+      columns: [table.proposalId, table.projectId],
+      foreignColumns: [aiProposals.id, aiProposals.projectId],
+    }),
+    assemblyProjectFk: foreignKey({
+      name: "source_spec_annotations_assembly_project_fk",
+      columns: [table.assemblyId, table.projectId],
+      foreignColumns: [analyzeReviewAssemblies.id, analyzeReviewAssemblies.projectId],
+    }),
+    claimEvidenceProjectFk: foreignKey({
+      name: "source_spec_annotations_claim_evidence_project_fk",
+      columns: [table.claimEvidenceId, table.projectId],
+      foreignColumns: [analyzeReviewClaimEvidence.id, analyzeReviewClaimEvidence.projectId],
+    }),
+    indexRunProjectFk: foreignKey({
+      name: "source_spec_annotations_index_run_project_fk",
+      columns: [table.indexRunId, table.projectId],
+      foreignColumns: [indexRuns.id, indexRuns.projectId],
+    }),
     activeDedupeIdx: uniqueIndex("source_spec_annotations_active_dedupe_idx")
       .on(
         table.projectId,
