@@ -83,6 +83,11 @@ type AnalyzeReviewAcceptFailure = AnalyzeReviewAcceptResponse["failures"][number
 
 type AnalyzeReviewAssemblyServiceOptions = {
   acceptTestHooks?: {
+    beforeAcceptAssembly?: (context: {
+      projectId: string;
+      runId: string;
+      assemblyId: string;
+    }) => Promise<void> | void;
     beforeStatusUpdate?: (context: {
       projectId: string;
       runId: string;
@@ -163,7 +168,6 @@ export function createAnalyzeReviewAssemblyService(
     input: AnalyzeReviewUpdateAssemblyRequest
   ): Promise<AnalyzeReviewAssemblyDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
-    await getAssemblyRow(projectId, runId, assemblyId);
     const now = new Date();
     const update: Partial<typeof analyzeReviewAssemblies.$inferInsert> = {
       updatedAt: now
@@ -189,17 +193,22 @@ export function createAnalyzeReviewAssemblyService(
       update.discardedAt = now;
     }
 
-    await db
-      .update(analyzeReviewAssemblies)
-      .set(update)
-      .where(
-        and(
-          eq(analyzeReviewAssemblies.projectId, projectId),
-          eq(analyzeReviewAssemblies.analyzeRunId, runId),
-          eq(analyzeReviewAssemblies.id, assemblyId)
-        )
-      );
-    await refreshRenderedMarkdown(db, projectId, assemblyId);
+    await db.transaction(async (tx) => {
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
+      await tx
+        .update(analyzeReviewAssemblies)
+        .set(update)
+        .where(
+          and(
+            eq(analyzeReviewAssemblies.projectId, projectId),
+            eq(analyzeReviewAssemblies.analyzeRunId, runId),
+            eq(analyzeReviewAssemblies.id, assemblyId),
+            eq(analyzeReviewAssemblies.status, "draft")
+          )
+        );
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
+    });
 
     return getMappedAssembly(projectId, run, assemblyId);
   }
@@ -214,7 +223,8 @@ export function createAnalyzeReviewAssemblyService(
     await getRunProposalRows(projectId, run, [input.proposalId]);
 
     await db.transaction(async (tx) => {
-      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
       await lockAssignmentWrites(tx, projectId, [input.proposalId]);
 
       if (input.role !== "evidence_only") {
@@ -266,7 +276,8 @@ export function createAnalyzeReviewAssemblyService(
   ): Promise<AnalyzeReviewAssemblyDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
     await db.transaction(async (tx) => {
-      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
       await lockAssignmentWrites(tx, projectId, [proposalId]);
       const inputs = await tx
         .select()
@@ -328,7 +339,8 @@ export function createAnalyzeReviewAssemblyService(
   ): Promise<AnalyzeReviewClaimDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
     const [claim] = await db.transaction(async (tx) => {
-      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
       const claims = await tx
         .select({ sortOrder: analyzeReviewClaims.sortOrder })
         .from(analyzeReviewClaims)
@@ -371,7 +383,8 @@ export function createAnalyzeReviewAssemblyService(
   ): Promise<AnalyzeReviewClaimDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
     await db.transaction(async (tx) => {
-      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
       await getClaimRow(projectId, assemblyId, claimId, tx);
       const update: Partial<typeof analyzeReviewClaims.$inferInsert> = {
         updatedAt: new Date()
@@ -415,7 +428,8 @@ export function createAnalyzeReviewAssemblyService(
   ): Promise<AnalyzeReviewEvidenceDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
     const [evidence] = await db.transaction(async (tx) => {
-      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
       await getClaimRow(projectId, assemblyId, claimId, tx);
       await getRunProposalRows(projectId, run, [input.proposalId], tx);
       const inserted = await tx
@@ -452,7 +466,8 @@ export function createAnalyzeReviewAssemblyService(
   ): Promise<AnalyzeReviewClaimDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
     await db.transaction(async (tx) => {
-      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssemblyWrite(tx, projectId, assemblyId);
+      await getDraftAssemblyRow(projectId, runId, assemblyId, tx);
       await getClaimRow(projectId, assemblyId, claimId, tx);
       await getEvidenceRow(projectId, claimId, evidenceId, tx);
       await tx
@@ -488,123 +503,120 @@ export function createAnalyzeReviewAssemblyService(
     await mkdir(specopsPath, { recursive: true });
     const realSpecopsPath = await assertRealPathInsideDirectory(repoPath, specopsPath);
 
-    const review = await listReviewAssembliesWithoutDeriving(projectId, run);
-    const assemblyById = new Map(review.assemblies.map((assembly) => [assembly.id, assembly]));
-    const selectedAssemblies = input.assemblyIds.map((assemblyId) => {
-      const assembly = assemblyById.get(assemblyId);
-      if (!assembly) {
-        throw new NotFoundError("Analyze review assembly not found", {
+    for (const assemblyId of input.assemblyIds) {
+      let targetPath: string | null = null;
+      let wroteFile = false;
+      try {
+        await options.acceptTestHooks?.beforeAcceptAssembly?.({
           projectId,
           runId,
           assemblyId
         });
-      }
-      return assembly;
-    });
-
-    for (const assembly of selectedAssemblies) {
-      if (assembly.status === "discarded") {
-        failures.push(
-          createAcceptFailure(
-            assembly.id,
-            "assembly_discarded",
-            "Discarded assemblies cannot be accepted.",
-            "status"
-          )
-        );
-        continue;
-      }
-      if (assembly.status !== "draft") {
-        failures.push(
-          createAcceptFailure(
-            assembly.id,
-            "assembly_not_draft",
-            "Only draft assemblies can be accepted.",
-            "status"
-          )
-        );
-        continue;
-      }
-
-      const blockerMessages = assembly.validation.messages.filter(
-        (message) => message.severity === "blocker"
-      );
-      if (blockerMessages.length > 0) {
-        failures.push({ assemblyId: assembly.id, messages: blockerMessages });
-        continue;
-      }
-
-      const proposedLinks = await getProposedLinksForAssembly(db, projectId, assembly.id);
-      const renderedMarkdown = renderAnalyzeReviewAssemblyMarkdown({
-        entityId: assembly.entityId,
-        entityType: assembly.entityType,
-        title: assembly.title,
-        summary: assembly.summary,
-        claims: assembly.claims.map((claim) => ({
-          text: claim.text,
-          kind: claim.kind,
-          evidence: claim.evidence.map((evidence) => ({
-            sourceFilePath: evidence.sourceFilePath,
-            symbolName: evidence.symbolName,
-            startLine: evidence.startLine,
-            endLine: evidence.endLine
-          }))
-        })),
-        proposedLinks
-      });
-      const parseMessages = validationMessagesForRenderedMarkdown(assembly, renderedMarkdown);
-      if (parseMessages.length > 0) {
-        failures.push({ assemblyId: assembly.id, messages: parseMessages });
-        continue;
-      }
-
-      const proposalIds = assembly.inputs
-        .filter((item) => item.assignmentState === "assigned")
-        .map((item) => item.proposalId);
-      if (proposalIds.length > 0) {
-        const proposalRows = await db
-          .select({ id: aiProposals.id, status: aiProposals.status })
-          .from(aiProposals)
-          .where(and(eq(aiProposals.projectId, projectId), inArray(aiProposals.id, proposalIds)));
-        const proposalById = new Map(proposalRows.map((proposal) => [proposal.id, proposal]));
-        const nonPendingProposalId = proposalIds.find(
-          (proposalId) => proposalById.get(proposalId)?.status !== "pending"
-        );
-        if (nonPendingProposalId) {
-          failures.push(
-            createAcceptFailure(
-              assembly.id,
-              "proposal_not_pending",
-              "Attached proposals must still be pending before the assembly can be accepted.",
-              "inputs"
-            )
-          );
-          continue;
-        }
-      }
-
-      const targetPath = assertInsideDirectory(
-        realSpecopsPath,
-        path.join(realSpecopsPath, assembly.filePath)
-      );
-      const targetParent = path.dirname(targetPath);
-      await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
-      await mkdir(targetParent, { recursive: true });
-      await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
-
-      let wroteFile = false;
-      try {
-        await writeFile(targetPath, renderedMarkdown, { encoding: "utf8", flag: "wx" });
-        wroteFile = true;
-        await options.acceptTestHooks?.beforeStatusUpdate?.({
-          projectId,
-          runId,
-          assemblyId: assembly.id,
-          targetPath
-        });
-
-        const now = new Date();
         await db.transaction(async (tx) => {
+          await lockAssemblyWrite(tx, projectId, assemblyId);
+          const assembly = await getMappedAssemblyFromClient(projectId, run, assemblyId, tx);
+          if (assembly.status === "discarded") {
+            throw new AcceptValidationFailureError(
+              createAcceptFailure(
+                assembly.id,
+                "assembly_discarded",
+                "Discarded assemblies cannot be accepted.",
+                "status"
+              )
+            );
+          }
+          if (assembly.status !== "draft") {
+            throw new AcceptValidationFailureError(
+              createAcceptFailure(
+                assembly.id,
+                "assembly_not_draft",
+                "Only draft assemblies can be accepted.",
+                "status"
+              )
+            );
+          }
+
+          const blockerMessages = assembly.validation.messages.filter(
+            (message) => message.severity === "blocker"
+          );
+          if (blockerMessages.length > 0) {
+            throw new AcceptValidationFailureError({
+              assemblyId: assembly.id,
+              messages: blockerMessages
+            });
+          }
+
+          const proposedLinks = await getProposedLinksForAssembly(tx, projectId, assembly.id);
+          const renderedMarkdown = renderAnalyzeReviewAssemblyMarkdown({
+            entityId: assembly.entityId,
+            entityType: assembly.entityType,
+            title: assembly.title,
+            summary: assembly.summary,
+            claims: assembly.claims.map((claim) => ({
+              text: claim.text,
+              kind: claim.kind,
+              evidence: claim.evidence.map((evidence) => ({
+                sourceFilePath: evidence.sourceFilePath,
+                symbolName: evidence.symbolName,
+                startLine: evidence.startLine,
+                endLine: evidence.endLine
+              }))
+            })),
+            proposedLinks
+          });
+          const parseMessages = validationMessagesForRenderedMarkdown(assembly, renderedMarkdown);
+          if (parseMessages.length > 0) {
+            throw new AcceptValidationFailureError({
+              assemblyId: assembly.id,
+              messages: parseMessages
+            });
+          }
+
+          const proposalIds = assembly.inputs
+            .filter((item) => item.assignmentState === "assigned")
+            .map((item) => item.proposalId);
+          if (proposalIds.length > 0) {
+            await lockAssignmentWrites(tx, projectId, proposalIds);
+            const proposalRows = await tx
+              .select({ id: aiProposals.id, status: aiProposals.status })
+              .from(aiProposals)
+              .where(
+                and(eq(aiProposals.projectId, projectId), inArray(aiProposals.id, proposalIds))
+              );
+            const proposalById = new Map(proposalRows.map((proposal) => [proposal.id, proposal]));
+            const nonPendingProposalId = proposalIds.find(
+              (proposalId) => proposalById.get(proposalId)?.status !== "pending"
+            );
+            if (nonPendingProposalId) {
+              throw new AcceptValidationFailureError(
+                createAcceptFailure(
+                  assembly.id,
+                  "proposal_not_pending",
+                  "Attached proposals must still be pending before the assembly can be accepted.",
+                  "inputs"
+                )
+              );
+            }
+          }
+
+          targetPath = assertInsideDirectory(
+            realSpecopsPath,
+            path.join(realSpecopsPath, assembly.filePath)
+          );
+          const targetParent = path.dirname(targetPath);
+          await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
+          await mkdir(targetParent, { recursive: true });
+          await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
+          await writeFile(targetPath, renderedMarkdown, { encoding: "utf8", flag: "wx" });
+          wroteFile = true;
+          await options.acceptTestHooks?.beforeStatusUpdate?.({
+            projectId,
+            runId,
+            assemblyId: assembly.id,
+            targetPath
+          });
+
+          const now = new Date();
           const [updatedAssembly] = await tx
             .update(analyzeReviewAssemblies)
             .set({
@@ -617,7 +629,7 @@ export function createAnalyzeReviewAssemblyService(
               and(
                 eq(analyzeReviewAssemblies.projectId, projectId),
                 eq(analyzeReviewAssemblies.analyzeRunId, runId),
-                eq(analyzeReviewAssemblies.id, assembly.id),
+                eq(analyzeReviewAssemblies.id, assemblyId),
                 eq(analyzeReviewAssemblies.status, "draft")
               )
             )
@@ -660,7 +672,7 @@ export function createAnalyzeReviewAssemblyService(
           }
         });
       } catch (error) {
-        if (wroteFile) {
+        if (wroteFile && targetPath) {
           await rm(targetPath, { force: true });
         }
         if (error instanceof AcceptValidationFailureError) {
@@ -670,7 +682,7 @@ export function createAnalyzeReviewAssemblyService(
         if (isFileExistsError(error)) {
           failures.push(
             createAcceptFailure(
-              assembly.id,
+              assemblyId,
               "target_file_exists",
               "Target markdown file already exists.",
               "filePath"
@@ -681,7 +693,7 @@ export function createAnalyzeReviewAssemblyService(
         throw error;
       }
 
-      acceptedAssemblyIds.push(assembly.id);
+      acceptedAssemblyIds.push(assemblyId);
     }
 
     let indexRun: AnalyzeReviewAcceptResponse["indexRun"] = null;
@@ -884,6 +896,17 @@ export function createAnalyzeReviewAssemblyService(
       });
     }
 
+    return row;
+  }
+
+  async function getDraftAssemblyRow(
+    projectId: string,
+    runId: string,
+    assemblyId: string,
+    client: QueryClient = db
+  ): Promise<AssemblyRow> {
+    const row = await getAssemblyRow(projectId, runId, assemblyId, client);
+    assertDraftAssembly(row);
     return row;
   }
 
@@ -1146,6 +1169,56 @@ export function createAnalyzeReviewAssemblyService(
     }
 
     return assembly;
+  }
+
+  async function getMappedAssemblyFromClient(
+    projectId: string,
+    run: AnalyzeRunRow,
+    assemblyId: string,
+    client: QueryClient = db
+  ): Promise<AnalyzeReviewAssemblyDto> {
+    const assembly = await getAssemblyRow(projectId, run.id, assemblyId, client);
+    const inputs = await client
+      .select()
+      .from(analyzeReviewAssemblyInputs)
+      .where(
+        and(
+          eq(analyzeReviewAssemblyInputs.projectId, projectId),
+          eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId)
+        )
+      );
+    const claims = await client
+      .select()
+      .from(analyzeReviewClaims)
+      .where(and(eq(analyzeReviewClaims.projectId, projectId), eq(analyzeReviewClaims.assemblyId, assemblyId)))
+      .orderBy(asc(analyzeReviewClaims.sortOrder), asc(analyzeReviewClaims.createdAt));
+    const claimIds = claims.map((claim) => claim.id);
+    const evidence = claimIds.length
+      ? await client
+          .select()
+          .from(analyzeReviewClaimEvidence)
+          .where(
+            and(
+              eq(analyzeReviewClaimEvidence.projectId, projectId),
+              inArray(analyzeReviewClaimEvidence.claimId, claimIds)
+            )
+          )
+          .orderBy(asc(analyzeReviewClaimEvidence.createdAt), asc(analyzeReviewClaimEvidence.id))
+      : [];
+    const proposalIds = [...new Set(inputs.map((input) => input.proposalId))];
+    const proposalRows = proposalIds.length
+      ? await client
+          .select()
+          .from(aiProposals)
+          .where(and(eq(aiProposals.projectId, projectId), inArray(aiProposals.id, proposalIds)))
+      : [];
+
+    return mapAssembly(assembly, {
+      inputs,
+      claims,
+      evidence,
+      proposalById: new Map(proposalRows.map((proposal) => [proposal.id, proposal]))
+    });
   }
 
   async function getMappedClaim(
@@ -1610,6 +1683,15 @@ class AcceptValidationFailureError extends Error {
   }
 }
 
+function assertDraftAssembly(assembly: Pick<AssemblyRow, "id" | "status">): void {
+  if (assembly.status !== "draft") {
+    throw new ConflictError("Only draft review assemblies can be modified", {
+      assemblyId: assembly.id,
+      status: assembly.status
+    });
+  }
+}
+
 function createAcceptFailure(
   assemblyId: string,
   code: string,
@@ -1673,6 +1755,16 @@ async function lockDerivation(
 ): Promise<void> {
   await client.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:analyze_review_derivation:${runId}`}, 0))`
+  );
+}
+
+async function lockAssemblyWrite(
+  client: QueryClient,
+  projectId: string,
+  assemblyId: string
+): Promise<void> {
+  await client.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:analyze_review_assembly:${assemblyId}`}, 0))`
   );
 }
 

@@ -877,6 +877,129 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     });
   });
 
+  it("blocks mutating accepted assemblies", async () => {
+    const { db, project, run, proposal, proposals } = await createReviewFixture({
+      derive: false,
+      proposalCount: 2
+    });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Immutable",
+      entityType: "use_case",
+      entityId: "use-case.immutable",
+      filePath: "use-cases/immutable.md",
+      summary: "Immutable assembly.",
+      proposalIds: [proposal.id]
+    });
+    const claim = assembly.claims[0]!;
+    const evidence = claim.evidence[0]!;
+
+    await service.acceptAssemblies(project.id, run.id, { assemblyIds: [assembly.id] });
+
+    await expect(
+      service.patchAssembly(project.id, run.id, assembly.id, { title: "Mutated" })
+    ).rejects.toMatchObject({ name: "ConflictError" });
+    await expect(
+      service.attachInput(project.id, run.id, assembly.id, {
+        proposalId: proposals[1]!.id,
+        role: "supporting"
+      })
+    ).rejects.toMatchObject({ name: "ConflictError" });
+    await expect(
+      service.removeInput(project.id, run.id, assembly.id, proposal.id)
+    ).rejects.toMatchObject({ name: "ConflictError" });
+    await expect(
+      service.createClaim(project.id, run.id, assembly.id, {
+        text: "Late claim.",
+        kind: "hypothesis",
+        confidence: 0.1
+      })
+    ).rejects.toMatchObject({ name: "ConflictError" });
+    await expect(
+      service.patchClaim(project.id, run.id, assembly.id, claim.id, { text: "Late edit." })
+    ).rejects.toMatchObject({ name: "ConflictError" });
+    await expect(
+      service.attachEvidence(project.id, run.id, assembly.id, claim.id, {
+        proposalId: proposal.id,
+        sourceFilePath: "apps/api/src/services/analyze-review-assembly-service.ts",
+        symbolName: "acceptAssemblies",
+        startLine: 1,
+        endLine: 20,
+        provenance: "user",
+        confidence: 0.7
+      })
+    ).rejects.toMatchObject({ name: "ConflictError" });
+    await expect(
+      service.removeEvidence(project.id, run.id, assembly.id, claim.id, evidence.id)
+    ).rejects.toMatchObject({ name: "ConflictError" });
+
+    const review = await service.listReviewAssemblies(project.id, run.id);
+    expect(review.assemblies[0]).toMatchObject({
+      id: assembly.id,
+      status: "accepted",
+      title: "Immutable"
+    });
+    expect(review.assemblies[0]?.inputs.map((input) => input.proposalId)).toEqual([proposal.id]);
+    expect(review.assemblies[0]?.claims).toHaveLength(1);
+    expect(review.assemblies[0]?.claims[0]?.text).toBe(claim.text);
+    expect(review.assemblies[0]?.claims[0]?.evidence.map((item) => item.id)).toEqual([
+      evidence.id
+    ]);
+  });
+
+  it("accepts the fresh locked assembly state instead of a stale snapshot", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    let service: ReturnType<typeof createAnalyzeReviewAssemblyService>;
+    let mutated = false;
+    service = createAnalyzeReviewAssemblyService(db, {
+      acceptTestHooks: {
+        beforeAcceptAssembly: async ({ assemblyId }) => {
+          if (mutated) {
+            return;
+          }
+          mutated = true;
+          await service.patchAssembly(project.id, run.id, assemblyId, {
+            title: "Fresh title",
+            summary: "Fresh summary."
+          });
+        }
+      }
+    });
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Stale title",
+      entityType: "use_case",
+      entityId: "use-case.fresh-accept",
+      filePath: "use-cases/fresh-accept.md",
+      summary: "Stale summary.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const writtenMarkdown = await readFile(
+      path.join(project.specopsPath, "use-cases/fresh-accept.md"),
+      "utf8"
+    );
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(result.acceptedAssemblyIds).toEqual([assembly.id]);
+    expect(writtenMarkdown).toContain("# Fresh title");
+    expect(writtenMarkdown).toContain("Fresh summary.");
+    expect(writtenMarkdown).not.toContain("Stale title");
+    expect(review.assemblies[0]).toMatchObject({
+      id: assembly.id,
+      status: "accepted",
+      title: "Fresh title",
+      renderedMarkdown: writtenMarkdown
+    });
+  });
+
   it("returns validation failures without writing invalid assemblies", async () => {
     const { db, project, run } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);
