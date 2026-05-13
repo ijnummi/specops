@@ -133,6 +133,45 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     ).not.toContain(proposal.id);
   });
 
+  it("does not rederive a removed input from a multi-input assembly", async () => {
+    const { db, project, run, proposals } = await createReviewFixture({
+      derive: false,
+      proposalCount: 2
+    });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const removedProposal = proposals[0]!;
+    const keptProposal = proposals[1]!;
+    const assembly = await service.createAssembly(project.id, run.id, {
+      proposalIds: [removedProposal.id, keptProposal.id]
+    });
+
+    await service.removeInput(project.id, run.id, assembly.id, removedProposal.id);
+    const review = await service.listReviewAssemblies(project.id, run.id);
+    const listedAgain = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(review.assemblies).toHaveLength(1);
+    expect(listedAgain.assemblies).toHaveLength(1);
+    expect(listedAgain.unassignedInputs.map((input) => input.proposalId)).toContain(
+      removedProposal.id
+    );
+    expect(
+      listedAgain.assemblies.flatMap((item) =>
+        item.status === "draft"
+          ? item.inputs
+              .filter((input) => input.assignmentState === "assigned")
+              .map((input) => input.proposalId)
+          : []
+      )
+    ).not.toContain(removedProposal.id);
+    expect(
+      listedAgain.assemblies.flatMap((item) =>
+        item.inputs
+          .filter((input) => input.assignmentState === "assigned")
+          .map((input) => input.proposalId)
+      )
+    ).toContain(keptProposal.id);
+  });
+
   it("derives active input when a run proposal only has evidence-only inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);

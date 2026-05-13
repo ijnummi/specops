@@ -66,6 +66,8 @@ type InitialClaim = {
   evidence: Array<Omit<AnalyzeReviewEvidenceDto, "id">>;
 };
 
+const DISCARDED_INPUT_ROLE = "discarded";
+
 export function createAnalyzeReviewAssemblyService(db: Db) {
   async function listReviewAssemblies(
     projectId: string,
@@ -217,8 +219,21 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       const removedInput = inputs.find((input) => input.proposalId === proposalId);
       const shouldDiscardAssembly =
         removedInput?.role !== undefined &&
-        removedInput.role !== "evidence_only" &&
-        inputs.filter((input) => input.role !== "evidence_only").length === 1;
+        isActiveInput(removedInput) &&
+        inputs.filter(isActiveInput).length === 1;
+
+      if (removedInput) {
+        await tx
+          .update(analyzeReviewAssemblyInputs)
+          .set({ role: DISCARDED_INPUT_ROLE })
+          .where(
+            and(
+              eq(analyzeReviewAssemblyInputs.projectId, projectId),
+              eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId),
+              eq(analyzeReviewAssemblyInputs.proposalId, proposalId)
+            )
+          );
+      }
 
       if (shouldDiscardAssembly) {
         const now = new Date();
@@ -234,16 +249,6 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
               eq(analyzeReviewAssemblies.projectId, projectId),
               eq(analyzeReviewAssemblies.analyzeRunId, runId),
               eq(analyzeReviewAssemblies.id, assemblyId)
-            )
-          );
-      } else {
-        await tx
-          .delete(analyzeReviewAssemblyInputs)
-          .where(
-            and(
-              eq(analyzeReviewAssemblyInputs.projectId, projectId),
-              eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId),
-              eq(analyzeReviewAssemblyInputs.proposalId, proposalId)
             )
           );
       }
@@ -528,7 +533,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         )
     );
     const blockingRows = rows.filter(
-      (row) => row.role !== "evidence_only" && (assemblyId === null || row.assemblyId !== assemblyId)
+      (row) => isActiveInput(row) && (assemblyId === null || row.assemblyId !== assemblyId)
     );
     if (blockingRows.length === 0) {
       return;
@@ -612,14 +617,18 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       inputs
         .filter(
           (input) =>
-            input.role !== "evidence_only" &&
+            isActiveInput(input) &&
             assemblyById.get(input.assemblyId)?.status !== "discarded"
         )
         .map((input) => input.proposalId)
     );
     const discardedProposalIds = new Set(
       inputs
-        .filter((input) => assemblyById.get(input.assemblyId)?.status === "discarded")
+        .filter(
+          (input) =>
+            input.role === DISCARDED_INPUT_ROLE ||
+            assemblyById.get(input.assemblyId)?.status === "discarded"
+        )
         .map((input) => input.proposalId)
     );
     const mappedAssemblies = assemblies.map((assembly) =>
@@ -800,11 +809,12 @@ function mapAssembly(
       if (!proposal) {
         return [];
       }
+      const isDiscarded = assembly.status === "discarded" || input.role === DISCARDED_INPUT_ROLE;
       return [
         mapProposalInput(
           proposal,
-          assembly.status === "discarded" ? "discarded" : "assigned",
-          input.role as AnalyzeReviewInputRole
+          isDiscarded ? "discarded" : "assigned",
+          isDiscarded ? undefined : (input.role as AnalyzeReviewInputRole)
         )
       ];
     }),
@@ -815,6 +825,10 @@ function mapAssembly(
     acceptedAt: assembly.acceptedAt?.toISOString() ?? null,
     discardedAt: assembly.discardedAt?.toISOString() ?? null
   };
+}
+
+function isActiveInput(input: Pick<AssemblyInputRow, "role">): boolean {
+  return input.role !== "evidence_only" && input.role !== DISCARDED_INPUT_ROLE;
 }
 
 function mapClaim(claim: ClaimRow, evidenceRows: ClaimEvidenceRow[]): AnalyzeReviewClaimDto {
