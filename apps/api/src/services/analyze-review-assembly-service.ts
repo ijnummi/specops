@@ -36,7 +36,7 @@ import {
   analyzeReviewClaims,
   analyzeRuns
 } from "@specops/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
 import { renderAnalyzeReviewAssemblyMarkdown } from "./analyze-review-renderer.js";
@@ -47,6 +47,8 @@ type AssemblyInputRow = typeof analyzeReviewAssemblyInputs.$inferSelect;
 type ClaimRow = typeof analyzeReviewClaims.$inferSelect;
 type ClaimEvidenceRow = typeof analyzeReviewClaimEvidence.$inferSelect;
 type ProposalRow = typeof aiProposals.$inferSelect;
+type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+type QueryClient = Db | Transaction;
 
 type ProposalMetadata = {
   entityType: AnalyzeReviewEntityType;
@@ -92,18 +94,25 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       throw new BadRequestError("Expected proposalIds or title, entityType, entityId, and filePath");
     }
 
-    for (const proposal of proposalRows) {
-      await assertNoActiveAssignment(projectId, "", proposal.id);
-    }
+    const assembly = await db.transaction(async (tx) => {
+      await lockAssignmentWrites(
+        tx,
+        projectId,
+        proposalRows.map((proposal) => proposal.id)
+      );
+      for (const proposal of proposalRows) {
+        await assertNoActiveAssignment(tx, projectId, "", proposal.id);
+      }
 
-    const assembly = await createDraftAssembly(projectId, runId, {
-      entityType,
-      entityId,
-      filePath,
-      title,
-      summary: input.summary ?? firstMetadata?.summary ?? "",
-      proposedLinks: firstMetadata?.proposedLinks ?? [],
-      proposals: proposalRows
+      return createDraftAssembly(tx, projectId, runId, {
+        entityType,
+        entityId,
+        filePath,
+        title,
+        summary: input.summary ?? firstMetadata?.summary ?? "",
+        proposedLinks: firstMetadata?.proposedLinks ?? [],
+        proposals: proposalRows
+      });
     });
 
     return getMappedAssembly(projectId, run, assembly.id);
@@ -152,7 +161,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
           eq(analyzeReviewAssemblies.id, assemblyId)
         )
       );
-    await refreshRenderedMarkdown(projectId, assemblyId);
+    await refreshRenderedMarkdown(db, projectId, assemblyId);
 
     return getMappedAssembly(projectId, run, assemblyId);
   }
@@ -164,20 +173,24 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     input: AnalyzeReviewAttachInputRequest
   ): Promise<AnalyzeReviewAssemblyDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
-    await getAssemblyRow(projectId, runId, assemblyId);
     await getRunProposalRows(projectId, run, [input.proposalId]);
 
-    if (input.role !== "evidence_only") {
-      await assertNoActiveAssignment(projectId, assemblyId, input.proposalId);
-    }
+    await db.transaction(async (tx) => {
+      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssignmentWrites(tx, projectId, [input.proposalId]);
 
-    await db.insert(analyzeReviewAssemblyInputs).values({
-      projectId,
-      assemblyId,
-      proposalId: input.proposalId,
-      role: input.role
+      if (input.role !== "evidence_only") {
+        await assertNoActiveAssignment(tx, projectId, assemblyId, input.proposalId);
+      }
+
+      await tx.insert(analyzeReviewAssemblyInputs).values({
+        projectId,
+        assemblyId,
+        proposalId: input.proposalId,
+        role: input.role
+      });
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
     });
-    await refreshRenderedMarkdown(projectId, assemblyId);
 
     return getMappedAssembly(projectId, run, assemblyId);
   }
@@ -199,7 +212,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
           eq(analyzeReviewAssemblyInputs.proposalId, proposalId)
         )
       );
-    await refreshRenderedMarkdown(projectId, assemblyId);
+    await refreshRenderedMarkdown(db, projectId, assemblyId);
 
     return getMappedAssembly(projectId, run, assemblyId);
   }
@@ -252,38 +265,64 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
   }
 
   async function ensureInitialAssemblies(projectId: string, run: AnalyzeRunRow): Promise<void> {
-    const [existing] = await db
-      .select({ id: analyzeReviewAssemblies.id })
-      .from(analyzeReviewAssemblies)
-      .where(
-        and(
-          eq(analyzeReviewAssemblies.projectId, projectId),
-          eq(analyzeReviewAssemblies.analyzeRunId, run.id)
-        )
-      )
-      .limit(1);
+    await db.transaction(async (tx) => {
+      const runProposalIds = readProposalIds(run.proposalIdsJson);
+      await lockDerivation(tx, projectId, run.id);
+      await lockAssignmentWrites(tx, projectId, runProposalIds);
 
-    if (existing) {
-      return;
-    }
+      const assemblies = await tx
+        .select({ id: analyzeReviewAssemblies.id })
+        .from(analyzeReviewAssemblies)
+        .where(
+          and(
+            eq(analyzeReviewAssemblies.projectId, projectId),
+            eq(analyzeReviewAssemblies.analyzeRunId, run.id)
+          )
+        );
+      const assemblyIds = assemblies.map((assembly) => assembly.id);
+      const inputs = assemblyIds.length
+        ? await tx
+            .select()
+            .from(analyzeReviewAssemblyInputs)
+            .where(
+              and(
+                eq(analyzeReviewAssemblyInputs.projectId, projectId),
+                inArray(analyzeReviewAssemblyInputs.assemblyId, assemblyIds)
+              )
+            )
+        : [];
+      const representedProposalIds = new Set(
+        inputs
+          .filter((input) => input.role !== "evidence_only")
+          .map((input) => input.proposalId)
+      );
+      const missingProposalIds = runProposalIds.filter(
+        (proposalId) => !representedProposalIds.has(proposalId)
+      );
 
-    const proposalRows = await getRunProposalRows(projectId, run, readProposalIds(run.proposalIdsJson));
-    for (const proposal of proposalRows) {
-      const metadata = metadataForProposal(proposal);
-      await createDraftAssembly(projectId, run.id, {
-        ...metadata,
-        proposals: [proposal]
-      });
-    }
+      if (missingProposalIds.length === 0) {
+        return;
+      }
+
+      const proposalRows = await getRunProposalRows(projectId, run, missingProposalIds, tx);
+      for (const proposal of proposalRows) {
+        const metadata = metadataForProposal(proposal);
+        await createDraftAssembly(tx, projectId, run.id, {
+          ...metadata,
+          proposals: [proposal]
+        });
+      }
+    });
   }
 
   async function createDraftAssembly(
+    client: QueryClient,
     projectId: string,
     runId: string,
     input: ProposalMetadata & { proposals: ProposalRow[] }
   ): Promise<AssemblyRow> {
     const now = new Date();
-    const [assembly] = await db
+    const [assembly] = await client
       .insert(analyzeReviewAssemblies)
       .values({
         projectId,
@@ -303,7 +342,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     }
 
     for (const [index, proposal] of input.proposals.entries()) {
-      await db.insert(analyzeReviewAssemblyInputs).values({
+      await client.insert(analyzeReviewAssemblyInputs).values({
         projectId,
         assemblyId: assembly.id,
         proposalId: proposal.id,
@@ -313,7 +352,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
 
     const initialClaims = input.proposals.flatMap((proposal) => initialClaimsForProposal(proposal));
     for (const [sortOrder, claim] of initialClaims.entries()) {
-      const [claimRow] = await db
+      const [claimRow] = await client
         .insert(analyzeReviewClaims)
         .values({
           projectId,
@@ -329,7 +368,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         continue;
       }
 
-      await db.insert(analyzeReviewClaimEvidence).values(
+      await client.insert(analyzeReviewClaimEvidence).values(
         claim.evidence.map((evidence) => ({
           projectId,
           claimId: claimRow.id,
@@ -344,7 +383,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       );
     }
 
-    await refreshRenderedMarkdown(projectId, assembly.id);
+    await refreshRenderedMarkdown(client, projectId, assembly.id);
     return assembly;
   }
 
@@ -365,9 +404,10 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
   async function getAssemblyRow(
     projectId: string,
     runId: string,
-    assemblyId: string
+    assemblyId: string,
+    client: QueryClient = db
   ): Promise<AssemblyRow> {
-    const [row] = await db
+    const [row] = await client
       .select()
       .from(analyzeReviewAssemblies)
       .where(
@@ -393,7 +433,8 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
   async function getRunProposalRows(
     projectId: string,
     run: AnalyzeRunRow,
-    proposalIds: string[]
+    proposalIds: string[],
+    client: QueryClient = db
   ): Promise<ProposalRow[]> {
     const uniqueProposalIds = [...new Set(proposalIds)];
     const runProposalIds = readProposalIds(run.proposalIdsJson);
@@ -410,7 +451,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       return [];
     }
 
-    const rows = await db
+    const rows = await client
       .select()
       .from(aiProposals)
       .where(and(eq(aiProposals.projectId, projectId), inArray(aiProposals.id, uniqueProposalIds)));
@@ -426,11 +467,12 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
   }
 
   async function assertNoActiveAssignment(
+    client: QueryClient,
     projectId: string,
     assemblyId: string,
     proposalId: string
   ): Promise<void> {
-    const rows = await db
+    const rows = await client
       .select()
       .from(analyzeReviewAssemblyInputs)
       .where(
@@ -446,7 +488,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       return;
     }
 
-    const activeAssemblies = await db
+    const activeAssemblies = await client
       .select({ id: analyzeReviewAssemblies.id })
       .from(analyzeReviewAssemblies)
       .where(
@@ -587,8 +629,12 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     return assembly;
   }
 
-  async function refreshRenderedMarkdown(projectId: string, assemblyId: string): Promise<void> {
-    const [assembly] = await db
+  async function refreshRenderedMarkdown(
+    client: QueryClient,
+    projectId: string,
+    assemblyId: string
+  ): Promise<void> {
+    const [assembly] = await client
       .select()
       .from(analyzeReviewAssemblies)
       .where(
@@ -602,14 +648,14 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       return;
     }
 
-    const claims = await db
+    const claims = await client
       .select()
       .from(analyzeReviewClaims)
       .where(and(eq(analyzeReviewClaims.projectId, projectId), eq(analyzeReviewClaims.assemblyId, assemblyId)))
       .orderBy(asc(analyzeReviewClaims.sortOrder), asc(analyzeReviewClaims.createdAt));
     const claimIds = claims.map((claim) => claim.id);
     const evidence = claimIds.length
-      ? await db
+      ? await client
           .select()
           .from(analyzeReviewClaimEvidence)
           .where(
@@ -619,7 +665,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
             )
           )
       : [];
-    const inputs = await db
+    const inputs = await client
       .select()
       .from(analyzeReviewAssemblyInputs)
       .where(
@@ -629,7 +675,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         )
       );
     const proposalRows = inputs.length
-      ? await db
+      ? await client
           .select()
           .from(aiProposals)
           .where(
@@ -656,7 +702,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       proposedLinks
     });
 
-    await db
+    await client
       .update(analyzeReviewAssemblies)
       .set({ renderedMarkdown, updatedAt: new Date() })
       .where(
@@ -811,8 +857,15 @@ function metadataForProposal(proposal: ProposalRow): ProposalMetadata {
 }
 
 function initialClaimsForProposal(proposal: ProposalRow): InitialClaim[] {
-  const evidence = evidenceForProposal(proposal);
-  if (evidence.length === 0) {
+  const aiEvidence = parseAiEvidence(proposal);
+  const firstAiClaim = aiEvidence?.claims[0];
+  const evidence = evidenceForProposal(
+    proposal,
+    firstAiClaim ? new Set(firstAiClaim.sourceFiles) : undefined
+  );
+  const hasSelectedAiEvidence = (aiEvidence?.selectedSourceFiles.length ?? 0) > 0;
+
+  if (evidence.length === 0 && !hasSelectedAiEvidence) {
     return [
       {
         text: proposal.title,
@@ -822,9 +875,6 @@ function initialClaimsForProposal(proposal: ProposalRow): InitialClaim[] {
       }
     ];
   }
-
-  const aiEvidence = parseAiEvidence(proposal);
-  const firstAiClaim = aiEvidence?.claims[0];
 
   return [
     {
@@ -836,7 +886,10 @@ function initialClaimsForProposal(proposal: ProposalRow): InitialClaim[] {
   ];
 }
 
-function evidenceForProposal(proposal: ProposalRow): Array<Omit<AnalyzeReviewEvidenceDto, "id">> {
+function evidenceForProposal(
+  proposal: ProposalRow,
+  aiSourceFileFilter?: Set<string>
+): Array<Omit<AnalyzeReviewEvidenceDto, "id">> {
   const sourceEvidence = parseSourceEvidence(proposal);
   if (sourceEvidence) {
     return sourceEvidence.sourceFiles.map((sourceFile) => ({
@@ -852,15 +905,17 @@ function evidenceForProposal(proposal: ProposalRow): Array<Omit<AnalyzeReviewEvi
 
   const aiEvidence = parseAiEvidence(proposal);
   if (aiEvidence) {
-    return aiEvidence.selectedSourceFiles.map((sourceFile) => ({
-      proposalId: proposal.id,
-      sourceFilePath: sourceFile.file,
-      symbolName: null,
-      startLine: sourceFile.excerptStartLine,
-      endLine: sourceFile.excerptEndLine,
-      provenance: "ai",
-      confidence: proposal.confidence
-    }));
+    return aiEvidence.selectedSourceFiles
+      .filter((sourceFile) => !aiSourceFileFilter || aiSourceFileFilter.has(sourceFile.file))
+      .map((sourceFile) => ({
+        proposalId: proposal.id,
+        sourceFilePath: sourceFile.file,
+        symbolName: null,
+        startLine: sourceFile.excerptStartLine,
+        endLine: sourceFile.excerptEndLine,
+        provenance: "ai",
+        confidence: proposal.confidence
+      }));
   }
 
   return [];
@@ -928,6 +983,29 @@ function parseSourceEvidence(proposal: ProposalRow): SourceSpecEntityProposalEvi
 function parseAiEvidence(proposal: ProposalRow): AiSpecEntityProposalEvidence | null {
   const parsed = aiSpecEntityProposalEvidenceSchema.safeParse(proposal.evidenceJson);
   return parsed.success ? parsed.data : null;
+}
+
+async function lockDerivation(
+  client: QueryClient,
+  projectId: string,
+  runId: string
+): Promise<void> {
+  await client.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:analyze_review_derivation:${runId}`}, 0))`
+  );
+}
+
+async function lockAssignmentWrites(
+  client: QueryClient,
+  projectId: string,
+  proposalIds: string[]
+): Promise<void> {
+  const uniqueProposalIds = [...new Set(proposalIds)].sort();
+  for (const proposalId of uniqueProposalIds) {
+    await client.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`${projectId}:analyze_review_assignment:${proposalId}`}, 0))`
+    );
+  }
 }
 
 function readProposalIds(value: unknown): string[] {

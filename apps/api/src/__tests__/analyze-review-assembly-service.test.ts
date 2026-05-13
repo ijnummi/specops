@@ -55,6 +55,28 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(first.assemblies[0]?.validation.state).toBe("ready");
   });
 
+  it("derives missing proposals when a run is partially initialized", async () => {
+    const { db, project, run, proposals } = await createReviewFixture({
+      derive: false,
+      proposalCount: 2
+    });
+    const service = createAnalyzeReviewAssemblyService(db);
+
+    await service.createAssembly(project.id, run.id, {
+      proposalIds: [proposals[0]!.id]
+    });
+
+    const first = await service.listReviewAssemblies(project.id, run.id);
+    const second = await service.listReviewAssemblies(project.id, run.id);
+    const assignedProposalIds = first.assemblies.flatMap((assembly) =>
+      assembly.inputs.map((input) => input.proposalId)
+    );
+
+    expect(first.assemblies).toHaveLength(2);
+    expect(second.assemblies).toHaveLength(2);
+    expect(assignedProposalIds).toEqual(expect.arrayContaining(proposals.map((item) => item.id)));
+  });
+
   it("attaches and removes proposal inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);
@@ -77,10 +99,12 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     await service.removeInput(project.id, run.id, assembly.id, proposal.id);
     review = await service.listReviewAssemblies(project.id, run.id);
     expect(review.assemblies[0]?.inputs).toHaveLength(0);
-    expect(review.unassignedInputs).toHaveLength(1);
+    expect(review.assemblies.flatMap((item) => item.inputs.map((input) => input.proposalId))).toContain(
+      proposal.id
+    );
   });
 
-  it("keeps evidence-only inputs unassigned for active assignment counts", async () => {
+  it("derives active input when a run proposal only has evidence-only inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);
     const assembly = await service.createAssembly(project.id, run.id, {
@@ -100,8 +124,10 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     const review = await service.listReviewAssemblies(project.id, run.id);
 
     expect(review.assemblies[0]?.inputs[0]?.role).toBe("evidence_only");
-    expect(review.unassignedInputs.map((input) => input.proposalId)).toContain(proposal.id);
-    expect(review.counts.inputs.assigned).toBe(0);
+    expect(review.assemblies.flatMap((item) => item.inputs.map((input) => input.proposalId))).toContain(
+      proposal.id
+    );
+    expect(review.counts.inputs.assigned).toBe(1);
   });
 
   it("blocks creating a second draft assembly with an actively assigned proposal", async () => {
@@ -113,6 +139,42 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     await expect(
       service.createAssembly(project.id, run.id, {
         proposalIds: [proposal.id]
+      })
+    ).rejects.toMatchObject({
+      name: "ConflictError",
+      message: "Proposal is already assigned to an active assembly"
+    });
+  });
+
+  it("blocks attaching an actively assigned proposal to another draft assembly", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const firstAssembly = await service.createAssembly(project.id, run.id, {
+      title: "Review drafts",
+      entityType: "use_case",
+      entityId: "use-case.review-drafts",
+      filePath: "use-cases/review-drafts.md",
+      summary: "Review generated drafts.",
+      proposalIds: []
+    });
+    const secondAssembly = await service.createAssembly(project.id, run.id, {
+      title: "Review drafts follow-up",
+      entityType: "use_case",
+      entityId: "use-case.review-drafts-follow-up",
+      filePath: "use-cases/review-drafts-follow-up.md",
+      summary: "Review generated drafts follow-up.",
+      proposalIds: []
+    });
+
+    await service.attachInput(project.id, run.id, firstAssembly.id, {
+      proposalId: proposal.id,
+      role: "primary"
+    });
+
+    await expect(
+      service.attachInput(project.id, run.id, secondAssembly.id, {
+        proposalId: proposal.id,
+        role: "primary"
       })
     ).rejects.toMatchObject({
       name: "ConflictError",
@@ -140,13 +202,15 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(review.assemblies[0]?.claims[0]?.text).toBe(
       "First generated claim is kept even when its source file does not overlap."
     );
-    expect(review.assemblies[0]?.validation.state).toBe("ready");
+    expect(review.assemblies[0]?.claims[0]?.evidence).toHaveLength(0);
+    expect(review.assemblies[0]?.validation.state).toBe("blocker");
   });
 
   async function createReviewFixture(
     options: {
       derive?: boolean;
       claims?: AiSpecEntityProposalEvidence["claims"];
+      proposalCount?: number;
     } = {}
   ) {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-review-assembly-"));
@@ -160,43 +224,47 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     });
     projectIds.push(project.id);
 
-    const payload: AiSpecEntityProposalPayload = {
-      entityId: "use-case.review-drafts",
-      type: "use_case",
-      title: "Review drafts",
-      status: "draft",
-      filePath: "use-cases/review-drafts.md",
-      generatedMarkdown: "---\nid: use-case.review-drafts\n---\n\n# Review drafts\n",
-      markdown: "---\nid: use-case.review-drafts\n---\n\n# Review drafts\n",
-      sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"],
-      proposedLinks: []
-    };
-    const evidence: AiSpecEntityProposalEvidence = {
-      provider: "ollama",
-      model: "qwen2.5-coder:7b",
-      promptVersion: "ai-prefill-v1",
-      selectedSourceFiles: [
-        {
-          file: "apps/web/src/routes/analyze-run-review.tsx",
-          contentHash: "review-drafts-hash",
-          excerptStartLine: 20,
-          excerptEndLine: 80
-        }
-      ],
-      claims: [
-        ...(options.claims ?? [
+    const proposalCount = options.proposalCount ?? 1;
+    const proposalInputs = Array.from({ length: proposalCount }, (_, index) => {
+      const suffix = index === 0 ? "" : ` ${index + 1}`;
+      const entitySuffix = index === 0 ? "" : `-${index + 1}`;
+      const payload: AiSpecEntityProposalPayload = {
+        entityId: `use-case.review-drafts${entitySuffix}`,
+        type: "use_case",
+        title: `Review drafts${suffix}`,
+        status: "draft",
+        filePath: `use-cases/review-drafts${entitySuffix}.md`,
+        generatedMarkdown: `---\nid: use-case.review-drafts${entitySuffix}\n---\n\n# Review drafts${suffix}\n`,
+        markdown: `---\nid: use-case.review-drafts${entitySuffix}\n---\n\n# Review drafts${suffix}\n`,
+        sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"],
+        proposedLinks: []
+      };
+      const evidence: AiSpecEntityProposalEvidence = {
+        provider: "ollama",
+        model: "qwen2.5-coder:7b",
+        promptVersion: "ai-prefill-v1",
+        selectedSourceFiles: [
           {
-            text: "Users review generated draft inputs before accepting specs.",
-            sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"]
+            file: "apps/web/src/routes/analyze-run-review.tsx",
+            contentHash: `review-drafts-hash${entitySuffix}`,
+            excerptStartLine: 20,
+            excerptEndLine: 80
           }
-        ])
-      ],
-      warnings: []
-    };
+        ],
+        claims: [
+          ...(index === 0 && options.claims
+            ? options.claims
+            : [
+                {
+                  text: `Users review generated draft inputs before accepting specs${suffix}.`,
+                  sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"]
+                }
+              ])
+        ],
+        warnings: []
+      };
 
-    const [proposal] = await db
-      .insert(aiProposals)
-      .values({
+      return {
         projectId: project.id,
         proposalType: "ai_spec_entity",
         title: payload.title,
@@ -204,9 +272,14 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
         evidenceJson: evidence,
         confidence: 0.82,
         status: "pending"
-      })
+      };
+    });
+
+    const proposals = await db
+      .insert(aiProposals)
+      .values(proposalInputs)
       .returning();
-    expect(proposal).toBeDefined();
+    expect(proposals).toHaveLength(proposalCount);
 
     const [run] = await db
       .insert(analyzeRuns)
@@ -214,13 +287,13 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
         projectId: project.id,
         status: "succeeded",
         stepsJson: [],
-        proposalIdsJson: [proposal!.id],
-        aiProposalCount: 1
+        proposalIdsJson: proposals.map((proposal) => proposal.id),
+        aiProposalCount: proposals.length
       })
       .returning();
     expect(run).toBeDefined();
 
-    return { db, project, run: run!, proposal: proposal! };
+    return { db, project, run: run!, proposal: proposals[0]!, proposals };
   }
 });
 
