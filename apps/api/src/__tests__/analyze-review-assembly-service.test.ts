@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -316,6 +316,365 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
       evidence: []
     });
     expect(review.assemblies[0]?.validation.state).toBe("warning");
+  });
+
+  it("inserts new claims at the next sort order", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Claims",
+      entityType: "use_case",
+      entityId: "use-case.claims",
+      filePath: "use-cases/claims.md",
+      summary: "Claims assembly.",
+      proposalIds: []
+    });
+
+    const first = await service.createClaim(project.id, run.id, assembly.id, {
+      text: "First claim.",
+      kind: "hypothesis",
+      confidence: 0.4
+    });
+    const second = await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Second claim.",
+      kind: "hypothesis",
+      confidence: null
+    });
+
+    expect(first.sortOrder).toBe(0);
+    expect(first.evidence).toEqual([]);
+    expect(second.sortOrder).toBe(1);
+  });
+
+  it("patches claims and refreshes assembly validation", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Patch claim",
+      entityType: "use_case",
+      entityId: "use-case.patch-claim",
+      filePath: "use-cases/patch-claim.md",
+      summary: "Patch claim assembly.",
+      proposalIds: []
+    });
+    const claim = await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Fact missing evidence.",
+      kind: "fact",
+      confidence: 0.7
+    });
+
+    const patched = await service.patchClaim(project.id, run.id, assembly.id, claim.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.3,
+      sortOrder: 4
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(patched).toMatchObject({
+      id: claim.id,
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.3,
+      sortOrder: 4,
+      evidence: []
+    });
+    expect(review.assemblies[0]?.validation.state).toBe("warning");
+    expect(review.assemblies[0]?.renderedMarkdown).toContain("Needs confirmation.");
+  });
+
+  it("verifies evidence proposal and claim ownership", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const firstAssembly = await service.createAssembly(project.id, run.id, {
+      title: "First",
+      entityType: "use_case",
+      entityId: "use-case.first",
+      filePath: "use-cases/first.md",
+      summary: "First assembly.",
+      proposalIds: []
+    });
+    const secondAssembly = await service.createAssembly(project.id, run.id, {
+      title: "Second",
+      entityType: "use_case",
+      entityId: "use-case.second",
+      filePath: "use-cases/second.md",
+      summary: "Second assembly.",
+      proposalIds: []
+    });
+    const claim = await service.createClaim(project.id, run.id, firstAssembly.id, {
+      text: "Owned by first assembly.",
+      kind: "fact",
+      confidence: 0.8
+    });
+    const otherClaim = await service.createClaim(project.id, run.id, secondAssembly.id, {
+      text: "Owned by second assembly.",
+      kind: "fact",
+      confidence: 0.8
+    });
+    const [outsideRunProposal] = await db
+      .insert(aiProposals)
+      .values({
+        projectId: project.id,
+        proposalType: "ai_spec_entity",
+        title: "Outside run",
+        payloadJson: {
+          entityId: "use-case.outside-run",
+          type: "use_case",
+          title: "Outside run",
+          status: "draft",
+          filePath: "use-cases/outside-run.md",
+          generatedMarkdown: "---\nid: use-case.outside-run\n---\n\n# Outside run\n",
+          markdown: "---\nid: use-case.outside-run\n---\n\n# Outside run\n",
+          sourceFiles: [],
+          proposedLinks: []
+        },
+        evidenceJson: {
+          provider: "ollama",
+          model: "qwen2.5-coder:7b",
+          promptVersion: "ai-prefill-v1",
+          selectedSourceFiles: [],
+          claims: [],
+          warnings: []
+        },
+        confidence: 0.5,
+        status: "pending"
+      })
+      .returning();
+    expect(outsideRunProposal).toBeDefined();
+
+    await expect(
+      service.attachEvidence(project.id, run.id, firstAssembly.id, claim.id, {
+        proposalId: outsideRunProposal!.id,
+        sourceFilePath: "apps/api/src/services/analyze-review-assembly-service.ts",
+        symbolName: "attachEvidence",
+        startLine: 1,
+        endLine: 5,
+        provenance: "user",
+        confidence: 0.8
+      })
+    ).rejects.toMatchObject({
+      name: "BadRequestError",
+      message: "Proposal does not belong to analyze run"
+    });
+
+    await expect(
+      service.attachEvidence(project.id, run.id, firstAssembly.id, otherClaim.id, {
+        proposalId: proposal.id,
+        sourceFilePath: "apps/api/src/services/analyze-review-assembly-service.ts",
+        symbolName: "attachEvidence",
+        startLine: 1,
+        endLine: 5,
+        provenance: "user",
+        confidence: 0.8
+      })
+    ).rejects.toMatchObject({
+      name: "NotFoundError",
+      message: "Analyze review claim not found"
+    });
+
+    const evidence = await service.attachEvidence(project.id, run.id, firstAssembly.id, claim.id, {
+      proposalId: proposal.id,
+      sourceFilePath: "apps/api/src/services/analyze-review-assembly-service.ts",
+      symbolName: "attachEvidence",
+      startLine: 1,
+      endLine: 5,
+      provenance: "user",
+      confidence: 0.8
+    });
+
+    expect(evidence.proposalId).toBe(proposal.id);
+  });
+
+  it("removes evidence and refreshes validation", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Evidence removal",
+      entityType: "use_case",
+      entityId: "use-case.evidence-removal",
+      filePath: "use-cases/evidence-removal.md",
+      summary: "Evidence removal assembly.",
+      proposalIds: []
+    });
+    const claim = await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Fact with evidence.",
+      kind: "fact",
+      confidence: 0.8
+    });
+    const evidence = await service.attachEvidence(project.id, run.id, assembly.id, claim.id, {
+      proposalId: proposal.id,
+      sourceFilePath: "apps/api/src/services/analyze-review-assembly-service.ts",
+      symbolName: "removeEvidence",
+      startLine: 1,
+      endLine: 5,
+      provenance: "user",
+      confidence: 0.8
+    });
+
+    const updatedClaim = await service.removeEvidence(
+      project.id,
+      run.id,
+      assembly.id,
+      claim.id,
+      evidence.id
+    );
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(updatedClaim.evidence).toEqual([]);
+    expect(review.assemblies[0]?.claims[0]?.evidence).toEqual([]);
+    expect(review.assemblies[0]?.validation.messages[0]?.code).toBe("fact_missing_evidence");
+  });
+
+  it("blocks accepting fact claims without evidence and accepts unrelated ready assemblies", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const blocked = await service.createAssembly(project.id, run.id, {
+      title: "Blocked",
+      entityType: "use_case",
+      entityId: "use-case.blocked",
+      filePath: "use-cases/blocked.md",
+      summary: "Blocked assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, blocked.id, {
+      text: "This fact has no evidence.",
+      kind: "fact",
+      confidence: 0.5
+    });
+
+    const ready = await service.createAssembly(project.id, run.id, {
+      title: "Ready",
+      entityType: "use_case",
+      entityId: "use-case.ready",
+      filePath: "use-cases/ready.md",
+      summary: "Ready assembly.",
+      proposalIds: []
+    });
+    const claim = await service.createClaim(project.id, run.id, ready.id, {
+      text: "This fact has evidence.",
+      kind: "fact",
+      confidence: 0.9
+    });
+    await service.attachEvidence(project.id, run.id, ready.id, claim.id, {
+      proposalId: proposal.id,
+      sourceFilePath: "apps/api/src/services/analyze-review-assembly-service.ts",
+      symbolName: "acceptAssemblies",
+      startLine: 1,
+      endLine: 20,
+      provenance: "user",
+      confidence: 0.9
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [blocked.id, ready.id]
+    });
+
+    expect(result.acceptedAssemblyIds).toEqual([ready.id]);
+    expect(result.failures[0]?.assemblyId).toBe(blocked.id);
+    expect(result.failures[0]?.messages[0]?.code).toBe("fact_missing_evidence");
+  });
+
+  it("renders hypotheses under a labeled section when accepted", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Hypothesis",
+      entityType: "use_case",
+      entityId: "use-case.hypothesis",
+      filePath: "use-cases/hypothesis.md",
+      summary: "Hypothesis assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "This needs user confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+
+    expect(result.acceptedAssemblyIds).toEqual([assembly.id]);
+    const review = await service.listReviewAssemblies(project.id, run.id);
+    expect(review.assemblies[0]?.renderedMarkdown).toContain("## Hypotheses and Unknowns");
+  });
+
+  it("accepts assemblies by writing markdown and reviewing attached proposals", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Accepted",
+      entityType: "use_case",
+      entityId: "use-case.accepted",
+      filePath: "use-cases/accepted.md",
+      summary: "Accepted assembly.",
+      proposalIds: [proposal.id]
+    });
+    const claim = assembly.claims[0]!;
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+    const [proposalRow] = await db
+      .select()
+      .from(aiProposals)
+      .where(eq(aiProposals.id, proposal.id))
+      .limit(1);
+    const writtenMarkdown = await readFile(
+      path.join(project.specopsPath, "use-cases/accepted.md"),
+      "utf8"
+    );
+
+    expect(claim.evidence).not.toEqual([]);
+    expect(result).toMatchObject({
+      acceptedAssemblyIds: [assembly.id],
+      failures: []
+    });
+    expect(result.indexRun).not.toBeNull();
+    expect(review.assemblies[0]).toMatchObject({
+      id: assembly.id,
+      status: "accepted",
+      renderedMarkdown: writtenMarkdown
+    });
+    expect(review.assemblies[0]?.acceptedAt).not.toBeNull();
+    expect(proposalRow).toMatchObject({ status: "accepted" });
+    expect(proposalRow?.reviewedAt).not.toBeNull();
+  });
+
+  it("returns validation failures without writing invalid assemblies", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Invalid",
+      entityType: "use_case",
+      entityId: "use-case.invalid",
+      filePath: "use-cases/invalid.md",
+      summary: "Invalid assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Missing evidence.",
+      kind: "fact",
+      confidence: 0.6
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(result.acceptedAssemblyIds).toEqual([]);
+    expect(result.indexRun).toBeNull();
+    expect(result.failures[0]?.messages[0]?.code).toBe("fact_missing_evidence");
+    await expect(
+      readFile(path.join(project.specopsPath, "use-cases/invalid.md"), "utf8")
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    expect(review.assemblies[0]?.status).toBe("draft");
   });
 
   async function createReviewFixture(

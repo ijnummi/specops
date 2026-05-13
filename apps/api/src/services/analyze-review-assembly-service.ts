@@ -1,3 +1,6 @@
+import { access, mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
 import type {
   AnalyzeReviewAcceptRequest,
   AnalyzeReviewAcceptResponse,
@@ -15,6 +18,7 @@ import type {
   AnalyzeReviewUpdateAssemblyRequest,
   AnalyzeReviewUpdateClaimRequest,
   AnalyzeReviewValidationMessage,
+  AnalyzeReviewValidationSummary,
   AiSpecEntityProposalEvidence,
   AiSpecEntityProposalPayload,
   ProposalType,
@@ -28,6 +32,7 @@ import {
   sourceSpecEntityProposalPayloadSchema
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
+import { parseSpecMarkdown } from "@specops/markdown";
 import {
   aiProposals,
   analyzeReviewAssemblies,
@@ -39,7 +44,15 @@ import {
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
+import {
+  assertAbsolutePath,
+  assertExistingParentInsideDirectory,
+  assertInsideDirectory,
+  assertRealPathInsideDirectory
+} from "../lib/path-safety.js";
 import { renderAnalyzeReviewAssemblyMarkdown } from "./analyze-review-renderer.js";
+import { createIndexerService } from "./indexer-service.js";
+import { createProjectService } from "./project-service.js";
 
 type AnalyzeRunRow = typeof analyzeRuns.$inferSelect;
 type AssemblyRow = typeof analyzeReviewAssemblies.$inferSelect;
@@ -285,50 +298,285 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
   }
 
   async function createClaim(
-    _projectId: string,
-    _runId: string,
-    _assemblyId: string,
-    _input: AnalyzeReviewCreateClaimRequest
+    projectId: string,
+    runId: string,
+    assemblyId: string,
+    input: AnalyzeReviewCreateClaimRequest
   ): Promise<AnalyzeReviewClaimDto> {
-    throw new Error("Not implemented");
+    const run = await getAnalyzeRunRow(projectId, runId);
+    const [claim] = await db.transaction(async (tx) => {
+      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      const claims = await tx
+        .select({ sortOrder: analyzeReviewClaims.sortOrder })
+        .from(analyzeReviewClaims)
+        .where(
+          and(
+            eq(analyzeReviewClaims.projectId, projectId),
+            eq(analyzeReviewClaims.assemblyId, assemblyId)
+          )
+        );
+      const nextSortOrder =
+        claims.length === 0 ? 0 : Math.max(...claims.map((item) => item.sortOrder)) + 1;
+      const inserted = await tx
+        .insert(analyzeReviewClaims)
+        .values({
+          projectId,
+          assemblyId,
+          text: input.text,
+          kind: input.kind,
+          confidence: input.confidence,
+          sortOrder: nextSortOrder
+        })
+        .returning();
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
+      return inserted;
+    });
+
+    if (!claim) {
+      throw new Error("Failed to create analyze review claim");
+    }
+
+    return getMappedClaim(projectId, run, assemblyId, claim.id);
   }
 
   async function patchClaim(
-    _projectId: string,
-    _runId: string,
-    _assemblyId: string,
-    _claimId: string,
-    _input: AnalyzeReviewUpdateClaimRequest
+    projectId: string,
+    runId: string,
+    assemblyId: string,
+    claimId: string,
+    input: AnalyzeReviewUpdateClaimRequest
   ): Promise<AnalyzeReviewClaimDto> {
-    throw new Error("Not implemented");
+    const run = await getAnalyzeRunRow(projectId, runId);
+    await db.transaction(async (tx) => {
+      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await getClaimRow(projectId, assemblyId, claimId, tx);
+      const update: Partial<typeof analyzeReviewClaims.$inferInsert> = {
+        updatedAt: new Date()
+      };
+
+      if (input.text !== undefined) {
+        update.text = input.text;
+      }
+      if (input.kind !== undefined) {
+        update.kind = input.kind;
+      }
+      if (input.confidence !== undefined) {
+        update.confidence = input.confidence;
+      }
+      if (input.sortOrder !== undefined) {
+        update.sortOrder = input.sortOrder;
+      }
+
+      await tx
+        .update(analyzeReviewClaims)
+        .set(update)
+        .where(
+          and(
+            eq(analyzeReviewClaims.projectId, projectId),
+            eq(analyzeReviewClaims.assemblyId, assemblyId),
+            eq(analyzeReviewClaims.id, claimId)
+          )
+        );
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
+    });
+
+    return getMappedClaim(projectId, run, assemblyId, claimId);
   }
 
   async function attachEvidence(
-    _projectId: string,
-    _runId: string,
-    _assemblyId: string,
-    _claimId: string,
-    _input: AnalyzeReviewAttachEvidenceRequest
+    projectId: string,
+    runId: string,
+    assemblyId: string,
+    claimId: string,
+    input: AnalyzeReviewAttachEvidenceRequest
   ): Promise<AnalyzeReviewEvidenceDto> {
-    throw new Error("Not implemented");
+    const run = await getAnalyzeRunRow(projectId, runId);
+    const [evidence] = await db.transaction(async (tx) => {
+      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await getClaimRow(projectId, assemblyId, claimId, tx);
+      await getRunProposalRows(projectId, run, [input.proposalId], tx);
+      const inserted = await tx
+        .insert(analyzeReviewClaimEvidence)
+        .values({
+          projectId,
+          claimId,
+          proposalId: input.proposalId,
+          sourceFilePath: input.sourceFilePath,
+          symbolName: input.symbolName,
+          startLine: input.startLine,
+          endLine: input.endLine,
+          provenance: input.provenance,
+          confidence: input.confidence
+        })
+        .returning();
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
+      return inserted;
+    });
+
+    if (!evidence) {
+      throw new Error("Failed to attach analyze review evidence");
+    }
+
+    return mapEvidence(evidence);
   }
 
   async function removeEvidence(
-    _projectId: string,
-    _runId: string,
-    _assemblyId: string,
-    _claimId: string,
-    _evidenceId: string
+    projectId: string,
+    runId: string,
+    assemblyId: string,
+    claimId: string,
+    evidenceId: string
   ): Promise<AnalyzeReviewClaimDto> {
-    throw new Error("Not implemented");
+    const run = await getAnalyzeRunRow(projectId, runId);
+    await db.transaction(async (tx) => {
+      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await getClaimRow(projectId, assemblyId, claimId, tx);
+      await getEvidenceRow(projectId, claimId, evidenceId, tx);
+      await tx
+        .delete(analyzeReviewClaimEvidence)
+        .where(
+          and(
+            eq(analyzeReviewClaimEvidence.projectId, projectId),
+            eq(analyzeReviewClaimEvidence.claimId, claimId),
+            eq(analyzeReviewClaimEvidence.id, evidenceId)
+          )
+        );
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
+    });
+
+    return getMappedClaim(projectId, run, assemblyId, claimId);
   }
 
   async function acceptAssemblies(
-    _projectId: string,
-    _runId: string,
-    _input: AnalyzeReviewAcceptRequest
+    projectId: string,
+    runId: string,
+    input: AnalyzeReviewAcceptRequest
   ): Promise<AnalyzeReviewAcceptResponse> {
-    throw new Error("Not implemented");
+    const run = await getAnalyzeRunRow(projectId, runId);
+    const project = await createProjectService(db).getProject(projectId);
+    const repoPath = assertAbsolutePath("repoPath", project.repoPath);
+    const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
+    const acceptedAssemblyIds: string[] = [];
+    const failures: AnalyzeReviewAcceptResponse["failures"] = [];
+
+    assertInsideDirectory(repoPath, specopsPath);
+    await assertRealPathInsideDirectory(repoPath, repoPath);
+    await assertExistingParentInsideDirectory(repoPath, specopsPath);
+    await mkdir(specopsPath, { recursive: true });
+    const realSpecopsPath = await assertRealPathInsideDirectory(repoPath, specopsPath);
+
+    const review = await listReviewAssembliesWithoutDeriving(projectId, run);
+    const assemblyById = new Map(review.assemblies.map((assembly) => [assembly.id, assembly]));
+    const selectedAssemblies = input.assemblyIds.map((assemblyId) => {
+      const assembly = assemblyById.get(assemblyId);
+      if (!assembly) {
+        throw new NotFoundError("Analyze review assembly not found", {
+          projectId,
+          runId,
+          assemblyId
+        });
+      }
+      return assembly;
+    });
+
+    for (const assembly of selectedAssemblies) {
+      const blockerMessages = assembly.validation.messages.filter(
+        (message) => message.severity === "blocker"
+      );
+      if (blockerMessages.length > 0) {
+        failures.push({ assemblyId: assembly.id, messages: blockerMessages });
+        continue;
+      }
+
+      const proposedLinks = await getProposedLinksForAssembly(db, projectId, assembly.id);
+      const renderedMarkdown = renderAnalyzeReviewAssemblyMarkdown({
+        entityId: assembly.entityId,
+        entityType: assembly.entityType,
+        title: assembly.title,
+        summary: assembly.summary,
+        claims: assembly.claims.map((claim) => ({
+          text: claim.text,
+          kind: claim.kind,
+          evidence: claim.evidence.map((evidence) => ({
+            sourceFilePath: evidence.sourceFilePath,
+            symbolName: evidence.symbolName,
+            startLine: evidence.startLine,
+            endLine: evidence.endLine
+          }))
+        })),
+        proposedLinks
+      });
+      const parseMessages = validationMessagesForRenderedMarkdown(assembly, renderedMarkdown);
+      if (parseMessages.length > 0) {
+        failures.push({ assemblyId: assembly.id, messages: parseMessages });
+        continue;
+      }
+
+      const targetPath = assertInsideDirectory(
+        realSpecopsPath,
+        path.join(realSpecopsPath, assembly.filePath)
+      );
+      const targetParent = path.dirname(targetPath);
+      await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
+      await mkdir(targetParent, { recursive: true });
+      await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
+      if (await pathExists(targetPath)) {
+        failures.push({
+          assemblyId: assembly.id,
+          messages: [
+            {
+              severity: "blocker",
+              code: "target_file_exists",
+              message: "Target markdown file already exists.",
+              field: "filePath"
+            }
+          ]
+        });
+        continue;
+      }
+
+      await writeFile(targetPath, renderedMarkdown, "utf8");
+      const now = new Date();
+      await db
+        .update(analyzeReviewAssemblies)
+        .set({
+          status: "accepted",
+          acceptedAt: now,
+          renderedMarkdown,
+          updatedAt: now
+        })
+        .where(
+          and(
+            eq(analyzeReviewAssemblies.projectId, projectId),
+            eq(analyzeReviewAssemblies.analyzeRunId, runId),
+            eq(analyzeReviewAssemblies.id, assembly.id)
+          )
+        );
+
+      const proposalIds = assembly.inputs
+        .filter((item) => item.assignmentState === "assigned")
+        .map((item) => item.proposalId);
+      if (proposalIds.length > 0) {
+        await db
+          .update(aiProposals)
+          .set({ status: "accepted", reviewedAt: now })
+          .where(
+            and(
+              eq(aiProposals.projectId, projectId),
+              inArray(aiProposals.id, proposalIds),
+              eq(aiProposals.status, "pending")
+            )
+          );
+      }
+      acceptedAssemblyIds.push(assembly.id);
+    }
+
+    const indexRun =
+      acceptedAssemblyIds.length > 0
+        ? await createIndexerService(db).indexProject(projectId)
+        : null;
+
+    return { acceptedAssemblyIds, failures, indexRun };
   }
 
   async function ensureInitialAssemblies(projectId: string, run: AnalyzeRunRow): Promise<void> {
@@ -500,6 +748,64 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         projectId,
         runId,
         assemblyId
+      });
+    }
+
+    return row;
+  }
+
+  async function getClaimRow(
+    projectId: string,
+    assemblyId: string,
+    claimId: string,
+    client: QueryClient = db
+  ): Promise<ClaimRow> {
+    const [row] = await client
+      .select()
+      .from(analyzeReviewClaims)
+      .where(
+        and(
+          eq(analyzeReviewClaims.projectId, projectId),
+          eq(analyzeReviewClaims.assemblyId, assemblyId),
+          eq(analyzeReviewClaims.id, claimId)
+        )
+      )
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundError("Analyze review claim not found", {
+        projectId,
+        assemblyId,
+        claimId
+      });
+    }
+
+    return row;
+  }
+
+  async function getEvidenceRow(
+    projectId: string,
+    claimId: string,
+    evidenceId: string,
+    client: QueryClient = db
+  ): Promise<ClaimEvidenceRow> {
+    const [row] = await client
+      .select()
+      .from(analyzeReviewClaimEvidence)
+      .where(
+        and(
+          eq(analyzeReviewClaimEvidence.projectId, projectId),
+          eq(analyzeReviewClaimEvidence.claimId, claimId),
+          eq(analyzeReviewClaimEvidence.id, evidenceId)
+        )
+      )
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundError("Analyze review evidence not found", {
+        projectId,
+        claimId,
+        evidenceId
       });
     }
 
@@ -709,6 +1015,58 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     return assembly;
   }
 
+  async function getMappedClaim(
+    projectId: string,
+    run: AnalyzeRunRow,
+    assemblyId: string,
+    claimId: string
+  ): Promise<AnalyzeReviewClaimDto> {
+    const assembly = await getMappedAssembly(projectId, run, assemblyId);
+    const claim = assembly.claims.find((item) => item.id === claimId);
+    if (!claim) {
+      throw new NotFoundError("Analyze review claim not found", {
+        projectId,
+        runId: run.id,
+        assemblyId,
+        claimId
+      });
+    }
+
+    return claim;
+  }
+
+  async function getProposedLinksForAssembly(
+    client: QueryClient,
+    projectId: string,
+    assemblyId: string
+  ): Promise<ProposalMetadata["proposedLinks"]> {
+    const inputs = await client
+      .select()
+      .from(analyzeReviewAssemblyInputs)
+      .where(
+        and(
+          eq(analyzeReviewAssemblyInputs.projectId, projectId),
+          eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId)
+        )
+      );
+    const proposalRows = inputs.length
+      ? await client
+          .select()
+          .from(aiProposals)
+          .where(
+            and(
+              eq(aiProposals.projectId, projectId),
+              inArray(
+                aiProposals.id,
+                inputs.map((input) => input.proposalId)
+              )
+            )
+          )
+      : [];
+
+    return proposalRows.flatMap((proposal) => metadataForProposal(proposal).proposedLinks);
+  }
+
   async function refreshRenderedMarkdown(
     client: QueryClient,
     projectId: string,
@@ -745,30 +1103,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
             )
           )
       : [];
-    const inputs = await client
-      .select()
-      .from(analyzeReviewAssemblyInputs)
-      .where(
-        and(
-          eq(analyzeReviewAssemblyInputs.projectId, projectId),
-          eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId)
-        )
-      );
-    const proposalRows = inputs.length
-      ? await client
-          .select()
-          .from(aiProposals)
-          .where(
-            and(
-              eq(aiProposals.projectId, projectId),
-              inArray(
-                aiProposals.id,
-                inputs.map((input) => input.proposalId)
-              )
-            )
-          )
-      : [];
-    const proposedLinks = proposalRows.flatMap((proposal) => metadataForProposal(proposal).proposedLinks);
+    const proposedLinks = await getProposedLinksForAssembly(client, projectId, assemblyId);
     const renderedMarkdown = renderAnalyzeReviewAssemblyMarkdown({
       entityId: assembly.entityId,
       entityType: assembly.entityType as AnalyzeReviewEntityType,
@@ -844,7 +1179,7 @@ function mapAssembly(
       ];
     }),
     claims,
-    validation: validateClaims(claims),
+    validation: validateAssembly(assembly, claims),
     createdAt: assembly.createdAt.toISOString(),
     updatedAt: assembly.updatedAt.toISOString(),
     acceptedAt: assembly.acceptedAt?.toISOString() ?? null,
@@ -1021,8 +1356,28 @@ function evidenceCountForProposal(proposal: ProposalRow): number {
   return evidenceForProposal(proposal).length;
 }
 
-function validateClaims(claims: AnalyzeReviewClaimDto[]) {
+function validateAssembly(
+  assembly: Pick<AssemblyRow, "title" | "entityId" | "entityType" | "filePath">,
+  claims: AnalyzeReviewClaimDto[]
+): AnalyzeReviewValidationSummary {
   const messages: AnalyzeReviewValidationMessage[] = [];
+  const requiredFields = [
+    ["title", assembly.title],
+    ["entityId", assembly.entityId],
+    ["entityType", assembly.entityType],
+    ["filePath", assembly.filePath]
+  ] as const;
+
+  for (const [field, value] of requiredFields) {
+    if (value.trim().length === 0) {
+      messages.push({
+        severity: "blocker",
+        code: `${field}_missing`,
+        message: `${field} is required.`,
+        field
+      });
+    }
+  }
 
   for (const claim of claims) {
     if (claim.kind === "fact" && claim.evidence.length === 0) {
@@ -1050,7 +1405,76 @@ function validateClaims(claims: AnalyzeReviewClaimDto[]) {
         ? "warning"
         : "ready",
     messages
-  } as const;
+  };
+}
+
+function validationMessagesForRenderedMarkdown(
+  assembly: AnalyzeReviewAssemblyDto,
+  markdown: string
+): AnalyzeReviewValidationMessage[] {
+  const parsed = parseSpecMarkdown(assembly.filePath, markdown);
+  const messages: AnalyzeReviewValidationMessage[] = parsed.messages
+    .filter((message) => message.level === "error")
+    .map((message) => ({
+      severity: "blocker",
+      code: message.code,
+      message: message.message,
+      field: "renderedMarkdown"
+    }));
+
+  if (!parsed.entity) {
+    return messages.length > 0
+      ? messages
+      : [
+          {
+            severity: "blocker",
+            code: "invalid_markdown",
+            message: "Rendered markdown did not produce a spec entity.",
+            field: "renderedMarkdown"
+          }
+        ];
+  }
+
+  if (parsed.entity.entityId !== assembly.entityId) {
+    messages.push({
+      severity: "blocker",
+      code: "entity_id_mismatch",
+      message: "Rendered markdown entity id does not match the assembly.",
+      field: "entityId"
+    });
+  }
+  if (parsed.entity.type !== assembly.entityType) {
+    messages.push({
+      severity: "blocker",
+      code: "entity_type_mismatch",
+      message: "Rendered markdown entity type does not match the assembly.",
+      field: "entityType"
+    });
+  }
+
+  return messages;
+}
+
+async function pathExists(value: string): Promise<boolean> {
+  try {
+    await access(value);
+    return true;
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 function parseProposalPayload(
