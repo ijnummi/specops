@@ -115,6 +115,7 @@ vi.mock("../api/queries.js", () => ({
       entityId
     ],
     indexRuns: (projectId: string) => ["index-runs", projectId],
+    annotationsRoot: (projectId: string) => ["annotations", projectId],
     outgoingLinks: (projectId: string, entityId: string) => ["outgoing-links", projectId, entityId],
     project: (projectId: string) => ["project", projectId],
     projectHealth: (projectId: string) => ["project-health", projectId],
@@ -207,6 +208,9 @@ describe("EntityDetail", () => {
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["project-readiness", "project-1"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["annotations", "project-1"]
     });
   });
 

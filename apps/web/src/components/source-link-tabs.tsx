@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { SourceSpecAnnotationDto } from "@specops/contracts";
 
+import { AnnotationSummaryPanel } from "./annotation-panels.js";
 import { SourceCodeViewer } from "./source-code-viewer.js";
 
 const DEFAULT_EXCERPT_MESSAGE = "Source excerpt unavailable.";
@@ -70,10 +71,10 @@ export function SourceLinkTabs({
         ) : null}
       </div>
 
+      <AnnotationSummaryPanel annotations={visibleSourceLinks} />
+
       {isSpecSelected ? (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {specPanel}
-        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">{specPanel}</div>
       ) : (
         <SourceLinkPanel sourceLink={activeSourceLink} />
       )}

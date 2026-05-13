@@ -130,6 +130,7 @@ vi.mock("../api/queries.js", () => ({
       runId,
       "review-assemblies"
     ],
+    annotationsRoot: (projectId: string) => ["projects", projectId, "annotations"],
     entities: (projectId: string) => ["projects", projectId, "entities"],
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
     project: (projectId: string) => ["projects", projectId],
@@ -300,6 +301,9 @@ describe("AnalyzeRunReviewPage", () => {
     });
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "index-runs"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "annotations"]
     });
     expect(container.textContent).toContain(
       "Saved 1 assembly and 1 source/spec annotation."

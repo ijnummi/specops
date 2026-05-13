@@ -51,6 +51,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.proposalsRoot(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.entities(projectId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.annotationsRoot(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.indexRuns(projectId) })
     ]);

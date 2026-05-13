@@ -130,6 +130,7 @@ export function EntityDetail({
         queryClient.invalidateQueries({ queryKey: queryKeys.outgoingLinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.backlinks(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sourceLinks(projectId, entityId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.annotationsRoot(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.entityReadiness(projectId, entityId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projectReadiness(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.validation(projectId) }),

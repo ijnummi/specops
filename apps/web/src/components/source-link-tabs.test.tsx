@@ -53,9 +53,13 @@ describe("SourceLinkTabs", () => {
     const buttons = Array.from(container.querySelectorAll("button"));
     expect(buttons[0]?.textContent).toContain("Spec: Decision Model");
     expect(container.textContent).toContain("Spec editor panel");
+    expect(container.textContent).toContain("Source/spec annotations");
+    expect(container.textContent).toContain("Implements");
+    expect(container.textContent).toContain("scanner");
 
     await clickButton(container, "decision-model.ts");
 
+    expect(container.textContent).toContain("Source/spec annotations");
     expect(container.textContent).toContain("src/domain/decision-model.ts");
     expect(container.textContent).toContain("function");
     expect(container.textContent).toContain("createDecisionModel");
@@ -214,7 +218,7 @@ describe("SourceLinkTabs", () => {
 
     expect(container.textContent).toContain("Spec: Workspace");
     expect(container.textContent).toContain("Workspace spec panel");
-    expect(container.textContent).not.toContain("src/domain/workspace.ts");
+    expect(container.querySelector('[data-testid="source-link-panel"]')).toBeNull();
   });
 });
 
