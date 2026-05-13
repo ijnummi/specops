@@ -166,6 +166,38 @@ describeWithDb("createAnnotationService", () => {
     });
   });
 
+  it("removes omitted active scanner-ingested annotations during replacement", async () => {
+    const project = await createProjectFixture("scanner-replace");
+    const source = await createSourceFileFixture(project.id, "src/decision.ts", "export interface Decision {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const firstIndexRunId = await createIndexRunFixture(project.id);
+    const secondIndexRunId = await createIndexRunFixture(project.id);
+    const service = createAnnotationService(db);
+    const scannerAnnotation: ScannerAnnotationInput = {
+      sourceFileId: source.id,
+      sourceFilePath: source.path,
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      sourceContentHash: source.contentHash,
+      entityId: "domain.decision",
+      specFilePath: "specs/decision.md",
+      relationshipType: "references",
+      confidence: 1
+    };
+
+    await service.replaceScannerAnnotations(project.id, firstIndexRunId, [scannerAnnotation]);
+    await service.replaceScannerAnnotations(project.id, secondIndexRunId, []);
+
+    const annotations = await service.listAnnotations(project.id, {
+      provenance: "scanner",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([]);
+  });
+
   it("validates scanner batch source and entity ownership while accepting null source file ids", async () => {
     const first = await createProjectFixture("scanner-owned");
     const second = await createProjectFixture("scanner-other");
@@ -620,7 +652,8 @@ describeWithDb("createAnnotationService", () => {
     });
     expect(annotations).toEqual([
       expect.objectContaining({
-        sourceFileId: null,
+        sourceFileId: firstSource.id,
+        sourceContentHash: firstSource.contentHash,
         entityId: "domain.decision",
         analyzeRunId: origin.analyzeRunId,
         assemblyId: origin.assemblyId,

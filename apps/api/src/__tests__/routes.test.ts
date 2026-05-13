@@ -2876,6 +2876,50 @@ describeWithDb("database-backed routes", () => {
     });
   });
 
+  it("lists accepted review evidence annotations by source file id", async () => {
+    const { app, project, run, proposal } = await createAnalyzeReviewRouteFixture();
+    const sourceFile = await insertIndexedSourceFile(
+      project.id,
+      project.repoPath,
+      "apps/api/src/routes/projects.ts"
+    );
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies`,
+      payload: {
+        proposalIds: [proposal.id]
+      }
+    });
+    expect(createResponse.statusCode).toBe(201);
+
+    const assemblyId = createResponse.json().id;
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/accept`,
+      payload: {
+        assemblyIds: [assemblyId]
+      }
+    });
+    expect(acceptResponse.statusCode).toBe(200);
+
+    const annotationsResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/annotations?sourceFileId=${sourceFile.id}`
+    });
+
+    expect(annotationsResponse.statusCode).toBe(200);
+    expect(annotationsResponse.json()).toContainEqual(
+      expect.objectContaining({
+        sourceFileId: sourceFile.id,
+        sourceFilePath: "apps/api/src/routes/projects.ts",
+        sourceContentHash: sourceFile.contentHash,
+        entityId: "use-case.review-drafts",
+        provenance: "ai",
+        claimEvidenceId: expect.any(String)
+      })
+    );
+  });
+
   it("generates AI proposals from selected source files without writing markdown", async () => {
     app = buildServer(testDatabaseUrl!, {
       aiPrefillProviderFactory: () => ({
@@ -5590,8 +5634,8 @@ Let customers buy products and receive confirmation while keeping payment and or
     projectId: string,
     repoPath: string,
     relativePath = "src/projects.ts"
-  ): Promise<{ id: string }> {
-    await mkdir(path.join(repoPath, "src"), { recursive: true });
+  ): Promise<{ id: string; contentHash: string }> {
+    await mkdir(path.dirname(path.join(repoPath, relativePath)), { recursive: true });
     const content = [
       "import { ProjectStore } from './db';",
       "",
@@ -5603,9 +5647,10 @@ Let customers buy products and receive confirmation while keeping payment and or
       ""
     ].join("\n");
     await writeFile(path.join(repoPath, relativePath), content);
+    const contentHash = sha256(content);
     const sourceFileResult = await pool.query<{ id: string }>(
       "insert into source_files (project_id, path, language, kind, size_bytes, content_hash, last_seen_at) values ($1, $2, 'typescript', 'source', $3, $4, '2026-05-10T10:00:01Z') returning id",
-      [projectId, relativePath, Buffer.byteLength(content), sha256(content)]
+      [projectId, relativePath, Buffer.byteLength(content), contentHash]
     );
     const sourceFileId = sourceFileResult.rows[0].id;
     await pool.query(
@@ -5621,7 +5666,7 @@ Let customers buy products and receive confirmation while keeping payment and or
       [projectId, sourceFileId, relativePath, JSON.stringify({ routeCount: 2 })]
     );
 
-    return { id: sourceFileId };
+    return { id: sourceFileId, contentHash };
   }
 
   async function insertSourceSpecAnnotation(

@@ -23,7 +23,7 @@ import {
   sourceSpecAnnotations,
   specEntities
 } from "@specops/db";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { BadRequestError, NotFoundError } from "../lib/http-errors.js";
 import { assertInsideDirectory, assertRealPathInsideDirectory } from "../lib/path-safety.js";
@@ -207,7 +207,8 @@ export function createAnnotationService(db: Db) {
           and(
             eq(sourceSpecAnnotations.projectId, projectId),
             eq(sourceSpecAnnotations.provenance, "scanner"),
-            eq(sourceSpecAnnotations.status, "active")
+            eq(sourceSpecAnnotations.status, "active"),
+            isNull(sourceSpecAnnotations.claimEvidenceId)
           )
         );
 
@@ -289,13 +290,14 @@ export function createAnnotationService(db: Db) {
           relationshipType: sourceSpecAnnotations.relationshipType,
           provenance: sourceSpecAnnotations.provenance,
           claimId: sourceSpecAnnotations.claimId,
+          claimEvidenceId: sourceSpecAnnotations.claimEvidenceId,
           symbolName: sourceSpecAnnotations.symbolName,
           startLine: sourceSpecAnnotations.startLine,
           endLine: sourceSpecAnnotations.endLine
         });
 
       for (const row of updatedRows) {
-        if (row.provenance !== "scanner") {
+        if (row.provenance !== "scanner" || row.claimEvidenceId !== null) {
           continue;
         }
 
@@ -306,6 +308,7 @@ export function createAnnotationService(db: Db) {
               eq(sourceSpecAnnotations.projectId, projectId),
               eq(sourceSpecAnnotations.status, "stale"),
               eq(sourceSpecAnnotations.provenance, "scanner"),
+              isNull(sourceSpecAnnotations.claimEvidenceId),
               eq(sourceSpecAnnotations.sourceFilePath, row.sourceFilePath),
               eq(sourceSpecAnnotations.entityId, row.entityId),
               eq(sourceSpecAnnotations.relationshipType, row.relationshipType),
@@ -331,11 +334,12 @@ export function createAnnotationService(db: Db) {
       }
 
       await validateAcceptedEvidenceAnnotations(client, projectId, annotations);
+      const enrichedAnnotations = await enrichAcceptedEvidenceAnnotations(client, projectId, annotations);
 
       const inserted = await client
         .insert(sourceSpecAnnotations)
         .values(
-          annotations.map((annotation) => ({
+          enrichedAnnotations.map((annotation) => ({
             ...mapBaseInsert(projectId, annotation),
             provenance: annotation.provenance,
             status: "active",
@@ -399,6 +403,40 @@ async function validateAcceptedEvidenceAnnotations(
       await getClaimRow(client, projectId, annotation.claimId);
     }
   }
+}
+
+async function enrichAcceptedEvidenceAnnotations(
+  client: Pick<Db, "select">,
+  projectId: string,
+  annotations: AcceptedEvidenceAnnotationInput[]
+): Promise<AcceptedEvidenceAnnotationInput[]> {
+  const paths = [...new Set(annotations.map((annotation) => annotation.sourceFilePath))];
+  if (paths.length === 0) {
+    return annotations;
+  }
+
+  const rows = await client
+    .select({
+      id: sourceFiles.id,
+      path: sourceFiles.path,
+      contentHash: sourceFiles.contentHash
+    })
+    .from(sourceFiles)
+    .where(and(eq(sourceFiles.projectId, projectId), inArray(sourceFiles.path, paths)));
+  const sourceFileByPath = new Map(rows.map((row) => [row.path, row]));
+
+  return annotations.map((annotation) => {
+    const sourceFile = sourceFileByPath.get(annotation.sourceFilePath);
+    if (!sourceFile) {
+      return annotation;
+    }
+
+    return {
+      ...annotation,
+      sourceFileId: annotation.sourceFileId ?? sourceFile.id,
+      sourceContentHash: annotation.sourceContentHash ?? sourceFile.contentHash
+    };
+  });
 }
 
 function isAnnotationProvenance(value: unknown): value is AnnotationProvenance {

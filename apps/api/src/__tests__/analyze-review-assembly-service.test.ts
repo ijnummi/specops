@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,6 +10,7 @@ import {
   analyzeRuns,
   createDb,
   projects,
+  analyzeReviewClaimEvidence,
   sourceSpecAnnotations
 } from "@specops/db";
 import { eq } from "drizzle-orm";
@@ -880,6 +882,47 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     });
   });
 
+  it("keeps accepted scanner-provenance evidence after the post-accept index", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    await writeRepoFile(
+      project.repoPath,
+      "apps/web/src/routes/analyze-run-review.tsx",
+      "export function ReviewDrafts() {\n  return null;\n}\n"
+    );
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Accepted scanner annotations",
+      entityType: "use_case",
+      entityId: "use-case.accepted-scanner-annotations",
+      filePath: "use-cases/accepted-scanner-annotations.md",
+      summary: "Accepted scanner annotations assembly.",
+      proposalIds: [proposal.id]
+    });
+    const evidence = assembly.claims[0]!.evidence[0]!;
+    await db
+      .update(analyzeReviewClaimEvidence)
+      .set({ provenance: "scanner" })
+      .where(eq(analyzeReviewClaimEvidence.id, evidence.id));
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const annotations = await db
+      .select()
+      .from(sourceSpecAnnotations)
+      .where(eq(sourceSpecAnnotations.projectId, project.id));
+
+    expect(result.failures).toEqual([]);
+    expect(annotations).toContainEqual(
+      expect.objectContaining({
+        sourceFilePath: evidence.sourceFilePath,
+        entityId: assembly.entityId,
+        provenance: "scanner",
+        claimEvidenceId: evidence.id
+      })
+    );
+  });
+
   it("does not accept proposals attached only as evidence inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);
@@ -1206,6 +1249,17 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     return { db, project, run: run!, proposal: proposals[0]!, proposals };
   }
 });
+
+async function writeRepoFile(repoPath: string, relativePath: string, content: string): Promise<string> {
+  const absolutePath = path.join(repoPath, relativePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, content);
+  return sha256(content);
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
 
 async function migrateTestDatabase(connectionString: string) {
   const client = new Pool({ connectionString });
