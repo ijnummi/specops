@@ -39,6 +39,7 @@ describe("buildEntityImpact", () => {
       ["uc.create-decision", "domain.decision"]
     ]);
     expect(impact.sourceEvidence.map((item) => item.symbolName)).toEqual(["Decision"]);
+    expect(impact.sourceEvidence[0]?.relationshipType).toBe("implements");
     expect(impact.truncated.isTruncated).toBe(false);
   });
 
@@ -330,6 +331,7 @@ function evidence(
     symbolKind: string;
     symbolLine: number | null;
     annotationLine: number | null;
+    relationshipType: "implements" | "uses" | "defines" | "tests" | "references";
   }> = {}
 ) {
   return {
@@ -340,6 +342,7 @@ function evidence(
     symbolKind: "interface",
     symbolLine: 3,
     annotationLine: 2,
+    relationshipType: "implements" as const,
     ...overrides
   };
 }

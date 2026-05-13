@@ -10,12 +10,12 @@ import type { Db } from "@specops/db";
 import {
   projects,
   sourceFiles,
-  sourceSpecLinks,
+  sourceSpecAnnotations,
   specEntities,
   specLinks,
   validationMessages
 } from "@specops/db";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
 
@@ -250,10 +250,15 @@ async function loadReadinessEntityInputs(db: Db, projectId: string): Promise<Rea
         asc(validationMessages.id)
       ),
     db
-      .select({ entityId: sourceSpecLinks.entityId })
-      .from(sourceSpecLinks)
-      .where(eq(sourceSpecLinks.projectId, projectId))
-      .orderBy(asc(sourceSpecLinks.entityId)),
+      .select({ entityId: sourceSpecAnnotations.entityId })
+      .from(sourceSpecAnnotations)
+      .where(
+        and(
+          eq(sourceSpecAnnotations.projectId, projectId),
+          eq(sourceSpecAnnotations.status, "active")
+        )
+      )
+      .orderBy(asc(sourceSpecAnnotations.entityId)),
     db.select({ id: sourceFiles.id }).from(sourceFiles).where(eq(sourceFiles.projectId, projectId)).limit(1)
   ]);
 

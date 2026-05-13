@@ -425,10 +425,17 @@ describeWithDb("database-backed routes", () => {
       [project.id]
     );
     expect(sourceFileResult.rows[0]).toBeDefined();
-    await pool.query(
-      "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash) values ($1, $2, 'src/review-service.ts', 'uc.review', 'reviewService', 'function', 1, null, 'review-link-hash')",
-      [project.id, sourceFileResult.rows[0]!.id]
-    );
+    await insertSourceSpecAnnotation(project.id, sourceFileResult.rows[0]!.id, {
+      sourceFilePath: "src/review-service.ts",
+      entityId: "uc.review",
+      specFilePath: "use-cases/uc.review.md",
+      relationshipType: "implements",
+      symbolName: "reviewService",
+      symbolKind: "function",
+      startLine: 1,
+      endLine: 1,
+      sourceContentHash: "review-link-hash"
+    });
 
     const startResponse = await app.inject({
       method: "POST",
@@ -1320,9 +1327,9 @@ describeWithDb("database-backed routes", () => {
       [project.id, customerSourceId, apiSourceId]
     );
     await pool.query(
-      "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash, created_at) values " +
-        "($1, $2, 'src/customer.ts', 'domain.customer', 'Customer', 'interface', 1, 1, 'source-hash-1', '2026-05-10T10:00:01Z')," +
-        "($1, $3, 'src/customer-api.ts', 'interface.customer-api', 'CustomerApi', 'class', 3, 2, 'source-hash-2', '2026-05-10T10:00:02Z')",
+      "insert into source_spec_annotations (project_id, source_file_id, source_file_path, entity_id, spec_file_path, relationship_type, symbol_name, symbol_kind, start_line, end_line, annotation_line, source_content_hash, provenance, status, created_at) values " +
+        "($1, $2, 'src/customer.ts', 'domain.customer', 'domain/customer.md', 'defines', 'Customer', 'interface', 1, 1, 1, 'source-hash-1', 'scanner', 'active', '2026-05-10T10:00:01Z')," +
+        "($1, $3, 'src/customer-api.ts', 'interface.customer-api', 'interfaces/customer-api.md', 'implements', 'CustomerApi', 'class', 3, 3, 2, 'source-hash-2', 'scanner', 'active', '2026-05-10T10:00:02Z')",
       [project.id, customerSourceId, apiSourceId]
     );
 
@@ -2520,14 +2527,15 @@ describeWithDb("database-backed routes", () => {
       ])
     );
 
-    const sourceLinksResponse = await app.inject({
+    const annotationsResponse = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
-    expect(sourceLinksResponse.statusCode).toBe(200);
-    expect(sourceLinksResponse.json()).toContainEqual(
+    expect(annotationsResponse.statusCode).toBe(200);
+    expect(annotationsResponse.json()).toContainEqual(
       expect.objectContaining({
         entityId: "domain.decision",
+        sourceFilePath: "src/domain.ts",
         symbolName: "Decision"
       })
     );
@@ -2976,6 +2984,45 @@ describeWithDb("database-backed routes", () => {
         symbolCount: 1
       })
     ]);
+  });
+
+  it("lists annotations for a selected source file", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
+    await writeFile(
+      path.join(project.specopsPath, "domain", "decision.md"),
+      "---\nid: domain.decision\ntype: domain_entity\ntitle: Decision\nstatus: draft\n---\n\n# Decision\n"
+    );
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "/** @specops domain.decision */\nexport interface Decision { id: string }\n"
+    );
+    await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
+
+    const sourceFilesResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/source-files`
+    });
+    const sourceFile = (sourceFilesResponse.json() as Array<{ id: string; path: string }>).find(
+      (file) => file.path === "src/decision.ts"
+    );
+    expect(sourceFile).toBeDefined();
+
+    const annotationsResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/annotations?sourceFileId=${sourceFile!.id}`
+    });
+
+    expect(annotationsResponse.statusCode).toBe(200);
+    expect(annotationsResponse.json()).toContainEqual(
+      expect.objectContaining({
+        sourceFileId: sourceFile!.id,
+        sourceFilePath: "src/decision.ts",
+        entityId: "domain.decision"
+      })
+    );
   });
 
   it("returns source file detail including imports exports and symbols from source-files route", async () => {
@@ -4320,6 +4367,13 @@ describeWithDb("database-backed routes", () => {
         symbolName: "Decision"
       })
     );
+    expect(response.json().sourceEvidence).toContainEqual(
+      expect.objectContaining({
+        entityId: "domain.decision",
+        filePath: "src/decision.ts",
+        relationshipType: "references"
+      })
+    );
     expect(
       response.json().upstreamPaths.map((path: { entityIds: string[] }) => path.entityIds)
     ).toEqual([["uc.create-decision", "domain.decision"]]);
@@ -4673,7 +4727,7 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
-  it("returns full source file content for entity source links", async () => {
+  it("returns full source file content for entity annotations", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
     await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
@@ -4698,7 +4752,7 @@ describeWithDb("database-backed routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
 
     expect(response.statusCode).toBe(200);
@@ -4730,14 +4784,14 @@ describeWithDb("database-backed routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()[0]).toMatchObject({
       excerpt: {
-        status: "changed",
-        message: "Source file changed since the last index run."
+        status: "unavailable",
+        message: "Source file changed since the annotation was created."
       }
     });
   });
@@ -4756,13 +4810,14 @@ describeWithDb("database-backed routes", () => {
       "/** @specops domain.decision */\nexport interface Decision {}\n"
     );
     await app.inject({ method: "POST", url: `/api/projects/${project.id}/index` });
-    await pool.query("update source_spec_links set file_path = '../outside.ts' where project_id = $1", [
-      project.id
-    ]);
+    await pool.query(
+      "update source_spec_annotations set source_file_path = '../outside.ts' where project_id = $1",
+      [project.id]
+    );
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
 
     expect(response.statusCode).toBe(200);
@@ -4791,14 +4846,14 @@ describeWithDb("database-backed routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()[0]).toMatchObject({
       excerpt: {
-        status: "missing",
-        message: "Source file is missing."
+        status: "unavailable",
+        message: "Source excerpt unavailable."
       }
     });
   });
@@ -4825,7 +4880,7 @@ describeWithDb("database-backed routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
 
     expect(response.statusCode).toBe(200);
@@ -4854,7 +4909,7 @@ describeWithDb("database-backed routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/projects/${project.id}/entities/domain.decision/source-links`
+      url: `/api/projects/${project.id}/annotations?entityId=domain.decision&includeExcerpt=true`
     });
 
     expect(response.statusCode).toBe(200);
@@ -5517,6 +5572,43 @@ Let customers buy products and receive confirmation while keeping payment and or
     return { id: sourceFileId };
   }
 
+  async function insertSourceSpecAnnotation(
+    projectId: string,
+    sourceFileId: string,
+    input: {
+      sourceFilePath: string;
+      entityId: string;
+      specFilePath: string;
+      relationshipType: "implements" | "uses" | "defines" | "tests" | "references";
+      symbolName: string;
+      symbolKind: string;
+      startLine: number;
+      endLine: number;
+      annotationLine?: number | null;
+      sourceContentHash: string;
+      status?: "active" | "stale";
+    }
+  ) {
+    await pool.query(
+      "insert into source_spec_annotations (project_id, source_file_id, source_file_path, entity_id, spec_file_path, relationship_type, symbol_name, symbol_kind, start_line, end_line, annotation_line, source_content_hash, provenance, status) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'scanner', $13)",
+      [
+        projectId,
+        sourceFileId,
+        input.sourceFilePath,
+        input.entityId,
+        input.specFilePath,
+        input.relationshipType,
+        input.symbolName,
+        input.symbolKind,
+        input.startLine,
+        input.endLine,
+        input.annotationLine ?? null,
+        input.sourceContentHash,
+        input.status ?? "active"
+      ]
+    );
+  }
+
   function aiPrefillProviderResult(model: string, entityId: string, title: string) {
     return {
       provider: "ollama" as const,
@@ -5943,10 +6035,17 @@ Let customers buy products and receive confirmation while keeping payment and or
       [project.id]
     );
     expect(sourceFileResult.rows[0]).toBeDefined();
-    await pool.query(
-      "insert into source_spec_links (project_id, source_file_id, file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line, content_hash) values ($1, $2, 'src/review-service.ts', 'uc.review', 'reviewService', 'function', 1, null, 'review-link-hash')",
-      [project.id, sourceFileResult.rows[0]!.id]
-    );
+    await insertSourceSpecAnnotation(project.id, sourceFileResult.rows[0]!.id, {
+      sourceFilePath: "src/review-service.ts",
+      entityId: "uc.review",
+      specFilePath: "use-cases/uc.review.md",
+      relationshipType: "implements",
+      symbolName: "reviewService",
+      symbolKind: "function",
+      startLine: 1,
+      endLine: 1,
+      sourceContentHash: "review-link-hash"
+    });
 
     return project;
   }
