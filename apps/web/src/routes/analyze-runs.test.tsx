@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import type { AnalyzeRunDetailDto, ProposalDetailDto, ProposalSummaryDto } from "@specops/contracts";
+import type { AnalyzeReviewListResponse, AnalyzeRunDetailDto } from "@specops/contracts";
 import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -8,36 +8,35 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  acceptProposals: vi.fn(),
-  invalidateQueries: vi.fn(),
-  patchProposal: vi.fn(),
-  proposalDetailOverride: undefined as unknown,
-  proposalQueryOptions: [] as Array<{
-    enabled?: boolean;
-    queryKey: readonly unknown[];
-    queryType?: string;
-  }>,
-  aiProposalSummariesOverride: undefined as ProposalSummaryDto[] | undefined,
-  sourceProposalSummariesOverride: undefined as ProposalSummaryDto[] | undefined,
-  proposalQuery: vi.fn((projectId: string, proposalId: string) => ({
-    queryKey: ["projects", projectId, "proposals", proposalId],
-    queryType: "proposal"
+  acceptAnalyzeReviewAssemblies: vi.fn(),
+  analyzeReviewAssembliesQuery: vi.fn((projectId: string, runId: string) => ({
+    queryKey: ["projects", projectId, "analyze-runs", runId, "review-assemblies"],
+    queryType: "analyzeReviewAssemblies",
+    queryFn: vi.fn()
   })),
-  proposalsQuery: vi.fn((projectId: string, input: Record<string, unknown> = {}) => ({
-    queryKey: ["projects", projectId, "proposals", input],
-    queryType: "proposals"
-  })),
-  state: {
-    data: null as AnalyzeRunDetailDto | null,
-    error: null as Error | null,
-    isLoading: false
-  },
-  lastUseQueryOptions: null as Record<string, unknown> | null,
   analyzeRunQuery: vi.fn((projectId: string, runId: string) => ({
     queryKey: ["projects", projectId, "analyze-runs", runId],
     queryType: "analyzeRun",
     queryFn: vi.fn()
-  }))
+  })),
+  attachAnalyzeReviewInput: vi.fn(),
+  createAnalyzeReviewAssembly: vi.fn(),
+  createAnalyzeReviewClaim: vi.fn(),
+  invalidateQueries: vi.fn(),
+  lastUseQueryOptions: null as Record<string, unknown> | null,
+  patchAnalyzeReviewAssembly: vi.fn(),
+  patchAnalyzeReviewClaim: vi.fn(),
+  removeAnalyzeReviewInput: vi.fn(),
+  reviewState: {
+    data: null as AnalyzeReviewListResponse | null,
+    error: null as Error | null,
+    isLoading: false
+  },
+  state: {
+    data: null as AnalyzeRunDetailDto | null,
+    error: null as Error | null,
+    isLoading: false
+  }
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -79,44 +78,10 @@ vi.mock("@tanstack/react-query", async () => {
       };
     },
     useQuery: (options: Record<string, unknown>) => {
-      if (options.queryType === "analyzeRun") {
-        mocks.lastUseQueryOptions = options;
-        return mocks.state;
-      }
-
-      if (options.queryType === "proposals") {
-        const input = (options.queryKey as readonly unknown[])[3] as
-          | { proposalType?: string }
-          | undefined;
-        const sourceSummaries = mocks.sourceProposalSummariesOverride ?? [sourceProposalSummary()];
-        const aiSummaries = mocks.aiProposalSummariesOverride ?? [aiProposalSummary()];
-
-        return {
-          data:
-            input?.proposalType === "ai_spec_entity"
-              ? aiSummaries
-              : input?.proposalType === "source_spec_entity" || input?.proposalType === undefined
-                ? sourceSummaries
-                : [],
-          error: null,
-          isLoading: false
-        };
-      }
-
-      if (options.queryType === "proposal") {
-        mocks.proposalQueryOptions.push(
-          options as { enabled?: boolean; queryKey: readonly unknown[]; queryType?: string }
-        );
-        const proposalId = String((options.queryKey as readonly unknown[])[3]);
-
-        return {
-          data: mocks.proposalDetailOverride ?? proposalDetail(proposalId),
-          error: null,
-          isLoading: false
-        };
-      }
-
       mocks.lastUseQueryOptions = options;
+      if (options.queryType === "analyzeReviewAssemblies") {
+        return mocks.reviewState;
+      }
       return mocks.state;
     },
     useQueryClient: () => ({
@@ -149,27 +114,32 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("../api/queries.js", () => ({
-  acceptProposals: mocks.acceptProposals,
+  acceptAnalyzeReviewAssemblies: mocks.acceptAnalyzeReviewAssemblies,
+  analyzeReviewAssembliesQuery: mocks.analyzeReviewAssembliesQuery,
   analyzeRunQuery: mocks.analyzeRunQuery,
-  patchProposal: mocks.patchProposal,
-  proposalQuery: mocks.proposalQuery,
-  proposalsQuery: mocks.proposalsQuery,
+  attachAnalyzeReviewInput: mocks.attachAnalyzeReviewInput,
+  createAnalyzeReviewAssembly: mocks.createAnalyzeReviewAssembly,
+  createAnalyzeReviewClaim: mocks.createAnalyzeReviewClaim,
+  patchAnalyzeReviewAssembly: mocks.patchAnalyzeReviewAssembly,
+  patchAnalyzeReviewClaim: mocks.patchAnalyzeReviewClaim,
   queryKeys: {
+    analyzeReviewAssemblies: (projectId: string, runId: string) => [
+      "projects",
+      projectId,
+      "analyze-runs",
+      runId,
+      "review-assemblies"
+    ],
     entities: (projectId: string) => ["projects", projectId, "entities"],
     indexRuns: (projectId: string) => ["projects", projectId, "index-runs"],
     project: (projectId: string) => ["projects", projectId],
     projectHealth: (projectId: string) => ["projects", projectId, "health"],
     projectOverview: (projectId: string) => ["projects", projectId, "overview"],
     projectReadiness: (projectId: string) => ["projects", projectId, "readiness"],
-    proposal: (projectId: string, proposalId: string) => [
-      "projects",
-      projectId,
-      "proposals",
-      proposalId
-    ],
     proposalsRoot: (projectId: string) => ["projects", projectId, "proposals"],
     validation: (projectId: string) => ["projects", projectId, "validation-messages"]
-  }
+  },
+  removeAnalyzeReviewInput: mocks.removeAnalyzeReviewInput
 }));
 
 import { AnalyzeRunDetailPage } from "./analyze-run-detail.js";
@@ -285,10 +255,8 @@ describe("AnalyzeRunDetailPage", () => {
 describe("AnalyzeRunReviewPage", () => {
   beforeEach(() => {
     resetMocks();
-    mocks.state = {
-      data: analyzeRun({
-        proposalIds: ["source-proposal-1", "ai-proposal-1"]
-      }),
+    mocks.reviewState = {
+      data: reviewFixture(),
       error: null,
       isLoading: false
     };
@@ -298,252 +266,49 @@ describe("AnalyzeRunReviewPage", () => {
     cleanupRenderedRoots();
   });
 
-  it("renders source and AI proposals together", () => {
+  it("renders the run-scoped assembly workspace", () => {
     const html = renderToStaticMarkup(
       <AnalyzeRunReviewPage projectId="project-1" runId="run-1" />
     );
 
-    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1", {
-      proposalType: "source_spec_entity"
-    });
-    expect(mocks.proposalsQuery).toHaveBeenCalledWith("project-1", {
-      proposalType: "ai_spec_entity"
-    });
-    expect(mocks.analyzeRunQuery).toHaveBeenCalledWith("project-1", "run-1");
-    expect(html).toContain("Analyze review");
-    expect(html).toContain("DecisionService");
-    expect(html).toContain("Manage projects");
-    expect(html).toContain("source_spec_entity");
-    expect(html).toContain("ai_spec_entity");
+    expect(mocks.analyzeReviewAssembliesQuery).toHaveBeenCalledWith("project-1", "run-1");
+    expect(html).toContain("Draft pool");
+    expect(html).toContain("Assembly list");
+    expect(html).toContain("Assembly detail");
+    expect(html).toContain("fact_missing_evidence");
+    expect(html).toContain("Accept selected");
     expect(html).toContain("/projects/project-1/analyze-runs/run-1");
   });
 
-  it("filters out project proposals that were not generated by the run", () => {
-    mocks.sourceProposalSummariesOverride = [
-      sourceProposalSummary(),
-      sourceProposalSummary({
-        id: "source-proposal-2",
-        title: "HistoricalGateway",
-        entityId: "interfaces.historical-gateway",
-        filePath: "interfaces/historical-gateway.md"
-      })
-    ];
-    mocks.aiProposalSummariesOverride = [
-      aiProposalSummary(),
-      aiProposalSummary({
-        id: "ai-proposal-2",
-        title: "Historical AI use case",
-        entityId: "uc.historical-ai",
-        filePath: "use-cases/uc.historical-ai.md"
-      })
-    ];
-
-    const html = renderToStaticMarkup(
-      <AnalyzeRunReviewPage projectId="project-1" runId="run-1" />
-    );
-
-    expect(html).toContain("DecisionService");
-    expect(html).toContain("Manage projects");
-    expect(html).not.toContain("HistoricalGateway");
-    expect(html).not.toContain("Historical AI use case");
-  });
-
-  it("shows source evidence for a source proposal detail", () => {
-    const html = renderToStaticMarkup(
-      <AnalyzeRunReviewPage projectId="project-1" runId="run-1" />
-    );
-
-    expect(mocks.proposalQuery).toHaveBeenCalledWith("project-1", "source-proposal-1");
-    expect(html).toContain("Source evidence");
-    expect(html).toContain("typescript");
-    expect(html).toContain("apps/api/src/decision-service.ts");
-    expect(html).toContain("DecisionService");
-    expect(html).toContain("class");
-    expect(html).toContain("line 12");
-    expect(html).toContain("exported");
-  });
-
-  it("shows AI evidence after selecting an AI proposal detail", async () => {
+  it("accepts selected ready assemblies and invalidates derived project data", async () => {
     const { container } = await renderAnalyzeRunReviewPage();
-
-    await clickButton(container, "Manage projects");
-
-    expect(container.textContent).toContain("AI evidence");
-    expect(container.textContent).toContain("ollama");
-    expect(container.textContent).toContain("qwen2.5-coder:7b");
-    expect(container.textContent).toContain("ai-prefill-v1");
-    expect(container.textContent).toContain("apps/api/src/routes/projects.ts");
-    expect(container.textContent).toContain("Project routes create and list projects.");
-    expect(container.textContent).toContain("uses -> interface.project-service");
-  });
-
-  it("accepts checked pending source and AI proposals by id", async () => {
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    await changeCheckbox(container, "Select DecisionService", true);
-    await changeCheckbox(container, "Select Manage projects", true);
-    await clickButton(container, "Accept selected");
-
-    expect(mocks.acceptProposals).toHaveBeenCalledWith("project-1", {
-      proposalIds: ["source-proposal-1", "ai-proposal-1"]
-    });
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "readiness"]
-    });
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "proposals", "source-proposal-1"]
-    });
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "proposals", "ai-proposal-1"]
-    });
-  });
-
-  it("shows pending proposals by default and can toggle to all statuses", async () => {
-    mocks.sourceProposalSummariesOverride = [
-      sourceProposalSummary(),
-      sourceProposalSummary({
-        id: "accepted-source-proposal",
-        status: "accepted",
-        title: "Accepted source",
-        entityId: "interfaces.accepted-source",
-        filePath: "interfaces/accepted-source.md"
-      })
-    ];
-    mocks.state = {
-      data: analyzeRun({
-        proposalIds: ["source-proposal-1", "accepted-source-proposal", "ai-proposal-1"]
-      }),
-      error: null,
-      isLoading: false
-    };
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    expect(input(container, "Show pending only").checked).toBe(true);
-    expect(container.textContent).toContain("DecisionService");
-    expect(container.textContent).toContain("Manage projects");
-    expect(container.textContent).not.toContain("Accepted source");
-
-    await changeCheckbox(container, "Show pending only", false);
-
-    expect(input(container, "Show pending only").checked).toBe(false);
-    expect(container.textContent).toContain("Accepted source");
-  });
-
-  it("rejects checked pending proposals by id", async () => {
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    await changeCheckbox(container, "Select DecisionService", true);
-    await changeCheckbox(container, "Select Manage projects", true);
-    await clickButton(container, "Reject selected");
-
-    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
-      status: "rejected"
-    });
-    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "ai-proposal-1", {
-      status: "rejected"
-    });
-    expect(container.textContent).toContain("0 selected");
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "proposals", "source-proposal-1"]
-    });
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "proposals", "ai-proposal-1"]
-    });
-  });
-
-  it("clears successful batch rejects when another selected reject fails", async () => {
-    mocks.patchProposal.mockImplementation(
-      (_projectId: string, proposalId: string, input: { status?: string }) => {
-        if (proposalId === "ai-proposal-1") {
-          return Promise.reject(new Error("Reject failed for ai-proposal-1"));
-        }
-
-        const detail = proposalDetail(proposalId);
-        return Promise.resolve({
-          ...detail,
-          status: input.status ?? detail.status
-        });
-      }
-    );
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    await changeCheckbox(container, "Select DecisionService", true);
-    await changeCheckbox(container, "Select Manage projects", true);
-    await clickButton(container, "Reject selected");
-
-    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
-      status: "rejected"
-    });
-    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "ai-proposal-1", {
-      status: "rejected"
-    });
-    expect(input(container, "Select DecisionService").checked).toBe(false);
-    expect(input(container, "Select Manage projects").checked).toBe(true);
-    expect(container.textContent).toContain("1 selected");
-    expect(container.textContent).toContain("Reject selected failed");
-    expect(container.textContent).toContain("ai-proposal-1");
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "proposals", "source-proposal-1"]
-    });
-    expect(mocks.invalidateQueries).not.toHaveBeenCalledWith({
-      queryKey: ["projects", "project-1", "proposals", "ai-proposal-1"]
-    });
-  });
-
-  it("prunes checked proposals that are hidden by filter changes", async () => {
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    await changeCheckbox(container, "Select DecisionService", true);
-    await changeCheckbox(container, "Select Manage projects", true);
-    await clickButton(container, "Source 1");
-
-    expect(container.textContent).toContain("1 selected");
 
     await clickButton(container, "Accept selected");
 
-    expect(mocks.acceptProposals).toHaveBeenCalledWith("project-1", {
-      proposalIds: ["source-proposal-1"]
+    expect(mocks.acceptAnalyzeReviewAssemblies).toHaveBeenCalledWith("project-1", "run-1", {
+      assemblyIds: ["assembly-ready"]
     });
-  });
-
-  it("saves markdown edits through the proposal patch API", async () => {
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nEdited.");
-    await clickButton(container, "Save markdown");
-
-    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
-      markdown: "# DecisionService\n\nEdited."
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "analyze-runs", "run-1", "review-assemblies"]
     });
-  });
-
-  it("rejects the selected proposal through the proposal patch API", async () => {
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    await clickButton(container, "Reject");
-
-    expect(mocks.patchProposal).toHaveBeenCalledWith("project-1", "source-proposal-1", {
-      status: "rejected"
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "proposals"]
     });
-  });
-
-  it("disables the back navigation link while markdown edits are dirty", async () => {
-    const { container } = await renderAnalyzeRunReviewPage();
-
-    expect(container.querySelector('a[href="/projects/project-1/analyze-runs/run-1"]')).not.toBeNull();
-
-    await changeTextarea(container, "Proposal markdown", "# DecisionService\n\nEdited.");
-
-    expect(container.querySelector('a[href="/projects/project-1/analyze-runs/run-1"]')).toBeNull();
-    expect(button(container, "Back to progress").disabled).toBe(true);
-    expect(container.textContent).toContain("Unsaved markdown edits.");
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "entities"]
+    });
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "project-1", "index-runs"]
+    });
   });
 });
 
 function refetchIntervalFor(data: AnalyzeRunDetailDto | null) {
   const refetchInterval = mocks.lastUseQueryOptions?.refetchInterval;
   expect(refetchInterval).toEqual(expect.any(Function));
-  return (refetchInterval as (query: { state: { data: AnalyzeRunDetailDto | null } }) => number | false)({
+  return (
+    refetchInterval as (query: { state: { data: AnalyzeRunDetailDto | null } }) => number | false
+  )({
     state: { data }
   });
 }
@@ -612,7 +377,7 @@ function analyzeRun(overrides: Partial<AnalyzeRunDetailDto> = {}): AnalyzeRunDet
       ],
       diagnostics: []
     },
-    proposalIds: ["source-proposal-1", "ai-proposal-1"],
+    proposalIds: ["proposal-ready", "proposal-blocked"],
     sourceProposalCount: 4,
     aiProposalCount: 1,
     indexRunId: "index-run-1",
@@ -624,39 +389,166 @@ function analyzeRun(overrides: Partial<AnalyzeRunDetailDto> = {}): AnalyzeRunDet
   };
 }
 
+function reviewFixture(): AnalyzeReviewListResponse {
+  return {
+    assemblies: [
+      {
+        id: "assembly-ready",
+        projectId: "project-1",
+        analyzeRunId: "run-1",
+        status: "draft",
+        entityType: "use_case",
+        entityId: "uc.review-drafts",
+        title: "Review drafts",
+        summary: "Review generated analyze drafts.",
+        filePath: "use-cases/review-drafts.md",
+        renderedMarkdown: "# Review drafts\n\nReview generated analyze drafts.",
+        inputs: [
+          {
+            proposalId: "proposal-ready",
+            role: "primary",
+            proposalType: "ai_spec_entity",
+            title: "Review drafts",
+            entityType: "use_case",
+            entityId: "uc.review-drafts",
+            filePath: "use-cases/review-drafts.md",
+            confidence: 0.84,
+            assignmentState: "assigned",
+            evidenceCount: 1
+          }
+        ],
+        claims: [
+          {
+            id: "claim-ready",
+            text: "Users can accept ready review drafts.",
+            kind: "fact",
+            confidence: 0.9,
+            sortOrder: 0,
+            evidence: [
+              {
+                id: "evidence-ready",
+                proposalId: "proposal-ready",
+                sourceFilePath: "apps/web/src/routes/analyze-run-review.tsx",
+                symbolName: "AnalyzeRunReviewPage",
+                startLine: 1,
+                endLine: 40,
+                provenance: "ai",
+                confidence: 0.8
+              }
+            ]
+          }
+        ],
+        validation: {
+          state: "ready",
+          messages: []
+        },
+        createdAt: "2026-05-12T08:00:00.000Z",
+        updatedAt: "2026-05-12T08:05:00.000Z",
+        acceptedAt: null,
+        discardedAt: null
+      },
+      {
+        id: "assembly-blocked",
+        projectId: "project-1",
+        analyzeRunId: "run-1",
+        status: "draft",
+        entityType: "interface",
+        entityId: "interfaces.blocked",
+        title: "Blocked draft",
+        summary: "Needs evidence.",
+        filePath: "interfaces/blocked.md",
+        renderedMarkdown: null,
+        inputs: [],
+        claims: [
+          {
+            id: "claim-blocked",
+            text: "Blocked facts need evidence.",
+            kind: "fact",
+            confidence: 0.7,
+            sortOrder: 0,
+            evidence: []
+          }
+        ],
+        validation: {
+          state: "blocker",
+          messages: [
+            {
+              severity: "blocker",
+              code: "fact_missing_evidence",
+              message: "Fact claims need evidence before accepting.",
+              field: "claims"
+            }
+          ]
+        },
+        createdAt: "2026-05-12T08:00:00.000Z",
+        updatedAt: "2026-05-12T08:05:00.000Z",
+        acceptedAt: null,
+        discardedAt: null
+      }
+    ],
+    counts: {
+      assemblies: {
+        accepted: 0,
+        discarded: 0,
+        draft: 2
+      },
+      inputs: {
+        assigned: 1,
+        discarded: 0,
+        unassigned: 1
+      },
+      validation: {
+        blocker: 1,
+        ready: 1,
+        warning: 0
+      }
+    },
+    unassignedInputs: [
+      {
+        proposalId: "proposal-unassigned",
+        role: "primary",
+        proposalType: "source_spec_entity",
+        title: "Review draft pool",
+        entityType: "interface",
+        entityId: "interfaces.review-draft-pool",
+        filePath: "interfaces/review-draft-pool.md",
+        confidence: 0.7,
+        assignmentState: "unassigned",
+        evidenceCount: 1
+      }
+    ]
+  };
+}
+
 function resetMocks() {
   mocks.state = {
     data: null,
     error: null,
     isLoading: false
   };
-  mocks.acceptProposals.mockReset();
-  mocks.acceptProposals.mockImplementation((_projectId: string, input: unknown) => ({
-    acceptedProposalIds: (input as { proposalIds: string[] }).proposalIds
-  }));
-  mocks.invalidateQueries.mockReset();
-  mocks.patchProposal.mockReset();
-  mocks.patchProposal.mockImplementation(
-    (_projectId: string, proposalId: string, input: { markdown?: string; status?: string }) => {
-      const detail = proposalDetail(proposalId);
-      return {
-        ...detail,
-        status: input.status ?? detail.status,
-        payload: {
-          ...detail.payload,
-          markdown: input.markdown ?? detail.payload.markdown
-        }
-      };
-    }
-  );
+  mocks.reviewState = {
+    data: null,
+    error: null,
+    isLoading: false
+  };
   mocks.lastUseQueryOptions = null;
   mocks.analyzeRunQuery.mockClear();
-  mocks.proposalDetailOverride = undefined;
-  mocks.proposalQuery.mockClear();
-  mocks.proposalQueryOptions = [];
-  mocks.aiProposalSummariesOverride = undefined;
-  mocks.sourceProposalSummariesOverride = undefined;
-  mocks.proposalsQuery.mockClear();
+  mocks.analyzeReviewAssembliesQuery.mockClear();
+  mocks.invalidateQueries.mockReset();
+  mocks.acceptAnalyzeReviewAssemblies.mockReset();
+  mocks.acceptAnalyzeReviewAssemblies.mockImplementation(
+    (_projectId: string, _runId: string, input: { assemblyIds: string[] }) => ({
+      acceptedAssemblyIds: input.assemblyIds,
+      failures: [],
+      indexRun: null
+    })
+  );
+  mocks.attachAnalyzeReviewInput.mockReset();
+  mocks.createAnalyzeReviewAssembly.mockReset();
+  mocks.createAnalyzeReviewClaim.mockReset();
+  mocks.patchAnalyzeReviewAssembly.mockReset();
+  mocks.patchAnalyzeReviewClaim.mockReset();
+  mocks.removeAnalyzeReviewInput.mockReset();
 }
 
 function cleanupRenderedRoots() {
@@ -696,27 +588,6 @@ async function clickButton(container: HTMLElement, label: string) {
   });
 }
 
-async function changeCheckbox(container: HTMLElement, label: string, checked: boolean) {
-  const target = input(container, label);
-
-  await act(async () => {
-    if (target.checked !== checked) {
-      target.click();
-    }
-    await waitForRender();
-  });
-}
-
-async function changeTextarea(container: HTMLElement, label: string, value: string) {
-  const target = textarea(container, label);
-  target.value = value;
-
-  await act(async () => {
-    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
-    await waitForRender();
-  });
-}
-
 function button(container: HTMLElement, label: string) {
   const candidates = Array.from(container.querySelectorAll("button"));
   const target =
@@ -728,147 +599,8 @@ function button(container: HTMLElement, label: string) {
   return target as HTMLButtonElement;
 }
 
-function input(container: HTMLElement, label: string) {
-  const target = Array.from(container.querySelectorAll("input")).find(
-    (candidate) => candidate.getAttribute("aria-label") === label
-  );
-
-  expect(target).toBeDefined();
-  return target!;
-}
-
-function textarea(container: HTMLElement, label: string) {
-  const target = Array.from(container.querySelectorAll("textarea")).find(
-    (candidate) => candidate.getAttribute("aria-label") === label
-  );
-
-  expect(target).toBeDefined();
-  return target!;
-}
-
 function waitForRender() {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
-}
-
-function sourceProposalSummary(overrides: Partial<ProposalSummaryDto> = {}): ProposalSummaryDto {
-  return {
-    id: "source-proposal-1",
-    projectId: "project-1",
-    proposalType: "source_spec_entity",
-    status: "pending",
-    title: "DecisionService",
-    entityId: "interfaces.decision-service",
-    entityType: "interface",
-    filePath: "interfaces/decision-service.md",
-    confidence: 0.92,
-    conflict: { status: "none" },
-    createdAt: "2026-05-11T10:00:00.000Z",
-    reviewedAt: null,
-    ...overrides
-  } as ProposalSummaryDto;
-}
-
-function aiProposalSummary(overrides: Partial<ProposalSummaryDto> = {}): ProposalSummaryDto {
-  return {
-    id: "ai-proposal-1",
-    projectId: "project-1",
-    proposalType: "ai_spec_entity",
-    status: "pending",
-    title: "Manage projects",
-    entityId: "uc.manage-projects",
-    entityType: "use_case",
-    filePath: "use-cases/uc.manage-projects.md",
-    confidence: 0.82,
-    conflict: { status: "none" },
-    createdAt: "2026-05-11T10:00:00.000Z",
-    reviewedAt: null,
-    ...overrides
-  } as ProposalSummaryDto;
-}
-
-function proposalDetail(proposalId = "source-proposal-1"): ProposalDetailDto {
-  return proposalId === "ai-proposal-1" ? aiProposalDetail() : sourceProposalDetail();
-}
-
-function sourceProposalDetail(): ProposalDetailDto {
-  return {
-    ...sourceProposalSummary(),
-    payload: {
-      entityId: "interfaces.decision-service",
-      type: "interface",
-      title: "DecisionService",
-      status: "draft",
-      filePath: "interfaces/decision-service.md",
-      generatedMarkdown: "# DecisionService",
-      markdown: "# DecisionService\n\nCoordinates policy decisions.",
-      sourceFiles: ["apps/api/src/decision-service.ts"],
-      symbols: [
-        {
-          name: "DecisionService",
-          kind: "class",
-          exported: true,
-          file: "apps/api/src/decision-service.ts",
-          line: 12
-        }
-      ]
-    },
-    evidence: {
-      scanner: "typescript",
-      sourceFiles: [
-        {
-          file: "apps/api/src/decision-service.ts",
-          symbolName: "DecisionService",
-          symbolKind: "class",
-          exported: true,
-          line: 12
-        }
-      ]
-    }
-  } as ProposalDetailDto;
-}
-
-function aiProposalDetail(): ProposalDetailDto {
-  return {
-    ...aiProposalSummary(),
-    payload: {
-      entityId: "uc.manage-projects",
-      type: "use_case",
-      title: "Manage projects",
-      status: "draft",
-      filePath: "use-cases/uc.manage-projects.md",
-      generatedMarkdown: "# Manage projects",
-      markdown: "# Manage projects\n\nDraft spec.",
-      sourceFiles: ["apps/api/src/routes/projects.ts"],
-      proposedLinks: [
-        {
-          linkType: "uses",
-          targetEntityId: "interface.project-service",
-          targetExists: true,
-          rationale: "The selected route delegates project behavior to the project service."
-        }
-      ]
-    },
-    evidence: {
-      provider: "ollama",
-      model: "qwen2.5-coder:7b",
-      promptVersion: "ai-prefill-v1",
-      selectedSourceFiles: [
-        {
-          file: "apps/api/src/routes/projects.ts",
-          contentHash: "hash-1",
-          excerptStartLine: 1,
-          excerptEndLine: 80
-        }
-      ],
-      claims: [
-        {
-          text: "Project routes create and list projects.",
-          sourceFiles: ["apps/api/src/routes/projects.ts"]
-        }
-      ],
-      warnings: []
-    }
-  } as ProposalDetailDto;
 }
