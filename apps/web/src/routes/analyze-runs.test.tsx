@@ -283,6 +283,7 @@ describe("AnalyzeRunReviewPage", () => {
   it("accepts selected ready assemblies and invalidates derived project data", async () => {
     const { container } = await renderAnalyzeRunReviewPage();
 
+    await changeCheckbox(container, "Select assembly Review drafts", true);
     await clickButton(container, "Accept selected");
 
     expect(mocks.acceptAnalyzeReviewAssemblies).toHaveBeenCalledWith("project-1", "run-1", {
@@ -300,6 +301,40 @@ describe("AnalyzeRunReviewPage", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "index-runs"]
     });
+  });
+
+  it("surfaces accept response failures", async () => {
+    mocks.acceptAnalyzeReviewAssemblies.mockResolvedValue({
+      acceptedAssemblyIds: [],
+      failures: [
+        {
+          assemblyId: "assembly-ready",
+          messages: [
+            {
+              severity: "blocker",
+              code: "fact_missing_evidence",
+              message: "Fact claims need evidence before accepting.",
+              field: "claims"
+            },
+            {
+              severity: "blocker",
+              code: "index_failed",
+              message: "Index refresh failed.",
+              field: null
+            }
+          ]
+        }
+      ],
+      indexRun: null
+    });
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    await changeCheckbox(container, "Select assembly Review drafts", true);
+    await clickButton(container, "Accept selected");
+
+    expect(container.textContent).toContain("Accept failures");
+    expect(container.textContent).toContain("fact_missing_evidence");
+    expect(container.textContent).toContain("index_failed");
   });
 });
 
@@ -588,6 +623,17 @@ async function clickButton(container: HTMLElement, label: string) {
   });
 }
 
+async function changeCheckbox(container: HTMLElement, label: string, checked: boolean) {
+  const target = input(container, label);
+
+  await act(async () => {
+    if (target.checked !== checked) {
+      target.click();
+    }
+    await waitForRender();
+  });
+}
+
 function button(container: HTMLElement, label: string) {
   const candidates = Array.from(container.querySelectorAll("button"));
   const target =
@@ -597,6 +643,15 @@ function button(container: HTMLElement, label: string) {
 
   expect(target).toBeDefined();
   return target as HTMLButtonElement;
+}
+
+function input(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("input")).find(
+    (candidate) => candidate.getAttribute("aria-label") === label
+  );
+
+  expect(target).toBeDefined();
+  return target!;
 }
 
 function waitForRender() {

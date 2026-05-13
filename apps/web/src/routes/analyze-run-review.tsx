@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import type {
   AnalyzeReviewAttachInputRequest,
+  AnalyzeReviewAcceptFailure,
   AnalyzeReviewCreateAssemblyRequest,
   AnalyzeReviewCreateClaimRequest,
   AnalyzeReviewUpdateAssemblyRequest,
@@ -29,6 +31,7 @@ type AnalyzeRunReviewPageProps = {
 
 export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageProps) {
   const queryClient = useQueryClient();
+  const [acceptFailures, setAcceptFailures] = useState<AnalyzeReviewAcceptFailure[]>([]);
   const review = useQuery(analyzeReviewAssembliesQuery(projectId, runId));
 
   const invalidateReviewAssemblies = async () => {
@@ -106,7 +109,10 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
   const acceptMutation = useMutation({
     mutationFn: (assemblyIds: string[]) =>
       acceptAnalyzeReviewAssemblies(projectId, runId, { assemblyIds }),
-    onSuccess: invalidateAcceptedData
+    onSuccess: async (response) => {
+      setAcceptFailures(response.failures);
+      await invalidateAcceptedData();
+    }
   });
 
   const mutationPending =
@@ -146,8 +152,12 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
           projectId={projectId}
           runId={runId}
           review={review.data}
+          acceptFailures={acceptFailures}
           mutationPending={mutationPending}
-          onAcceptAssemblies={(assemblyIds) => acceptMutation.mutate(assemblyIds)}
+          onAcceptAssemblies={(assemblyIds) => {
+            setAcceptFailures([]);
+            acceptMutation.mutate(assemblyIds);
+          }}
           onAttachInput={(assemblyId, input) =>
             attachInputMutation.mutate({ assemblyId, input })
           }

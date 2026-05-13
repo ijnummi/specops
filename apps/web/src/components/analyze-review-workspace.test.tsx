@@ -52,11 +52,67 @@ describe("AnalyzeReviewWorkspace", () => {
     const mocks = workspaceMocks();
     const { container } = await renderWorkspace(mocks);
 
+    await changeCheckbox(container, "Select assembly Review drafts", true);
     await clickButton(container, "Accept selected");
 
     expect(mocks.acceptAssemblies).toHaveBeenCalledWith("project-1", "run-1", {
       assemblyIds: ["assembly-ready"]
     });
+  });
+
+  it("does not reselect ready assemblies after the user deselects them and review data refreshes", async () => {
+    const mocks = workspaceMocks();
+    const { container, rerender } = await renderWorkspace(mocks);
+
+    await changeCheckbox(container, "Select assembly Review drafts", true);
+    await changeCheckbox(container, "Select assembly Review drafts", false);
+    await rerender(reviewFixture({ readyTitle: "Review drafts refreshed" }));
+
+    expect(checkboxInput(container, "Select assembly Review drafts refreshed").checked).toBe(false);
+    expect(button(container, "Accept selected").disabled).toBe(true);
+  });
+
+  it("preserves dirty detail edits across selected assembly refreshes", async () => {
+    const { container, rerender } = await renderWorkspace();
+
+    await changeTextInput(container, "Title", "Local title edit");
+    await rerender(reviewFixture({ readyTitle: "Server refreshed title" }));
+
+    expect(textInput(container, "Title").value).toBe("Local title edit");
+    expect(container.textContent).toContain("Server refreshed title");
+  });
+
+  it("disables edit controls for non-draft assemblies", async () => {
+    const mocks = workspaceMocks();
+    const { container } = await renderWorkspace(
+      mocks,
+      reviewFixture({
+        extraAssemblies: [
+          assembly({
+            id: "assembly-accepted",
+            title: "Accepted assembly",
+            status: "accepted",
+            acceptedAt: "2026-05-12T08:10:00.000Z"
+          })
+        ]
+      })
+    );
+
+    await clickButton(container, "Accepted assembly");
+    await changeTextarea(container, "New claim", "Should not be added");
+    await clickButton(container, "Add claim");
+    await clickButton(container, "Mark fact");
+    await clickButton(container, "Save detail");
+    await clickButton(container, "Remove");
+
+    expect(button(container, "Save detail").disabled).toBe(true);
+    expect(button(container, "Add claim").disabled).toBe(true);
+    expect(button(container, "Mark fact").disabled).toBe(true);
+    expect(button(container, "Remove").disabled).toBe(true);
+    expect(mocks.patchAssembly).not.toHaveBeenCalled();
+    expect(mocks.createClaim).not.toHaveBeenCalled();
+    expect(mocks.patchClaim).not.toHaveBeenCalled();
+    expect(mocks.removeInput).not.toHaveBeenCalled();
   });
 });
 
@@ -72,19 +128,19 @@ function workspaceMocks() {
   };
 }
 
-async function renderWorkspace(mocks = workspaceMocks()) {
+async function renderWorkspace(mocks = workspaceMocks(), review = reviewFixture()) {
   const container = document.createElement("div");
   document.body.append(container);
   containers.push(container);
   const root = createRoot(container);
   roots.push(root);
 
-  await act(async () => {
+  const render = (nextReview: AnalyzeReviewListResponse) =>
     root.render(
       <AnalyzeReviewWorkspace
         projectId="project-1"
         runId="run-1"
-        review={reviewFixture()}
+        review={nextReview}
         mutationPending={false}
         onAcceptAssemblies={(assemblyIds) =>
           mocks.acceptAssemblies("project-1", "run-1", { assemblyIds })
@@ -99,12 +155,25 @@ async function renderWorkspace(mocks = workspaceMocks()) {
         onRemoveInput={(assemblyId, proposalId) => mocks.removeInput(assemblyId, proposalId)}
       />
     );
+
+  await act(async () => {
+    render(review);
   });
   await act(async () => {
     await waitForRender();
   });
 
-  return { container };
+  return {
+    container,
+    rerender: async (nextReview: AnalyzeReviewListResponse) => {
+      await act(async () => {
+        render(nextReview);
+      });
+      await act(async () => {
+        await waitForRender();
+      });
+    }
+  };
 }
 
 function cleanupRenderedRoots() {
@@ -127,6 +196,37 @@ async function clickButton(container: HTMLElement, label: string) {
   });
 }
 
+async function changeCheckbox(container: HTMLElement, label: string, checked: boolean) {
+  const target = checkboxInput(container, label);
+
+  await act(async () => {
+    if (target.checked !== checked) {
+      target.click();
+    }
+    await waitForRender();
+  });
+}
+
+async function changeTextInput(container: HTMLElement, label: string, value: string) {
+  const target = textInput(container, label);
+  target.value = value;
+
+  await act(async () => {
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    await waitForRender();
+  });
+}
+
+async function changeTextarea(container: HTMLElement, label: string, value: string) {
+  const target = textarea(container, label);
+  target.value = value;
+
+  await act(async () => {
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    await waitForRender();
+  });
+}
+
 function button(container: HTMLElement, label: string) {
   const candidates = Array.from(container.querySelectorAll("button"));
   const target =
@@ -138,23 +238,58 @@ function button(container: HTMLElement, label: string) {
   return target as HTMLButtonElement;
 }
 
+function checkboxInput(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("input")).find(
+    (candidate) => candidate.getAttribute("aria-label") === label
+  );
+
+  expect(target).toBeDefined();
+  return target!;
+}
+
+function textInput(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("label")).find((candidate) =>
+    candidate.textContent?.includes(label)
+  )?.querySelector("input");
+
+  expect(target).toBeDefined();
+  return target as HTMLInputElement;
+}
+
+function textarea(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("textarea")).find(
+    (candidate) =>
+      candidate.getAttribute("aria-label") === label ||
+      candidate.closest("label")?.textContent?.includes(label)
+  );
+
+  expect(target).toBeDefined();
+  return target!;
+}
+
 function waitForRender() {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
 }
 
-function reviewFixture(): AnalyzeReviewListResponse {
+function reviewFixture({
+  extraAssemblies = [],
+  readyTitle = "Review drafts"
+}: {
+  extraAssemblies?: AnalyzeReviewAssemblyDto[];
+  readyTitle?: string;
+} = {}): AnalyzeReviewListResponse {
   return {
     assemblies: [
       assembly({
         id: "assembly-ready",
-        title: "Review drafts",
+        title: readyTitle,
         validation: {
           state: "ready",
           messages: []
         },
-        renderedMarkdown: "# Review drafts\n\nReview generated analyze drafts."
+        renderedMarkdown: `# ${readyTitle}\n\nReview generated analyze drafts.`
       }),
       assembly({
         id: "assembly-blocked",
@@ -180,7 +315,8 @@ function reviewFixture(): AnalyzeReviewListResponse {
             evidence: []
           }
         ]
-      })
+      }),
+      ...extraAssemblies
     ],
     counts: {
       assemblies: {

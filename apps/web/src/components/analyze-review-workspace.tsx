@@ -3,6 +3,7 @@ import { Check, FilePlus2, Link2, Save, Trash2 } from "lucide-react";
 import type {
   AnalyzeReviewAssemblyDto,
   AnalyzeReviewAttachInputRequest,
+  AnalyzeReviewAcceptFailure,
   AnalyzeReviewClaimDto,
   AnalyzeReviewCreateAssemblyRequest,
   AnalyzeReviewCreateClaimRequest,
@@ -33,6 +34,7 @@ export type AnalyzeReviewWorkspaceProps = {
   ) => void;
   onAcceptAssemblies: (assemblyIds: string[]) => void;
   mutationPending: boolean;
+  acceptFailures?: AnalyzeReviewAcceptFailure[];
 };
 
 type AssemblyFormState = {
@@ -43,7 +45,14 @@ type AssemblyFormState = {
   title: string;
 };
 
+type AssemblyFormDraft = {
+  assemblyId: string | null;
+  dirty: boolean;
+  value: AssemblyFormState;
+};
+
 export function AnalyzeReviewWorkspace({
+  acceptFailures = [],
   mutationPending,
   onAcceptAssemblies,
   onAttachInput,
@@ -68,17 +77,20 @@ export function AnalyzeReviewWorkspace({
     () => assemblies[0]?.id ?? null
   );
   const [selectedInputIds, setSelectedInputIds] = useState<Set<string>>(() => new Set());
-  const [checkedAssemblyIds, setCheckedAssemblyIds] = useState<Set<string>>(
-    () => new Set(assemblies.filter((assembly) => isReadyDraft(assembly)).map((assembly) => assembly.id))
-  );
+  const [checkedAssemblyIds, setCheckedAssemblyIds] = useState<Set<string>>(() => new Set());
   const [newClaimText, setNewClaimText] = useState("");
   const [newClaimKind, setNewClaimKind] =
     useState<AnalyzeReviewCreateClaimRequest["kind"]>("fact");
   const selectedAssembly =
     assemblies.find((assembly) => assembly.id === selectedAssemblyId) ?? assemblies[0] ?? null;
-  const [formState, setFormState] = useState<AssemblyFormState>(() =>
-    formStateFromAssembly(selectedAssembly)
-  );
+  const [formDraft, setFormDraft] = useState<AssemblyFormDraft>(() => ({
+    assemblyId: selectedAssembly?.id ?? null,
+    dirty: false,
+    value: formStateFromAssembly(selectedAssembly)
+  }));
+  const formState = formDraft.value;
+  const selectedAssemblyIsDraft = selectedAssembly?.status === "draft";
+  const canEditSelected = selectedAssemblyIsDraft && !mutationPending;
 
   useEffect(() => {
     setSelectedAssemblyId((current) =>
@@ -90,12 +102,13 @@ export function AnalyzeReviewWorkspace({
 
   useEffect(() => {
     setCheckedAssemblyIds((current) => {
+      const readyAssemblyIds = new Set(
+        assemblies.filter((assembly) => isReadyDraft(assembly)).map((assembly) => assembly.id)
+      );
       const next = new Set<string>();
       for (const assembly of assemblies) {
-        if (current.has(assembly.id) || isReadyDraft(assembly)) {
-          if (isReadyDraft(assembly)) {
-            next.add(assembly.id);
-          }
+        if (current.has(assembly.id) && readyAssemblyIds.has(assembly.id)) {
+          next.add(assembly.id);
         }
       }
       return sameSet(current, next) ? current : next;
@@ -103,7 +116,32 @@ export function AnalyzeReviewWorkspace({
   }, [assemblies]);
 
   useEffect(() => {
-    setFormState(formStateFromAssembly(selectedAssembly));
+    setFormDraft((current) => {
+      const nextAssemblyId = selectedAssembly?.id ?? null;
+      const nextValue = formStateFromAssembly(selectedAssembly);
+      if (current.assemblyId !== nextAssemblyId) {
+        return {
+          assemblyId: nextAssemblyId,
+          dirty: false,
+          value: nextValue
+        };
+      }
+      if (!current.dirty) {
+        return formStateEqual(current.value, nextValue)
+          ? current
+          : {
+              ...current,
+              value: nextValue
+            };
+      }
+      if (selectedAssembly && formStateMatchesAssembly(current.value, selectedAssembly)) {
+        return {
+          ...current,
+          dirty: false
+        };
+      }
+      return current;
+    });
     setNewClaimText("");
     setNewClaimKind("fact");
   }, [selectedAssembly]);
@@ -123,7 +161,7 @@ export function AnalyzeReviewWorkspace({
   );
   const canAttachInputs =
     selectedAssembly !== null &&
-    selectedAssembly.status === "draft" &&
+    selectedAssemblyIsDraft &&
     selectedInputs.length > 0 &&
     !mutationPending;
   const canAcceptSelected = checkedReadyAssemblyIds.length > 0 && !mutationPending;
@@ -167,7 +205,7 @@ export function AnalyzeReviewWorkspace({
   };
 
   const saveAssembly = () => {
-    if (!selectedAssembly || mutationPending) {
+    if (!selectedAssembly || !selectedAssemblyIsDraft || mutationPending) {
       return;
     }
     onPatchAssembly(selectedAssembly.id, formState);
@@ -181,7 +219,7 @@ export function AnalyzeReviewWorkspace({
   };
 
   const createClaim = () => {
-    if (!selectedAssembly || !newClaimText.trim() || mutationPending) {
+    if (!selectedAssembly || !selectedAssemblyIsDraft || !newClaimText.trim() || mutationPending) {
       return;
     }
     onCreateClaim(selectedAssembly.id, {
@@ -215,6 +253,7 @@ export function AnalyzeReviewWorkspace({
           Accept selected
         </button>
       </header>
+      <AcceptFailures failures={acceptFailures} />
 
       <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[320px_340px_minmax(0,1fr)]">
         <section className="panel-section min-h-0 overflow-hidden">
@@ -320,7 +359,7 @@ export function AnalyzeReviewWorkspace({
               <button
                 type="button"
                 className="button-primary"
-                disabled={!selectedAssembly || mutationPending}
+                disabled={!selectedAssembly || !selectedAssemblyIsDraft || mutationPending}
                 onClick={saveAssembly}
               >
                 <Save className="h-4 w-4" aria-hidden="true" />
@@ -334,16 +373,22 @@ export function AnalyzeReviewWorkspace({
               <ValidationMessages assembly={selectedAssembly} />
               <AssemblyFields
                 formState={formState}
-                onChange={(next) => setFormState((current) => ({ ...current, ...next }))}
+                onChange={(next) =>
+                  setFormDraft((current) => ({
+                    ...current,
+                    dirty: true,
+                    value: { ...current.value, ...next }
+                  }))
+                }
               />
               <InputRoles
                 assembly={selectedAssembly}
-                mutationPending={mutationPending}
+                disabled={!canEditSelected}
                 onRemoveInput={onRemoveInput}
               />
               <ClaimsPanel
                 assembly={selectedAssembly}
-                mutationPending={mutationPending}
+                disabled={!canEditSelected}
                 newClaimKind={newClaimKind}
                 newClaimText={newClaimText}
                 onCreateClaim={createClaim}
@@ -508,11 +553,11 @@ function LabeledInput({
 
 function InputRoles({
   assembly,
-  mutationPending,
+  disabled,
   onRemoveInput
 }: {
   assembly: AnalyzeReviewAssemblyDto;
-  mutationPending: boolean;
+  disabled: boolean;
   onRemoveInput: (assemblyId: string, proposalId: string) => void;
 }) {
   return (
@@ -536,8 +581,12 @@ function InputRoles({
               <button
                 type="button"
                 className="button-secondary"
-                disabled={mutationPending}
-                onClick={() => onRemoveInput(assembly.id, input.proposalId)}
+                disabled={disabled}
+                onClick={() => {
+                  if (!disabled) {
+                    onRemoveInput(assembly.id, input.proposalId);
+                  }
+                }}
               >
                 Remove
               </button>
@@ -551,7 +600,7 @@ function InputRoles({
 
 function ClaimsPanel({
   assembly,
-  mutationPending,
+  disabled,
   newClaimKind,
   newClaimText,
   onCreateClaim,
@@ -560,7 +609,7 @@ function ClaimsPanel({
   onPatchClaim
 }: {
   assembly: AnalyzeReviewAssemblyDto;
-  mutationPending: boolean;
+  disabled: boolean;
   newClaimKind: AnalyzeReviewCreateClaimRequest["kind"];
   newClaimText: string;
   onCreateClaim: () => void;
@@ -584,7 +633,7 @@ function ClaimsPanel({
               key={claim.id}
               assemblyId={assembly.id}
               claim={claim}
-              mutationPending={mutationPending}
+              disabled={disabled}
               onPatchClaim={onPatchClaim}
             />
           ))
@@ -604,6 +653,7 @@ function ClaimsPanel({
               type="radio"
               name={`new-claim-kind-${assembly.id}`}
               checked={newClaimKind === "fact"}
+              disabled={disabled}
               onChange={() => onNewClaimKindChange("fact")}
             />
             fact
@@ -613,6 +663,7 @@ function ClaimsPanel({
               type="radio"
               name={`new-claim-kind-${assembly.id}`}
               checked={newClaimKind === "hypothesis"}
+              disabled={disabled}
               onChange={() => onNewClaimKindChange("hypothesis")}
             />
             hypothesis
@@ -620,7 +671,7 @@ function ClaimsPanel({
           <button
             type="button"
             className="button-secondary"
-            disabled={!newClaimText.trim() || mutationPending}
+            disabled={!newClaimText.trim() || disabled}
             onClick={onCreateClaim}
           >
             Add claim
@@ -634,12 +685,12 @@ function ClaimsPanel({
 function ClaimRow({
   assemblyId,
   claim,
-  mutationPending,
+  disabled,
   onPatchClaim
 }: {
   assemblyId: string;
   claim: AnalyzeReviewClaimDto;
-  mutationPending: boolean;
+  disabled: boolean;
   onPatchClaim: (
     assemblyId: string,
     claimId: string,
@@ -660,12 +711,14 @@ function ClaimRow({
         <button
           type="button"
           className="button-secondary"
-          disabled={mutationPending}
-          onClick={() =>
-            onPatchClaim(assemblyId, claim.id, {
-              kind: claim.kind === "fact" ? "hypothesis" : "fact"
-            })
-          }
+          disabled={disabled}
+          onClick={() => {
+            if (!disabled) {
+              onPatchClaim(assemblyId, claim.id, {
+                kind: claim.kind === "fact" ? "hypothesis" : "fact"
+              });
+            }
+          }}
         >
           Mark {claim.kind === "fact" ? "hypothesis" : "fact"}
         </button>
@@ -710,6 +763,32 @@ function ValidationMessages({ assembly }: { assembly: AnalyzeReviewAssemblyDto }
   );
 }
 
+function AcceptFailures({ failures }: { failures: AnalyzeReviewAcceptFailure[] }) {
+  if (failures.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+      <h2 className="font-semibold">Accept failures</h2>
+      <div className="mt-2 grid gap-2">
+        {failures.map((failure) => (
+          <div key={failure.assemblyId}>
+            <div className="font-medium">{failure.assemblyId}</div>
+            <ul className="mt-1 grid gap-1">
+              {failure.messages.map((message) => (
+                <li key={`${failure.assemblyId}:${message.code}:${message.field ?? ""}`}>
+                  <span className="font-semibold">{message.code}</span>: {message.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function MarkdownPreview({
   assembly,
   formState
@@ -749,6 +828,23 @@ function formStateFromAssembly(assembly: AnalyzeReviewAssemblyDto | null): Assem
     summary: assembly?.summary ?? "",
     title: assembly?.title ?? ""
   };
+}
+
+function formStateMatchesAssembly(
+  formState: AssemblyFormState,
+  assembly: AnalyzeReviewAssemblyDto
+) {
+  return formStateEqual(formState, formStateFromAssembly(assembly));
+}
+
+function formStateEqual(left: AssemblyFormState, right: AssemblyFormState) {
+  return (
+    left.entityId === right.entityId &&
+    left.entityType === right.entityType &&
+    left.filePath === right.filePath &&
+    left.summary === right.summary &&
+    left.title === right.title
+  );
 }
 
 function isReadyDraft(assembly: AnalyzeReviewAssemblyDto) {
