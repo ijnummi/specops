@@ -266,6 +266,109 @@ describeWithDb("database-backed routes", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("creates, lists, updates, and deletes annotations through the API", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectDirectly(db);
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      [
+        "export function reviewDrafts() {",
+        "  return ['draft-a', 'draft-b'];",
+        "}",
+        ""
+      ].join("\n")
+    );
+    await writeSpecFile(
+      project.specopsPath,
+      "use-cases/use-case.review-drafts.md",
+      specEntityMarkdown({
+        id: "use-case.review-drafts",
+        type: "use_case",
+        title: "Review Drafts",
+        status: "draft",
+        body: "# Review Drafts\n\nEditors review generated drafts before publishing."
+      })
+    );
+    await createIndexerService(db).indexProject(project.id);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/annotations`,
+      payload: {
+        sourceFilePath: "src/decision.ts",
+        entityId: "use-case.review-drafts",
+        relationshipType: "implements",
+        symbolName: "reviewDrafts",
+        startLine: 1,
+        endLine: 3,
+        confidence: 0.82
+      }
+    });
+    const created = createResponse.json() as {
+      id: string;
+      entityId: string;
+      relationshipType: string;
+      provenance: string;
+      status: string;
+    };
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(created).toMatchObject({
+      entityId: "use-case.review-drafts",
+      relationshipType: "implements",
+      provenance: "user",
+      status: "active"
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/annotations?entityId=use-case.review-drafts&includeExcerpt=true`
+    });
+    const listed = listResponse.json() as Array<{
+      id: string;
+      excerpt?: {
+        status: string;
+        text?: string;
+      };
+    }>;
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      id: created.id,
+      excerpt: {
+        status: "available",
+        text: expect.stringContaining("reviewDrafts")
+      }
+    });
+
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/annotations/${created.id}`,
+      payload: {
+        relationshipType: "references",
+        status: "stale"
+      }
+    });
+
+    expect(patchResponse.statusCode).toBe(200);
+    expect(patchResponse.json()).toMatchObject({
+      id: created.id,
+      relationshipType: "references",
+      status: "stale",
+      provenance: "user"
+    });
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${project.id}/annotations/${created.id}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(204);
+  });
+
   it("starts, lists, reads, and finishes an agent run through the API", async () => {
     app = buildServer(testDatabaseUrl!);
     const db = createTestDb();

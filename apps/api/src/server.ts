@@ -9,6 +9,7 @@ import { registerAgentRunRoutes } from "./routes/agent-runs.js";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.js";
 import { registerAnalyzeReviewAssemblyRoutes } from "./routes/analyze-review-assemblies.js";
 import { registerAnalyzeRunRoutes } from "./routes/analyze-runs.js";
+import { registerAnnotationRoutes } from "./routes/annotations.js";
 import { registerDiffReviewRoutes } from "./routes/diff-reviews.js";
 import { registerEntityRoutes } from "./routes/entities.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
@@ -102,6 +103,7 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
   app.register(registerProjectHealthRoutes, { prefix: "/api", db });
   app.register(registerReadinessRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
+  app.register(registerAnnotationRoutes, { prefix: "/api", db });
   app.register(registerAgentTaskRoutes, { prefix: "/api", db });
   app.register(registerAgentRunRoutes, { prefix: "/api", db });
   app.register(registerDiffReviewRoutes, { prefix: "/api", db });
