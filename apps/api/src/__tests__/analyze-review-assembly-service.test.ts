@@ -99,7 +99,7 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(review.unassignedInputs.map((input) => input.proposalId)).toContain(proposal.id);
   });
 
-  it("attaches and removes proposal inputs", async () => {
+  it("attaches and removes proposal inputs without rederiving removed inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);
     const assembly = await service.createAssembly(project.id, run.id, {
@@ -120,10 +120,17 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
 
     await service.removeInput(project.id, run.id, assembly.id, proposal.id);
     review = await service.listReviewAssemblies(project.id, run.id);
-    expect(review.assemblies[0]?.inputs).toHaveLength(0);
-    expect(review.assemblies.flatMap((item) => item.inputs.map((input) => input.proposalId))).toContain(
-      proposal.id
-    );
+    const listedAgain = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(review.assemblies).toHaveLength(1);
+    expect(listedAgain.assemblies).toHaveLength(1);
+    expect(review.unassignedInputs.map((input) => input.proposalId)).toContain(proposal.id);
+    expect(listedAgain.unassignedInputs.map((input) => input.proposalId)).toContain(proposal.id);
+    expect(
+      listedAgain.assemblies.flatMap((item) =>
+        item.status === "draft" ? item.inputs.map((input) => input.proposalId) : []
+      )
+    ).not.toContain(proposal.id);
   });
 
   it("derives active input when a run proposal only has evidence-only inputs", async () => {

@@ -202,17 +202,54 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     proposalId: string
   ): Promise<AnalyzeReviewAssemblyDto> {
     const run = await getAnalyzeRunRow(projectId, runId);
-    await getAssemblyRow(projectId, runId, assemblyId);
-    await db
-      .delete(analyzeReviewAssemblyInputs)
-      .where(
-        and(
-          eq(analyzeReviewAssemblyInputs.projectId, projectId),
-          eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId),
-          eq(analyzeReviewAssemblyInputs.proposalId, proposalId)
-        )
-      );
-    await refreshRenderedMarkdown(db, projectId, assemblyId);
+    await db.transaction(async (tx) => {
+      await getAssemblyRow(projectId, runId, assemblyId, tx);
+      await lockAssignmentWrites(tx, projectId, [proposalId]);
+      const inputs = await tx
+        .select()
+        .from(analyzeReviewAssemblyInputs)
+        .where(
+          and(
+            eq(analyzeReviewAssemblyInputs.projectId, projectId),
+            eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId)
+          )
+        );
+      const removedInput = inputs.find((input) => input.proposalId === proposalId);
+      const shouldDiscardAssembly =
+        removedInput?.role !== undefined &&
+        removedInput.role !== "evidence_only" &&
+        inputs.filter((input) => input.role !== "evidence_only").length === 1;
+
+      if (shouldDiscardAssembly) {
+        const now = new Date();
+        await tx
+          .update(analyzeReviewAssemblies)
+          .set({
+            status: "discarded",
+            discardedAt: now,
+            updatedAt: now
+          })
+          .where(
+            and(
+              eq(analyzeReviewAssemblies.projectId, projectId),
+              eq(analyzeReviewAssemblies.analyzeRunId, runId),
+              eq(analyzeReviewAssemblies.id, assemblyId)
+            )
+          );
+      } else {
+        await tx
+          .delete(analyzeReviewAssemblyInputs)
+          .where(
+            and(
+              eq(analyzeReviewAssemblyInputs.projectId, projectId),
+              eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId),
+              eq(analyzeReviewAssemblyInputs.proposalId, proposalId)
+            )
+          );
+      }
+
+      await refreshRenderedMarkdown(tx, projectId, assemblyId);
+    });
 
     return getMappedAssembly(projectId, run, assemblyId);
   }
