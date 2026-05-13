@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { parseSpecMarkdown } from "@specops/markdown";
+
 import { renderAnalyzeReviewAssemblyMarkdown } from "./analyze-review-renderer.js";
 
 describe("renderAnalyzeReviewAssemblyMarkdown", () => {
@@ -51,5 +53,26 @@ describe("renderAnalyzeReviewAssemblyMarkdown", () => {
     expect(markdown).toContain("## Proposed Links");
     expect(markdown).toContain("relates_to: interface.proposal-service");
     expect(markdown).toContain("Assemblies are built from proposal inputs.");
+  });
+
+  it("renders frontmatter that round-trips through spec markdown parsing", () => {
+    const title = "Review: drafts #1 [pilot]";
+    const markdown = renderAnalyzeReviewAssemblyMarkdown({
+      entityId: "use-case.review-drafts",
+      entityType: "use_case",
+      title,
+      summary: "Review generated draft inputs before writing specs.",
+      claims: [],
+      proposedLinks: []
+    });
+
+    const parsed = parseSpecMarkdown("use-cases/review-drafts.md", markdown);
+
+    expect(parsed.messages.filter((message) => message.level === "error")).toEqual([]);
+    expect(parsed.entity).toMatchObject({
+      entityId: "use-case.review-drafts",
+      type: "use_case",
+      title
+    });
   });
 });

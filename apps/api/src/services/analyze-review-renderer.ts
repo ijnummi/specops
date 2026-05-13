@@ -1,3 +1,5 @@
+import { stringify } from "yaml";
+
 type RenderEvidence = {
   sourceFilePath: string;
   symbolName: string | null;
@@ -29,12 +31,18 @@ type RenderAssemblyInput = {
 export function renderAnalyzeReviewAssemblyMarkdown(input: RenderAssemblyInput): string {
   const facts = input.claims.filter((claim) => claim.kind === "fact");
   const hypotheses = input.claims.filter((claim) => claim.kind === "hypothesis");
+  const frontmatter = stringify(
+    {
+      id: input.entityId,
+      type: input.entityType,
+      title: input.title,
+      status: "draft"
+    },
+    { lineWidth: 0 }
+  ).trimEnd();
   const lines = [
     "---",
-    `id: ${input.entityId}`,
-    `type: ${input.entityType}`,
-    `title: ${input.title}`,
-    "status: draft",
+    frontmatter,
     "---",
     "",
     `# ${input.title}`,
