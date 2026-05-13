@@ -172,6 +172,36 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     ).toContain(keptProposal.id);
   });
 
+  it("reattaches a removed input to the same assembly by reviving the tombstone", async () => {
+    const { db, project, run, proposals } = await createReviewFixture({
+      derive: false,
+      proposalCount: 2
+    });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const removedProposal = proposals[0]!;
+    const keptProposal = proposals[1]!;
+    const assembly = await service.createAssembly(project.id, run.id, {
+      proposalIds: [removedProposal.id, keptProposal.id]
+    });
+
+    await service.removeInput(project.id, run.id, assembly.id, removedProposal.id);
+    await service.attachInput(project.id, run.id, assembly.id, {
+      proposalId: removedProposal.id,
+      role: "primary"
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+    const activeInputs = review.assemblies
+      .flatMap((item) => item.inputs)
+      .filter((input) => input.assignmentState === "assigned");
+
+    expect(activeInputs.map((input) => input.proposalId)).toEqual(
+      expect.arrayContaining([removedProposal.id, keptProposal.id])
+    );
+    expect(review.unassignedInputs.map((input) => input.proposalId)).not.toContain(
+      removedProposal.id
+    );
+  });
+
   it("derives active input when a run proposal only has evidence-only inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);

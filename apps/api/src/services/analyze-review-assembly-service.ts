@@ -185,12 +185,37 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         await assertNoActiveAssignment(tx, projectId, assemblyId, input.proposalId);
       }
 
-      await tx.insert(analyzeReviewAssemblyInputs).values({
-        projectId,
-        assemblyId,
-        proposalId: input.proposalId,
-        role: input.role
-      });
+      const [existingInput] = await tx
+        .select()
+        .from(analyzeReviewAssemblyInputs)
+        .where(
+          and(
+            eq(analyzeReviewAssemblyInputs.projectId, projectId),
+            eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId),
+            eq(analyzeReviewAssemblyInputs.proposalId, input.proposalId)
+          )
+        )
+        .limit(1);
+
+      if (existingInput?.role === DISCARDED_INPUT_ROLE) {
+        await tx
+          .update(analyzeReviewAssemblyInputs)
+          .set({ role: input.role })
+          .where(
+            and(
+              eq(analyzeReviewAssemblyInputs.projectId, projectId),
+              eq(analyzeReviewAssemblyInputs.assemblyId, assemblyId),
+              eq(analyzeReviewAssemblyInputs.proposalId, input.proposalId)
+            )
+          );
+      } else {
+        await tx.insert(analyzeReviewAssemblyInputs).values({
+          projectId,
+          assemblyId,
+          proposalId: input.proposalId,
+          role: input.role
+        });
+      }
       await refreshRenderedMarkdown(tx, projectId, assemblyId);
     });
 
