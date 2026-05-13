@@ -12,6 +12,7 @@ vi.mock("./client.js", () => ({
 
 import {
   analyzeRunQuery,
+  entitySourceLinksQuery,
   generateAiPrefillProposals,
   proposalsQuery,
   queryKeys,
@@ -50,6 +51,18 @@ describe("api queries", () => {
 
     expect(mocks.apiGet).toHaveBeenCalledWith(
       "/api/projects/project-1/source-files?language=typescript&kind=source&q=routes&limit=100&offset=20"
+    );
+  });
+
+  it("fetches entity source evidence from active annotations", async () => {
+    mocks.apiGet.mockResolvedValueOnce([]);
+    const query = entitySourceLinksQuery("project-1", "domain.decision");
+
+    const runQuery = query.queryFn as () => Promise<unknown>;
+    await runQuery();
+
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      "/api/projects/project-1/annotations?entityId=domain.decision&status=active&includeExcerpt=true"
     );
   });
 

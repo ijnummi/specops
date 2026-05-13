@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { SourceSpecLinkDto } from "@specops/contracts";
+import type { SourceSpecAnnotationDto } from "@specops/contracts";
 
 import { SourceCodeViewer } from "./source-code-viewer.js";
 
@@ -8,7 +8,7 @@ const DEFAULT_EXCERPT_MESSAGE = "Source excerpt unavailable.";
 
 type SourceLinkTabsProps = {
   specTitle: string;
-  sourceLinks: SourceSpecLinkDto[];
+  sourceLinks: SourceSpecAnnotationDto[];
   sourceLinksError?: string | null;
   specPanel: ReactNode;
 };
@@ -54,7 +54,7 @@ export function SourceLinkTabs({
             <button
               key={sourceLink.id}
               type="button"
-              aria-label={`${sourceLink.filePath} ${sourceLink.symbolName}`}
+              aria-label={`${sourceLink.sourceFilePath} ${sourceLabel(sourceLink)}`}
               aria-pressed={isSelected}
               className={panelButtonClassName(isSelected)}
               onClick={() => setActiveTab({ type: "source", id: sourceLink.id })}
@@ -81,7 +81,7 @@ export function SourceLinkTabs({
   );
 }
 
-function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
+function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecAnnotationDto }) {
   return (
     <section
       data-testid="source-link-panel"
@@ -91,13 +91,17 @@ function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
         data-testid="source-link-metadata"
         className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 overflow-hidden border-b border-slate-200 px-3 py-2 text-xs text-slate-600"
       >
-        <div className="min-w-0 flex-1 truncate font-mono text-slate-900">{sourceLink.filePath}</div>
-        <div className="shrink-0">
-          <span className="font-medium text-slate-700">{sourceLink.symbolKind}</span>{" "}
-          <span>{sourceLink.symbolName}</span>
+        <div className="min-w-0 flex-1 truncate font-mono text-slate-900">
+          {sourceLink.sourceFilePath}
         </div>
-        {sourceLink.symbolLine ? (
-          <div className="shrink-0">Symbol line {sourceLink.symbolLine}</div>
+        <div className="shrink-0">
+          <span className="font-medium text-slate-700">
+            {sourceLink.symbolKind ?? "source"}
+          </span>{" "}
+          <span>{sourceLabel(sourceLink)}</span>
+        </div>
+        {sourceLink.startLine ? (
+          <div className="shrink-0">Symbol line {sourceLink.startLine}</div>
         ) : null}
         {sourceLink.annotationLine ? (
           <div className="shrink-0">Annotation line {sourceLink.annotationLine}</div>
@@ -110,7 +114,7 @@ function SourceLinkPanel({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
   );
 }
 
-function Excerpt({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
+function Excerpt({ sourceLink }: { sourceLink: SourceSpecAnnotationDto }) {
   const excerpt = sourceLink.excerpt;
 
   if (!excerpt || excerpt.status !== "available") {
@@ -127,9 +131,9 @@ function Excerpt({ sourceLink }: { sourceLink: SourceSpecLinkDto }) {
       className="h-full min-h-0 flex-1 overflow-hidden rounded border border-slate-200"
     >
       <SourceCodeViewer
-        filePath={sourceLink.filePath}
+        filePath={sourceLink.sourceFilePath}
         value={excerpt.text}
-        focusLine={sourceLink.annotationLine ?? sourceLink.symbolLine}
+        focusLine={sourceLink.annotationLine ?? sourceLink.startLine}
       />
     </div>
   );
@@ -148,6 +152,10 @@ function basename(filePath: string) {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
-function sourceButtonLabel(sourceLink: SourceSpecLinkDto) {
-  return `${basename(sourceLink.filePath)} · ${sourceLink.symbolName}`;
+function sourceLabel(sourceLink: SourceSpecAnnotationDto) {
+  return sourceLink.symbolName ?? basename(sourceLink.sourceFilePath);
+}
+
+function sourceButtonLabel(sourceLink: SourceSpecAnnotationDto) {
+  return `${basename(sourceLink.sourceFilePath)} · ${sourceLabel(sourceLink)}`;
 }

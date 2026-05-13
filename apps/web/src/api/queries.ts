@@ -50,7 +50,7 @@ import type {
   SpecLinkDto,
   SourceFileListQuery,
   SourceFileSummaryDto,
-  SourceSpecLinkDto,
+  SourceSpecAnnotationDto,
   StartAgentRunRequest,
   StartAgentRunResponse,
   UpdateDiffReviewStatusRequest,
@@ -373,13 +373,17 @@ export function backlinksQuery(projectId: string, entityId: string) {
 }
 
 export function entitySourceLinksQuery(projectId: string, entityId: string) {
+  const search = new URLSearchParams({
+    entityId,
+    status: "active",
+    includeExcerpt: "true"
+  });
+
   return queryOptions({
     queryKey: queryKeys.sourceLinks(projectId, entityId),
     queryFn: () =>
-      apiGet<SourceSpecLinkDto[]>(
-        `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
-          entityId
-        )}/source-links`
+      apiGet<SourceSpecAnnotationDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/annotations?${search.toString()}`
       )
   });
 }
