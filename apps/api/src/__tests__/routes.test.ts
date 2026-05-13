@@ -6,7 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { analyzeRunDetailSchema } from "@specops/contracts";
-import { createDb, diffReviews } from "@specops/db";
+import { aiProposals, analyzeRuns, createDb, diffReviews } from "@specops/db";
 import { and, eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -2524,6 +2524,183 @@ describeWithDb("database-backed routes", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("lists analyze review assemblies for a run", async () => {
+    const { app, project, run } = await createAnalyzeReviewRouteFixture();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      assemblies: expect.any(Array),
+      unassignedInputs: expect.any(Array),
+      counts: expect.any(Object)
+    });
+  });
+
+  it("creates and patches analyze review assemblies", async () => {
+    const { app, project, run } = await createAnalyzeReviewRouteFixture();
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies`,
+      payload: {
+        title: "Review drafts",
+        entityType: "use_case",
+        entityId: "use-case.review-drafts",
+        filePath: "use-cases/review-drafts.md",
+        summary: "Review generated drafts.",
+        proposalIds: []
+      }
+    });
+    expect(createResponse.statusCode).toBe(201);
+
+    const assemblyId = createResponse.json().id;
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assemblyId}`,
+      payload: { title: "Review generated drafts" }
+    });
+
+    expect(patchResponse.statusCode).toBe(200);
+    expect(patchResponse.json().title).toBe("Review generated drafts");
+  });
+
+  it("attaches and removes analyze review assembly inputs", async () => {
+    const { app, project, run, proposal } = await createAnalyzeReviewRouteFixture();
+    const assembly = await createReviewAssemblyViaApi(project.id, run.id);
+
+    const attachResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/inputs`,
+      payload: {
+        proposalId: proposal.id,
+        role: "primary"
+      }
+    });
+
+    expect(attachResponse.statusCode).toBe(201);
+    expect(attachResponse.json().inputs).toContainEqual(
+      expect.objectContaining({ proposalId: proposal.id, role: "primary" })
+    );
+
+    const removeResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/inputs/${proposal.id}`
+    });
+
+    expect(removeResponse.statusCode).toBe(204);
+    expect(removeResponse.body).toBe("");
+  });
+
+  it("creates and patches analyze review assembly claims", async () => {
+    const { app, project, run } = await createAnalyzeReviewRouteFixture();
+    const assembly = await createReviewAssemblyViaApi(project.id, run.id);
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/claims`,
+      payload: {
+        text: "Generated drafts should be reviewed before acceptance.",
+        kind: "hypothesis",
+        confidence: 0.4
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+
+    const claimId = createResponse.json().id;
+    const patchResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/claims/${claimId}`,
+      payload: {
+        text: "Generated drafts are reviewed before acceptance.",
+        confidence: 0.7
+      }
+    });
+
+    expect(patchResponse.statusCode).toBe(200);
+    expect(patchResponse.json()).toMatchObject({
+      id: claimId,
+      text: "Generated drafts are reviewed before acceptance.",
+      confidence: 0.7
+    });
+  });
+
+  it("attaches and removes analyze review claim evidence", async () => {
+    const { app, project, run, proposal } = await createAnalyzeReviewRouteFixture();
+    const assembly = await createReviewAssemblyViaApi(project.id, run.id);
+    const claimResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/claims`,
+      payload: {
+        text: "Review routes expose generated drafts.",
+        kind: "fact",
+        confidence: 0.8
+      }
+    });
+    expect(claimResponse.statusCode).toBe(201);
+
+    const claimId = claimResponse.json().id;
+    const attachResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/claims/${claimId}/evidence`,
+      payload: {
+        proposalId: proposal.id,
+        sourceFilePath: "apps/api/src/routes/analyze-review-assemblies.ts",
+        symbolName: "registerAnalyzeReviewAssemblyRoutes",
+        startLine: 1,
+        endLine: 80,
+        provenance: "user",
+        confidence: 0.8
+      }
+    });
+
+    expect(attachResponse.statusCode).toBe(201);
+    expect(attachResponse.json()).toMatchObject({
+      proposalId: proposal.id,
+      sourceFilePath: "apps/api/src/routes/analyze-review-assemblies.ts"
+    });
+
+    const evidenceId = attachResponse.json().id;
+    const removeResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/${assembly.id}/claims/${claimId}/evidence/${evidenceId}`
+    });
+
+    expect(removeResponse.statusCode).toBe(204);
+    expect(removeResponse.body).toBe("");
+  });
+
+  it("accepts analyze review assemblies", async () => {
+    const { app, project, run, proposal } = await createAnalyzeReviewRouteFixture();
+    const createResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies`,
+      payload: {
+        proposalIds: [proposal.id]
+      }
+    });
+    expect(createResponse.statusCode).toBe(201);
+
+    const assemblyId = createResponse.json().id;
+    const acceptResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs/${run.id}/review-assemblies/accept`,
+      payload: {
+        assemblyIds: [assemblyId]
+      }
+    });
+
+    expect(acceptResponse.statusCode).toBe(200);
+    expect(acceptResponse.json()).toMatchObject({
+      acceptedAssemblyIds: [assemblyId],
+      failures: []
+    });
   });
 
   it("generates AI proposals from selected source files without writing markdown", async () => {
@@ -5125,15 +5302,21 @@ Let customers buy products and receive confirmation while keeping payment and or
     ].join("\n");
   }
 
-  function aiProposalPayload() {
-    const markdown = aiProposalMarkdown();
+  function aiProposalPayload({
+    entityId = "uc.manage-projects",
+    title = "Manage projects"
+  }: {
+    entityId?: string;
+    title?: string;
+  } = {}) {
+    const markdown = aiProposalMarkdown({ entityId, title });
 
     return {
-      entityId: "uc.manage-projects",
+      entityId,
       type: "use_case",
-      title: "Manage projects",
+      title,
       status: "draft",
-      filePath: "use-cases/uc.manage-projects.md",
+      filePath: `use-cases/${entityId}.md`,
       generatedMarkdown: markdown,
       markdown,
       sourceFiles: ["apps/api/src/routes/projects.ts"],
@@ -5280,6 +5463,68 @@ Let customers buy products and receive confirmation while keeping payment and or
     );
 
     return result.rows[0];
+  }
+
+  async function createAnalyzeReviewRouteFixture(options: { proposalCount?: number } = {}) {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const project = await createProjectViaApi();
+    const proposalCount = options.proposalCount ?? 1;
+    const proposalInputs = Array.from({ length: proposalCount }, (_, index) => {
+      const suffix = index === 0 ? "" : ` ${index + 1}`;
+      const entitySuffix = index === 0 ? "" : `-${index + 1}`;
+      const payload = aiProposalPayload({
+        entityId: `use-case.review-drafts${entitySuffix}`,
+        title: `Review drafts${suffix}`
+      });
+
+      return {
+        projectId: project.id,
+        proposalType: "ai_spec_entity" as const,
+        title: payload.title,
+        payloadJson: {
+          ...payload,
+          filePath: `use-cases/review-drafts${entitySuffix}.md`
+        },
+        evidenceJson: aiProposalEvidence(),
+        confidence: 0.82,
+        status: "pending" as const
+      };
+    });
+    const proposals = await db.insert(aiProposals).values(proposalInputs).returning();
+    const [run] = await db
+      .insert(analyzeRuns)
+      .values({
+        projectId: project.id,
+        status: "succeeded",
+        stepsJson: [],
+        proposalIdsJson: proposals.map((proposal) => proposal.id),
+        aiProposalCount: proposals.length
+      })
+      .returning();
+
+    expect(proposals).toHaveLength(proposalCount);
+    expect(run).toBeDefined();
+
+    return { app, project, run: run!, proposal: proposals[0]!, proposals };
+  }
+
+  async function createReviewAssemblyViaApi(projectId: string, runId: string) {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/analyze-runs/${runId}/review-assemblies`,
+      payload: {
+        title: "Review drafts",
+        entityType: "use_case",
+        entityId: "use-case.review-drafts",
+        filePath: "use-cases/review-drafts.md",
+        summary: "Review generated drafts.",
+        proposalIds: []
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    return response.json() as { id: string };
   }
 
   async function waitForAnalyzeRun(projectId: string, runId: string) {

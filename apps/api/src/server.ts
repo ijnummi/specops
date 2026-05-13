@@ -7,6 +7,7 @@ import { isHttpError } from "./lib/http-errors.js";
 import { registerAdminDatabaseRoutes } from "./routes/admin-database.js";
 import { registerAgentRunRoutes } from "./routes/agent-runs.js";
 import { registerAgentTaskRoutes } from "./routes/agent-tasks.js";
+import { registerAnalyzeReviewAssemblyRoutes } from "./routes/analyze-review-assemblies.js";
 import { registerAnalyzeRunRoutes } from "./routes/analyze-runs.js";
 import { registerDiffReviewRoutes } from "./routes/diff-reviews.js";
 import { registerEntityRoutes } from "./routes/entities.js";
@@ -97,6 +98,7 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
     aiPrefillConfig,
     aiPrefillProviderFactory: options.aiPrefillProviderFactory
   });
+  app.register(registerAnalyzeReviewAssemblyRoutes, { prefix: "/api", db });
   app.register(registerProjectHealthRoutes, { prefix: "/api", db });
   app.register(registerReadinessRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
