@@ -872,7 +872,7 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
       relationshipType: "implements",
       confidence: evidence.confidence,
       provenance: evidence.provenance,
-      status: "active",
+      status: "stale",
       analyzeRunId: run.id,
       proposalId: proposal.id,
       assemblyId: assembly.id,

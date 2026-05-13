@@ -383,6 +383,54 @@ describeWithDb("database-backed routes", () => {
     expect(deleteResponse.statusCode).toBe(204);
   });
 
+  it("marks generated annotations stale during an empty source scan while preserving user annotations", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    const sourceHash = sha256("export interface Removed {}\n");
+    const sourceFileResult = await pool.query<{ id: string }>(
+      "insert into source_files (project_id, path, language, kind, size_bytes, content_hash) values ($1, 'src/removed.ts', 'typescript', 'source', 28, $2) returning id",
+      [project.id, sourceHash]
+    );
+    const sourceFileId = sourceFileResult.rows[0].id;
+    await pool.query(
+      "insert into spec_entities (project_id, entity_id, type, title, status, file_path, body_markdown, body_text, content_hash) values ($1, 'domain.removed', 'domain_entity', 'Removed', 'draft', 'domain/removed.md', '# Removed', 'Removed', $2)",
+      [project.id, sha256(`${project.id}:domain.removed`)]
+    );
+    await pool.query(
+      "insert into source_spec_annotations (project_id, source_file_id, source_file_path, entity_id, spec_file_path, relationship_type, symbol_name, symbol_kind, start_line, end_line, annotation_line, source_content_hash, provenance, status) values " +
+        "($1, $2, 'src/removed.ts', 'domain.removed', 'domain/removed.md', 'references', 'Removed', 'interface', 1, 1, 1, $3, 'scanner', 'active')," +
+        "($1, $2, 'src/removed.ts', 'domain.removed', 'domain/removed.md', 'implements', 'RemovedUser', 'interface', 1, 1, 1, $3, 'user', 'active')",
+      [project.id, sourceFileId, sourceHash]
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    const annotations = await pool.query<{
+      provenance: string;
+      status: string;
+      source_file_path: string;
+    }>(
+      "select provenance, status, source_file_path from source_spec_annotations where project_id = $1 order by provenance",
+      [project.id]
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(annotations.rows).toEqual([
+      {
+        provenance: "scanner",
+        status: "stale",
+        source_file_path: "src/removed.ts"
+      },
+      {
+        provenance: "user",
+        status: "active",
+        source_file_path: "src/removed.ts"
+      }
+    ]);
+  });
+
   it("starts, lists, reads, and finishes an agent run through the API", async () => {
     app = buildServer(testDatabaseUrl!);
     const db = createTestDb();

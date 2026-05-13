@@ -278,9 +278,7 @@ async function persistSourceScan(
 
   const annotationService = createAnnotationService(db as Db);
   const currentSourceHashes = new Map(result.files.map((file) => [file.path, file.contentHash]));
-  if (currentSourceHashes.size > 0) {
-    await annotationService.markStaleAnnotations(projectId, { currentSourceHashes }, db);
-  }
+  await annotationService.markStaleAnnotations(projectId, { currentSourceHashes }, db);
   await annotationService.replaceScannerAnnotations(projectId, indexRunId, scannerAnnotations, db);
 
   if (invalidAnnotationWarnings.length > 0) {
