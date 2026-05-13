@@ -1,5 +1,6 @@
 import type {
   AnalyzeReviewAssemblyDto,
+  AnalyzeReviewAssemblyStatus,
   AnalyzeReviewInputDto,
   AnalyzeReviewValidationState
 } from "@specops/contracts";
@@ -16,6 +17,12 @@ const validationRank: Record<AnalyzeReviewValidationState, number> = {
   blocker: 0,
   warning: 1,
   ready: 2
+};
+
+const statusRank: Record<AnalyzeReviewAssemblyStatus, number> = {
+  draft: 0,
+  accepted: 1,
+  discarded: 2
 };
 
 export function groupAnalyzeReviewInputs(inputs: AnalyzeReviewInputDto[]) {
@@ -37,6 +44,11 @@ export function groupAnalyzeReviewInputs(inputs: AnalyzeReviewInputDto[]) {
 
 export function sortAnalyzeReviewAssemblies(assemblies: AnalyzeReviewAssemblyDto[]) {
   return [...assemblies].sort((left, right) => {
+    const status = statusRank[left.status] - statusRank[right.status];
+    if (status !== 0) {
+      return status;
+    }
+
     const validation =
       validationRank[left.validation.state] - validationRank[right.validation.state];
     if (validation !== 0) {
@@ -56,7 +68,16 @@ function groupForInput(input: AnalyzeReviewInputDto): AnalyzeReviewInputGroupNam
   }
 
   if (input.entityType === "interface") {
-    return input.title.toLowerCase().includes("model") ? "Data Models" : "Interfaces";
+    const title = input.title.toLowerCase();
+    const entityId = input.entityId.toLowerCase();
+    if (
+      title.includes("service") ||
+      entityId.includes(".service") ||
+      entityId.includes("service")
+    ) {
+      return "Services";
+    }
+    return title.includes("model") ? "Data Models" : "Interfaces";
   }
 
   return "Use Cases";

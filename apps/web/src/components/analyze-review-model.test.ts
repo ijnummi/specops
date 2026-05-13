@@ -11,10 +11,12 @@ describe("analyze review model", () => {
     const groups = groupAnalyzeReviewInputs([
       input({ entityType: "domain_entity", title: "Project" }),
       input({ entityType: "interface", title: "Project service" }),
+      input({ entityType: "interface", title: "Project API" }),
       input({ entityType: "use_case", title: "Review drafts", confidence: null })
     ]);
 
     expect(groups.Domain).toHaveLength(1);
+    expect(groups.Services).toHaveLength(1);
     expect(groups.Interfaces).toHaveLength(1);
     expect(groups.Unknowns).toHaveLength(1);
   });
@@ -27,6 +29,22 @@ describe("analyze review model", () => {
     ]);
 
     expect(sorted.map((item) => item.title)).toEqual(["Blocked", "Warning", "Ready"]);
+  });
+
+  it("sorts draft assemblies before accepted or discarded assemblies", () => {
+    const sorted = sortAnalyzeReviewAssemblies([
+      assembly("blocker", "Accepted blocker", { status: "accepted" }),
+      assembly("ready", "Draft ready", { status: "draft" }),
+      assembly("blocker", "Discarded blocker", { status: "discarded" }),
+      assembly("warning", "Draft warning", { status: "draft" })
+    ]);
+
+    expect(sorted.map((item) => item.title)).toEqual([
+      "Draft warning",
+      "Draft ready",
+      "Accepted blocker",
+      "Discarded blocker"
+    ]);
   });
 });
 
@@ -48,7 +66,8 @@ function input(overrides: Partial<AnalyzeReviewInputDto> = {}): AnalyzeReviewInp
 
 function assembly(
   state: AnalyzeReviewAssemblyDto["validation"]["state"],
-  title: string
+  title: string,
+  overrides: Partial<AnalyzeReviewAssemblyDto> = {}
 ): AnalyzeReviewAssemblyDto {
   return {
     id: `00000000-0000-4000-8000-00000000000${state.length}`,
@@ -70,6 +89,7 @@ function assembly(
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     acceptedAt: null,
-    discardedAt: null
+    discardedAt: null,
+    ...overrides
   };
 }
