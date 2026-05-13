@@ -23,7 +23,7 @@ import {
   sourceSpecAnnotations,
   specEntities
 } from "@specops/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { BadRequestError, NotFoundError } from "../lib/http-errors.js";
 import { assertInsideDirectory, assertRealPathInsideDirectory } from "../lib/path-safety.js";
@@ -282,7 +282,41 @@ export function createAnnotationService(db: Db) {
             inArray(sourceSpecAnnotations.id, staleAnnotationIds)
           )
         )
-        .returning({ id: sourceSpecAnnotations.id });
+        .returning({
+          id: sourceSpecAnnotations.id,
+          sourceFilePath: sourceSpecAnnotations.sourceFilePath,
+          entityId: sourceSpecAnnotations.entityId,
+          relationshipType: sourceSpecAnnotations.relationshipType,
+          provenance: sourceSpecAnnotations.provenance,
+          claimId: sourceSpecAnnotations.claimId,
+          symbolName: sourceSpecAnnotations.symbolName,
+          startLine: sourceSpecAnnotations.startLine,
+          endLine: sourceSpecAnnotations.endLine
+        });
+
+      for (const row of updatedRows) {
+        if (row.provenance !== "scanner") {
+          continue;
+        }
+
+        await client
+          .delete(sourceSpecAnnotations)
+          .where(
+            and(
+              eq(sourceSpecAnnotations.projectId, projectId),
+              eq(sourceSpecAnnotations.status, "stale"),
+              eq(sourceSpecAnnotations.provenance, "scanner"),
+              eq(sourceSpecAnnotations.sourceFilePath, row.sourceFilePath),
+              eq(sourceSpecAnnotations.entityId, row.entityId),
+              eq(sourceSpecAnnotations.relationshipType, row.relationshipType),
+              sql`${sourceSpecAnnotations.id} <> ${row.id}`,
+              sql`coalesce(${sourceSpecAnnotations.claimId}::text, '') = ${row.claimId ?? ""}`,
+              sql`coalesce(${sourceSpecAnnotations.symbolName}, '') = ${row.symbolName ?? ""}`,
+              sql`coalesce(${sourceSpecAnnotations.startLine}, 0) = ${row.startLine ?? 0}`,
+              sql`coalesce(${sourceSpecAnnotations.endLine}, 0) = ${row.endLine ?? 0}`
+            )
+          );
+      }
 
       return updatedRows.length;
     },

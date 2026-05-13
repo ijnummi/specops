@@ -446,6 +446,108 @@ describeWithDb("createAnnotationService", () => {
     ]);
   });
 
+  it("deduplicates stale scanner annotations for the same logical key across repeated scans", async () => {
+    const project = await createProjectFixture("stale-scanner-dedupe");
+    const source = await createSourceFileFixture(project.id, "src/decision.ts", "export interface Decision {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const firstIndexRunId = await createIndexRunFixture(project.id);
+    const secondIndexRunId = await createIndexRunFixture(project.id);
+    const thirdIndexRunId = await createIndexRunFixture(project.id);
+    const service = createAnnotationService(db);
+    const firstHash = source.contentHash;
+    const secondHash = sha256("export interface Decision { second: true }\n");
+    const thirdHash = sha256("export interface Decision { third: true }\n");
+    const scannerAnnotation: ScannerAnnotationInput = {
+      sourceFileId: source.id,
+      sourceFilePath: source.path,
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      sourceContentHash: firstHash,
+      entityId: "domain.decision",
+      specFilePath: "specs/decision.md",
+      relationshipType: "references",
+      confidence: 1
+    };
+
+    await service.createUserAnnotation(project.id, {
+      sourceFileId: source.id,
+      entityId: "domain.decision",
+      relationshipType: "references",
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      claimId: null,
+      confidence: 1
+    });
+    await db.insert(sourceSpecAnnotations).values({
+      projectId: project.id,
+      sourceFileId: source.id,
+      sourceFilePath: source.path,
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      sourceContentHash: firstHash,
+      entityId: "domain.decision",
+      specFilePath: "specs/decision.md",
+      relationshipType: "references",
+      confidence: 1,
+      provenance: "ai",
+      status: "stale"
+    });
+
+    await service.replaceScannerAnnotations(project.id, firstIndexRunId, [scannerAnnotation]);
+    await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([[source.path, secondHash]])
+    });
+    await service.replaceScannerAnnotations(project.id, secondIndexRunId, [
+      { ...scannerAnnotation, sourceContentHash: secondHash }
+    ]);
+    await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([[source.path, thirdHash]])
+    });
+    await service.replaceScannerAnnotations(project.id, thirdIndexRunId, [
+      { ...scannerAnnotation, sourceContentHash: thirdHash }
+    ]);
+
+    const annotations = await db
+      .select({
+        provenance: sourceSpecAnnotations.provenance,
+        status: sourceSpecAnnotations.status,
+        sourceContentHash: sourceSpecAnnotations.sourceContentHash,
+        indexRunId: sourceSpecAnnotations.indexRunId
+      })
+      .from(sourceSpecAnnotations)
+      .where(eq(sourceSpecAnnotations.projectId, project.id));
+
+    const scannerRows = annotations
+      .filter((annotation) => annotation.provenance === "scanner")
+      .sort((left, right) => right.status.localeCompare(left.status));
+
+    expect(scannerRows).toEqual([
+      {
+        provenance: "scanner",
+        status: "stale",
+        sourceContentHash: secondHash,
+        indexRunId: secondIndexRunId
+      },
+      {
+        provenance: "scanner",
+        status: "active",
+        sourceContentHash: thirdHash,
+        indexRunId: thirdIndexRunId
+      }
+    ]);
+    expect(annotations.filter((annotation) => annotation.provenance === "user")).toHaveLength(1);
+    expect(annotations.filter((annotation) => annotation.provenance === "ai")).toHaveLength(1);
+  });
+
   it("validates accepted evidence ownership and origin metadata", async () => {
     const first = await createProjectFixture("evidence-owned");
     const second = await createProjectFixture("evidence-other");
