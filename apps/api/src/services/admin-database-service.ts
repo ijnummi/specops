@@ -6,6 +6,7 @@ import {
   sourceExports,
   sourceFiles,
   sourceImports,
+  sourceSpecAnnotations,
   sourceSpecLinks,
   sourceSymbols,
   specEntities,
@@ -28,6 +29,7 @@ type AdminTableName =
   | "source_imports"
   | "source_exports"
   | "source_symbols"
+  | "source_spec_annotations"
   | "source_spec_links"
   | "ai_proposals";
 
@@ -82,6 +84,7 @@ const adminTables: AdminTableDefinition[] = [
   { name: "source_imports", table: sourceImports, primaryKey: "id" },
   { name: "source_exports", table: sourceExports, primaryKey: "id" },
   { name: "source_symbols", table: sourceSymbols, primaryKey: "id" },
+  { name: "source_spec_annotations", table: sourceSpecAnnotations, primaryKey: "id" },
   { name: "source_spec_links", table: sourceSpecLinks, primaryKey: "id" },
   { name: "ai_proposals", table: aiProposals, primaryKey: "id" }
 ];

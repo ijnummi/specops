@@ -27,6 +27,10 @@ import {
   assertInsideDirectory,
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
+import {
+  createAnnotationService,
+  type ScannerAnnotationInput
+} from "./annotation-service.js";
 
 const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
 const SOURCE_EXCERPT_CONCURRENCY = 4;
@@ -192,10 +196,13 @@ async function persistSourceScan(
   }
 
   const existingEntityRows = await db
-    .select({ entityId: specEntities.entityId })
+    .select({ entityId: specEntities.entityId, filePath: specEntities.filePath })
     .from(specEntities)
     .where(eq(specEntities.projectId, projectId));
   const existingEntityIds = new Set(existingEntityRows.map((row) => row.entityId));
+  const specFilePathsByEntityId = new Map(
+    existingEntityRows.map((row) => [row.entityId, row.filePath])
+  );
 
   const sourceSpecLinkRows = result.files.flatMap((file) => {
     const sourceFileId = sourceFileIdsByPath.get(file.path);
@@ -251,6 +258,30 @@ async function persistSourceScan(
   if (missingEntityWarnings.length > 0) {
     await db.insert(validationMessages).values(missingEntityWarnings);
   }
+
+  const scannerAnnotations: ScannerAnnotationInput[] = validSourceSpecLinkRows
+    .filter((link) => existingEntityIds.has(link.entityId))
+    .map((link) => ({
+      sourceFileId: link.sourceFileId,
+      sourceFilePath: link.filePath,
+      symbolName: link.symbolName,
+      symbolKind: link.symbolKind,
+      startLine: link.symbolLine,
+      endLine: link.symbolLine,
+      annotationLine: link.annotationLine,
+      sourceContentHash: link.contentHash,
+      entityId: link.entityId,
+      specFilePath: specFilePathsByEntityId.get(link.entityId) ?? link.entityId,
+      relationshipType: "references",
+      confidence: 1
+    }));
+
+  await createAnnotationService(db as Db).replaceScannerAnnotations(
+    projectId,
+    indexRunId,
+    scannerAnnotations,
+    db
+  );
 
   if (invalidAnnotationWarnings.length > 0) {
     await db.insert(validationMessages).values(invalidAnnotationWarnings);
