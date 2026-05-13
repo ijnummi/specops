@@ -831,6 +831,52 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(proposalRow?.reviewedAt).not.toBeNull();
   });
 
+  it("reports index failures after accepting assemblies without rolling back", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db, {
+      acceptTestHooks: {
+        indexProject: () => {
+          throw new Error("Simulated index failure");
+        }
+      }
+    });
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Index failure",
+      entityType: "use_case",
+      entityId: "use-case.index-failure",
+      filePath: "use-cases/index-failure.md",
+      summary: "Index failure assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+    const writtenMarkdown = await readFile(
+      path.join(project.specopsPath, "use-cases/index-failure.md"),
+      "utf8"
+    );
+
+    expect(result.acceptedAssemblyIds).toEqual([assembly.id]);
+    expect(result.indexRun).toBeNull();
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]?.assemblyId).toBe(assembly.id);
+    expect(result.failures[0]?.messages[0]?.code).toBe("index_failed");
+    expect(result.failures[0]?.messages[0]?.message).toContain("Simulated index failure");
+    expect(writtenMarkdown).toContain("# Index failure");
+    expect(review.assemblies[0]).toMatchObject({
+      id: assembly.id,
+      status: "accepted",
+      renderedMarkdown: writtenMarkdown
+    });
+  });
+
   it("returns validation failures without writing invalid assemblies", async () => {
     const { db, project, run } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);

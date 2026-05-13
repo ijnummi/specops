@@ -89,6 +89,13 @@ type AnalyzeReviewAssemblyServiceOptions = {
       assemblyId: string;
       targetPath: string;
     }) => Promise<void> | void;
+    indexProject?: (context: {
+      projectId: string;
+      runId: string;
+      acceptedAssemblyIds: string[];
+    }) =>
+      | NonNullable<AnalyzeReviewAcceptResponse["indexRun"]>
+      | Promise<NonNullable<AnalyzeReviewAcceptResponse["indexRun"]>>;
   };
 };
 
@@ -677,10 +684,30 @@ export function createAnalyzeReviewAssemblyService(
       acceptedAssemblyIds.push(assembly.id);
     }
 
-    const indexRun =
-      acceptedAssemblyIds.length > 0
-        ? await createIndexerService(db).indexProject(projectId)
-        : null;
+    let indexRun: AnalyzeReviewAcceptResponse["indexRun"] = null;
+    if (acceptedAssemblyIds.length > 0) {
+      try {
+        indexRun = options.acceptTestHooks?.indexProject
+          ? await options.acceptTestHooks.indexProject({
+              projectId,
+              runId,
+              acceptedAssemblyIds
+            })
+          : await createIndexerService(db).indexProject(projectId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Indexing failed.";
+        for (const assemblyId of acceptedAssemblyIds) {
+          failures.push(
+            createAcceptFailure(
+              assemblyId,
+              "index_failed",
+              `Indexing failed after accepting assembly: ${message}`,
+              "indexRun"
+            )
+          );
+        }
+      }
+    }
 
     return { acceptedAssemblyIds, failures, indexRun };
   }
