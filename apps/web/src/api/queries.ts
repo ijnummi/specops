@@ -7,6 +7,18 @@ import type {
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
   AnalyzeRunDetailDto,
+  AnalyzeReviewAcceptRequest,
+  AnalyzeReviewAcceptResponse,
+  AnalyzeReviewAssemblyDto,
+  AnalyzeReviewAttachEvidenceRequest,
+  AnalyzeReviewAttachInputRequest,
+  AnalyzeReviewClaimDto,
+  AnalyzeReviewCreateAssemblyRequest,
+  AnalyzeReviewCreateClaimRequest,
+  AnalyzeReviewEvidenceDto,
+  AnalyzeReviewListResponse,
+  AnalyzeReviewUpdateAssemblyRequest,
+  AnalyzeReviewUpdateClaimRequest,
   AiPrefillGenerateRequest,
   AiPrefillGenerateResponse,
   ChangeImpactPreviewQuery,
@@ -113,6 +125,8 @@ export const queryKeys = {
     ["projects", projectId, "agent-runs", runId] as const,
   analyzeRun: (projectId: string, runId: string) =>
     ["projects", projectId, "analyze-runs", runId] as const,
+  analyzeReviewAssemblies: (projectId: string, runId: string) =>
+    ["projects", projectId, "analyze-runs", runId, "review-assemblies"] as const,
   diffReviewsRoot: (projectId: string) => ["projects", projectId, "diff-reviews"] as const,
   diffReviews: (projectId: string) => ["projects", projectId, "diff-reviews", "list"] as const,
   diffReview: (projectId: string, reviewId: string) =>
@@ -239,6 +253,18 @@ export function analyzeRunQuery(projectId: string, runId: string) {
     queryFn: () =>
       apiGet<AnalyzeRunDetailDto>(
         `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(runId)}`
+      )
+  });
+}
+
+export function analyzeReviewAssembliesQuery(projectId: string, runId: string) {
+  return queryOptions({
+    queryKey: queryKeys.analyzeReviewAssemblies(projectId, runId),
+    queryFn: () =>
+      apiGet<AnalyzeReviewListResponse>(
+        `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+          runId
+        )}/review-assemblies`
       )
   });
 }
@@ -524,6 +550,148 @@ export function startAnalyzeRun(projectId: string) {
   return apiSend<AnalyzeRunDetailDto>(
     "POST",
     `/api/projects/${encodeURIComponent(projectId)}/analyze-runs`
+  );
+}
+
+export function createAnalyzeReviewAssembly(
+  projectId: string,
+  runId: string,
+  input: AnalyzeReviewCreateAssemblyRequest
+) {
+  return apiSend<AnalyzeReviewAssemblyDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies`,
+    input
+  );
+}
+
+export function patchAnalyzeReviewAssembly(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  input: AnalyzeReviewUpdateAssemblyRequest
+) {
+  return apiSend<AnalyzeReviewAssemblyDto>(
+    "PATCH",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}`,
+    input
+  );
+}
+
+export function attachAnalyzeReviewInput(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  input: AnalyzeReviewAttachInputRequest
+) {
+  return apiSend<AnalyzeReviewAssemblyDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}/inputs`,
+    input
+  );
+}
+
+export function removeAnalyzeReviewInput(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  proposalId: string
+) {
+  return apiSend<void>(
+    "DELETE",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}/inputs/${encodeURIComponent(
+      proposalId
+    )}`
+  );
+}
+
+export function createAnalyzeReviewClaim(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  input: AnalyzeReviewCreateClaimRequest
+) {
+  return apiSend<AnalyzeReviewClaimDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}/claims`,
+    input
+  );
+}
+
+export function patchAnalyzeReviewClaim(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  claimId: string,
+  input: AnalyzeReviewUpdateClaimRequest
+) {
+  return apiSend<AnalyzeReviewClaimDto>(
+    "PATCH",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}/claims/${encodeURIComponent(
+      claimId
+    )}`,
+    input
+  );
+}
+
+export function attachAnalyzeReviewEvidence(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  claimId: string,
+  input: AnalyzeReviewAttachEvidenceRequest
+) {
+  return apiSend<AnalyzeReviewEvidenceDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}/claims/${encodeURIComponent(
+      claimId
+    )}/evidence`,
+    input
+  );
+}
+
+export function removeAnalyzeReviewEvidence(
+  projectId: string,
+  runId: string,
+  assemblyId: string,
+  claimId: string,
+  evidenceId: string
+) {
+  return apiSend<void>(
+    "DELETE",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/${encodeURIComponent(assemblyId)}/claims/${encodeURIComponent(
+      claimId
+    )}/evidence/${encodeURIComponent(evidenceId)}`
+  );
+}
+
+export function acceptAnalyzeReviewAssemblies(
+  projectId: string,
+  runId: string,
+  input: AnalyzeReviewAcceptRequest
+) {
+  return apiSend<AnalyzeReviewAcceptResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+      runId
+    )}/review-assemblies/accept`,
+    input
   );
 }
 
