@@ -301,11 +301,15 @@ describe("AnalyzeRunReviewPage", () => {
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["projects", "project-1", "index-runs"]
     });
+    expect(container.textContent).toContain(
+      "Saved 1 assembly and 1 source/spec annotation."
+    );
   });
 
   it("surfaces accept response failures", async () => {
     mocks.acceptAnalyzeReviewAssemblies.mockResolvedValue({
       acceptedAssemblyIds: [],
+      annotationCount: 0,
       failures: [
         {
           assemblyId: "assembly-ready",
@@ -335,6 +339,40 @@ describe("AnalyzeRunReviewPage", () => {
     expect(container.textContent).toContain("Accept failures");
     expect(container.textContent).toContain("fact_missing_evidence");
     expect(container.textContent).toContain("index_failed");
+    expect(container.textContent).not.toContain("Saved 0 assemblies");
+  });
+
+  it("shows a neutral partial accept message when some assemblies fail", async () => {
+    mocks.acceptAnalyzeReviewAssemblies.mockResolvedValue({
+      acceptedAssemblyIds: ["assembly-ready"],
+      annotationCount: 2,
+      failures: [
+        {
+          assemblyId: "assembly-blocked",
+          messages: [
+            {
+              severity: "blocker",
+              code: "fact_missing_evidence",
+              message: "Fact claims need evidence before accepting.",
+              field: "claims"
+            }
+          ]
+        }
+      ],
+      indexRun: null
+    });
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    await changeCheckbox(container, "Select assembly Review drafts", true);
+    await clickButton(container, "Accept selected");
+
+    expect(container.textContent).toContain(
+      "Saved 1 assembly and 2 source/spec annotations. 1 assembly needs review."
+    );
+    expect(container.textContent).toContain("Accept failures");
+    expect(container.textContent).not.toContain(
+      "Saved 1 assemblies and 2 source/spec annotations.Accept failures"
+    );
   });
 });
 
@@ -574,6 +612,7 @@ function resetMocks() {
   mocks.acceptAnalyzeReviewAssemblies.mockImplementation(
     (_projectId: string, _runId: string, input: { assemblyIds: string[] }) => ({
       acceptedAssemblyIds: input.assemblyIds,
+      annotationCount: input.assemblyIds.length,
       failures: [],
       indexRun: null
     })

@@ -152,12 +152,7 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
         <p className="panel-section text-sm text-slate-500">Loading review assemblies...</p>
       ) : review.data ? (
         <>
-          {acceptResponse ? (
-            <p className="panel-section mb-3 text-sm text-emerald-700">
-              Saved {acceptResponse.acceptedAssemblyIds.length} assemblies and{" "}
-              {acceptResponse.annotationCount} source/spec annotations.
-            </p>
-          ) : null}
+          <AcceptResultMessage response={acceptResponse} />
           <AnalyzeReviewWorkspace
             projectId={projectId}
             runId={runId}
@@ -204,6 +199,43 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
       />
     </main>
   );
+}
+
+function AcceptResultMessage({
+  response
+}: {
+  response: AnalyzeReviewAcceptResponse | null;
+}) {
+  if (!response || response.acceptedAssemblyIds.length === 0) {
+    return null;
+  }
+
+  const savedCount = response.acceptedAssemblyIds.length;
+  const annotationCount = response.annotationCount;
+  if (response.failures.length === 0) {
+    return (
+      <p className="panel-section mb-3 text-sm text-emerald-700">
+        Saved {formatCount(savedCount, "assembly", "assemblies")} and{" "}
+        {formatCount(annotationCount, "source/spec annotation", "source/spec annotations")}.
+      </p>
+    );
+  }
+
+  return (
+    <p className="panel-section mb-3 text-sm text-amber-700">
+      Saved {formatCount(savedCount, "assembly", "assemblies")} and{" "}
+      {formatCount(annotationCount, "source/spec annotation", "source/spec annotations")}.{" "}
+      {formatNeedsReview(response.failures.length)}
+    </p>
+  );
+}
+
+function formatCount(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatNeedsReview(count: number) {
+  return `${formatCount(count, "assembly", "assemblies")} ${count === 1 ? "needs" : "need"} review.`;
 }
 
 function MutationErrors({ errors }: { errors: Array<[string, unknown]> }) {
