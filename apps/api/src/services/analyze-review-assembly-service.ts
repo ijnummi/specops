@@ -101,7 +101,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         proposalRows.map((proposal) => proposal.id)
       );
       for (const proposal of proposalRows) {
-        await assertNoActiveAssignment(tx, projectId, "", proposal.id);
+        await assertNoActiveAssignment(tx, projectId, null, proposal.id);
       }
 
       return createDraftAssembly(tx, projectId, runId, {
@@ -306,6 +306,15 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
 
       const proposalRows = await getRunProposalRows(projectId, run, missingProposalIds, tx);
       for (const proposal of proposalRows) {
+        try {
+          await assertNoActiveAssignment(tx, projectId, null, proposal.id);
+        } catch (error) {
+          if (error instanceof ConflictError) {
+            continue;
+          }
+          throw error;
+        }
+
         const metadata = metadataForProposal(proposal);
         await createDraftAssembly(tx, projectId, run.id, {
           ...metadata,
@@ -469,7 +478,7 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
   async function assertNoActiveAssignment(
     client: QueryClient,
     projectId: string,
-    assemblyId: string,
+    assemblyId: string | null,
     proposalId: string
   ): Promise<void> {
     const rows = await client
@@ -480,9 +489,9 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
           eq(analyzeReviewAssemblyInputs.projectId, projectId),
           eq(analyzeReviewAssemblyInputs.proposalId, proposalId)
         )
-      );
+    );
     const blockingRows = rows.filter(
-      (row) => row.role !== "evidence_only" && row.assemblyId !== assemblyId
+      (row) => row.role !== "evidence_only" && (assemblyId === null || row.assemblyId !== assemblyId)
     );
     if (blockingRows.length === 0) {
       return;
@@ -859,13 +868,24 @@ function metadataForProposal(proposal: ProposalRow): ProposalMetadata {
 function initialClaimsForProposal(proposal: ProposalRow): InitialClaim[] {
   const aiEvidence = parseAiEvidence(proposal);
   const firstAiClaim = aiEvidence?.claims[0];
+
+  if (aiEvidence && !firstAiClaim) {
+    return [
+      {
+        text: proposal.title,
+        kind: "hypothesis",
+        confidence: proposal.confidence,
+        evidence: []
+      }
+    ];
+  }
+
   const evidence = evidenceForProposal(
     proposal,
     firstAiClaim ? new Set(firstAiClaim.sourceFiles) : undefined
   );
-  const hasSelectedAiEvidence = (aiEvidence?.selectedSourceFiles.length ?? 0) > 0;
 
-  if (evidence.length === 0 && !hasSelectedAiEvidence) {
+  if (evidence.length === 0 && !firstAiClaim) {
     return [
       {
         text: proposal.title,

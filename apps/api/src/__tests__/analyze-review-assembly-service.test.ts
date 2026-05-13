@@ -77,6 +77,28 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(assignedProposalIds).toEqual(expect.arrayContaining(proposals.map((item) => item.id)));
   });
 
+  it("does not derive a duplicate active assignment from another run in the project", async () => {
+    const { db, project, run, proposal } = await createReviewFixture();
+    const service = createAnalyzeReviewAssemblyService(db);
+    await service.listReviewAssemblies(project.id, run.id);
+    const [secondRun] = await db
+      .insert(analyzeRuns)
+      .values({
+        projectId: project.id,
+        status: "succeeded",
+        stepsJson: [],
+        proposalIdsJson: [proposal.id],
+        aiProposalCount: 1
+      })
+      .returning();
+    expect(secondRun).toBeDefined();
+
+    const review = await service.listReviewAssemblies(project.id, secondRun!.id);
+
+    expect(review.assemblies.flatMap((item) => item.inputs)).toHaveLength(0);
+    expect(review.unassignedInputs.map((input) => input.proposalId)).toContain(proposal.id);
+  });
+
   it("attaches and removes proposal inputs", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);
@@ -204,6 +226,20 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     );
     expect(review.assemblies[0]?.claims[0]?.evidence).toHaveLength(0);
     expect(review.assemblies[0]?.validation.state).toBe("blocker");
+  });
+
+  it("does not attach selected AI evidence to a synthetic fact when AI claims are empty", async () => {
+    const { db, project, run } = await createReviewFixture({ claims: [] });
+    const service = createAnalyzeReviewAssemblyService(db);
+
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(review.assemblies[0]?.claims[0]).toMatchObject({
+      kind: "hypothesis",
+      text: "Review drafts",
+      evidence: []
+    });
+    expect(review.assemblies[0]?.validation.state).toBe("warning");
   });
 
   async function createReviewFixture(
