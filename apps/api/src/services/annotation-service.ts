@@ -13,7 +13,11 @@ import type {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import {
+  aiProposals,
+  analyzeReviewAssemblies,
+  analyzeReviewClaimEvidence,
   analyzeReviewClaims,
+  analyzeRuns,
   projects,
   sourceFiles,
   sourceSpecAnnotations,
@@ -21,7 +25,7 @@ import {
 } from "@specops/db";
 import { and, asc, eq } from "drizzle-orm";
 
-import { NotFoundError } from "../lib/http-errors.js";
+import { BadRequestError, NotFoundError } from "../lib/http-errors.js";
 import { assertInsideDirectory, assertRealPathInsideDirectory } from "../lib/path-safety.js";
 
 const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
@@ -50,10 +54,10 @@ export type ScannerAnnotationInput = BaseAnnotationInput;
 export type AcceptedEvidenceAnnotationInput = BaseAnnotationInput & {
   provenance: AnnotationProvenance;
   claimId?: string | null;
-  analyzeRunId?: string | null;
+  analyzeRunId: string;
   proposalId?: string | null;
-  assemblyId?: string | null;
-  claimEvidenceId?: string | null;
+  assemblyId: string;
+  claimEvidenceId: string;
 };
 
 export function createAnnotationService(db: Db) {
@@ -195,6 +199,8 @@ export function createAnnotationService(db: Db) {
       annotations: ScannerAnnotationInput[],
       client: AnnotationWriteClient = db
     ): Promise<void> {
+      await validateBatchReferences(client, projectId, annotations);
+
       await client
         .delete(sourceSpecAnnotations)
         .where(
@@ -230,6 +236,8 @@ export function createAnnotationService(db: Db) {
         return 0;
       }
 
+      await validateAcceptedEvidenceAnnotations(client, projectId, annotations);
+
       const inserted = await client
         .insert(sourceSpecAnnotations)
         .values(
@@ -250,6 +258,57 @@ export function createAnnotationService(db: Db) {
       return inserted.length;
     }
   };
+}
+
+async function validateBatchReferences(
+  client: Pick<Db, "select">,
+  projectId: string,
+  annotations: BaseAnnotationInput[]
+): Promise<void> {
+  for (const annotation of annotations) {
+    await getSpecEntityRow(client, projectId, annotation.entityId);
+    if (annotation.sourceFileId) {
+      await getSourceFileRow(client, projectId, annotation.sourceFileId);
+    }
+  }
+}
+
+async function validateAcceptedEvidenceAnnotations(
+  client: Pick<Db, "select">,
+  projectId: string,
+  annotations: AcceptedEvidenceAnnotationInput[]
+): Promise<void> {
+  await validateBatchReferences(client, projectId, annotations);
+
+  for (const annotation of annotations) {
+    if (!isAnnotationProvenance(annotation.provenance)) {
+      throw new BadRequestError("Accepted evidence annotation has invalid provenance", {
+        provenance: annotation.provenance
+      });
+    }
+
+    if (!annotation.analyzeRunId || !annotation.assemblyId || !annotation.claimEvidenceId) {
+      throw new BadRequestError("Accepted evidence annotation is missing origin metadata", {
+        analyzeRunId: annotation.analyzeRunId ?? null,
+        assemblyId: annotation.assemblyId ?? null,
+        claimEvidenceId: annotation.claimEvidenceId ?? null
+      });
+    }
+
+    await getAnalyzeRunRow(client, projectId, annotation.analyzeRunId);
+    await getAssemblyRow(client, projectId, annotation.assemblyId);
+    await getClaimEvidenceRow(client, projectId, annotation.claimEvidenceId);
+    if (annotation.proposalId) {
+      await getProposalRow(client, projectId, annotation.proposalId);
+    }
+    if (annotation.claimId) {
+      await getClaimRow(client, projectId, annotation.claimId);
+    }
+  }
+}
+
+function isAnnotationProvenance(value: unknown): value is AnnotationProvenance {
+  return value === "scanner" || value === "ai" || value === "user";
 }
 
 function mapBaseInsert(projectId: string, annotation: BaseAnnotationInput) {
@@ -293,6 +352,20 @@ async function getSpecEntityRow(db: Pick<Db, "select">, projectId: string, entit
   return entity;
 }
 
+async function getSourceFileRow(db: Pick<Db, "select">, projectId: string, sourceFileId: string) {
+  const [sourceFile] = await db
+    .select()
+    .from(sourceFiles)
+    .where(and(eq(sourceFiles.projectId, projectId), eq(sourceFiles.id, sourceFileId)))
+    .limit(1);
+
+  if (!sourceFile) {
+    throw new NotFoundError("Source file not found", { projectId, sourceFileId });
+  }
+
+  return sourceFile;
+}
+
 async function getClaimRow(db: Pick<Db, "select">, projectId: string, claimId: string) {
   const [claim] = await db
     .select()
@@ -305,6 +378,71 @@ async function getClaimRow(db: Pick<Db, "select">, projectId: string, claimId: s
   }
 
   return claim;
+}
+
+async function getAnalyzeRunRow(db: Pick<Db, "select">, projectId: string, analyzeRunId: string) {
+  const [run] = await db
+    .select()
+    .from(analyzeRuns)
+    .where(and(eq(analyzeRuns.projectId, projectId), eq(analyzeRuns.id, analyzeRunId)))
+    .limit(1);
+
+  if (!run) {
+    throw new NotFoundError("Analyze run not found", { projectId, analyzeRunId });
+  }
+
+  return run;
+}
+
+async function getProposalRow(db: Pick<Db, "select">, projectId: string, proposalId: string) {
+  const [proposal] = await db
+    .select()
+    .from(aiProposals)
+    .where(and(eq(aiProposals.projectId, projectId), eq(aiProposals.id, proposalId)))
+    .limit(1);
+
+  if (!proposal) {
+    throw new NotFoundError("AI proposal not found", { projectId, proposalId });
+  }
+
+  return proposal;
+}
+
+async function getAssemblyRow(db: Pick<Db, "select">, projectId: string, assemblyId: string) {
+  const [assembly] = await db
+    .select()
+    .from(analyzeReviewAssemblies)
+    .where(and(eq(analyzeReviewAssemblies.projectId, projectId), eq(analyzeReviewAssemblies.id, assemblyId)))
+    .limit(1);
+
+  if (!assembly) {
+    throw new NotFoundError("Analyze review assembly not found", { projectId, assemblyId });
+  }
+
+  return assembly;
+}
+
+async function getClaimEvidenceRow(
+  db: Pick<Db, "select">,
+  projectId: string,
+  claimEvidenceId: string
+) {
+  const [evidence] = await db
+    .select()
+    .from(analyzeReviewClaimEvidence)
+    .where(
+      and(
+        eq(analyzeReviewClaimEvidence.projectId, projectId),
+        eq(analyzeReviewClaimEvidence.id, claimEvidenceId)
+      )
+    )
+    .limit(1);
+
+  if (!evidence) {
+    throw new NotFoundError("Analyze review evidence not found", { projectId, claimEvidenceId });
+  }
+
+  return evidence;
 }
 
 async function getSourceFileForUserAnnotation(

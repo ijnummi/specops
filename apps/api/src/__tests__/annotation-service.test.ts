@@ -5,13 +5,25 @@ import path from "node:path";
 
 import { sourceSpecAnnotationSchema } from "@specops/contracts";
 import type { Db } from "@specops/db";
-import { createDb, indexRuns, projects, sourceFiles, specEntities } from "@specops/db";
+import {
+  aiProposals,
+  analyzeReviewAssemblies,
+  analyzeReviewClaimEvidence,
+  analyzeReviewClaims,
+  analyzeRuns,
+  createDb,
+  indexRuns,
+  projects,
+  sourceFiles,
+  specEntities
+} from "@specops/db";
 import { eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createAnnotationService,
+  type AcceptedEvidenceAnnotationInput,
   type ScannerAnnotationInput
 } from "../services/annotation-service.js";
 
@@ -153,6 +165,143 @@ describeWithDb("createAnnotationService", () => {
     });
   });
 
+  it("validates scanner batch source and entity ownership while accepting null source file ids", async () => {
+    const first = await createProjectFixture("scanner-owned");
+    const second = await createProjectFixture("scanner-other");
+    const firstSource = await createSourceFileFixture(first.id, "src/decision.ts", "export interface Decision {}\n");
+    const secondSource = await createSourceFileFixture(second.id, "src/other.ts", "export interface Other {}\n");
+    await createSpecEntityFixture(first.id, "domain.decision", "specs/decision.md");
+    await createSpecEntityFixture(second.id, "domain.other", "specs/other.md");
+    const indexRunId = await createIndexRunFixture(first.id);
+    const service = createAnnotationService(db);
+    const validAnnotation: ScannerAnnotationInput = {
+      sourceFileId: null,
+      sourceFilePath: firstSource.path,
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      sourceContentHash: firstSource.contentHash,
+      entityId: "domain.decision",
+      specFilePath: "specs/decision.md",
+      relationshipType: "references",
+      confidence: 1
+    };
+
+    await expect(
+      service.replaceScannerAnnotations(first.id, indexRunId, [
+        { ...validAnnotation, sourceFileId: secondSource.id }
+      ])
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Source file not found"
+    });
+    await expect(
+      service.replaceScannerAnnotations(first.id, indexRunId, [
+        { ...validAnnotation, entityId: "domain.other" }
+      ])
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Spec entity not found"
+    });
+
+    await service.replaceScannerAnnotations(first.id, indexRunId, [validAnnotation]);
+
+    const annotations = await service.listAnnotations(first.id, {
+      provenance: "scanner",
+      status: "active",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        sourceFileId: null,
+        entityId: "domain.decision"
+      })
+    ]);
+  });
+
+  it("validates accepted evidence ownership and origin metadata", async () => {
+    const first = await createProjectFixture("evidence-owned");
+    const second = await createProjectFixture("evidence-other");
+    const firstSource = await createSourceFileFixture(first.id, "src/decision.ts", "export interface Decision {}\n");
+    const secondSource = await createSourceFileFixture(second.id, "src/other.ts", "export interface Other {}\n");
+    await createSpecEntityFixture(first.id, "domain.decision", "specs/decision.md");
+    await createSpecEntityFixture(second.id, "domain.other", "specs/other.md");
+    const origin = await createEvidenceOriginFixture(first.id);
+    const service = createAnnotationService(db);
+    const validAnnotation: AcceptedEvidenceAnnotationInput = {
+      sourceFileId: null,
+      sourceFilePath: firstSource.path,
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      sourceContentHash: firstSource.contentHash,
+      entityId: "domain.decision",
+      specFilePath: "specs/decision.md",
+      relationshipType: "references",
+      confidence: 1,
+      provenance: "ai",
+      analyzeRunId: origin.analyzeRunId,
+      assemblyId: origin.assemblyId,
+      claimEvidenceId: origin.claimEvidenceId,
+      proposalId: origin.proposalId
+    };
+
+    await expect(
+      service.createAcceptedEvidenceAnnotations(first.id, [
+        { ...validAnnotation, sourceFileId: secondSource.id }
+      ])
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Source file not found"
+    });
+    await expect(
+      service.createAcceptedEvidenceAnnotations(first.id, [
+        { ...validAnnotation, entityId: "domain.other" }
+      ])
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Spec entity not found"
+    });
+    await expect(
+      service.createAcceptedEvidenceAnnotations(first.id, [
+        { ...validAnnotation, analyzeRunId: null } as unknown as AcceptedEvidenceAnnotationInput
+      ])
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: "Accepted evidence annotation is missing origin metadata"
+    });
+    await expect(
+      service.createAcceptedEvidenceAnnotations(first.id, [
+        { ...validAnnotation, provenance: "manual" } as unknown as AcceptedEvidenceAnnotationInput
+      ])
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: "Accepted evidence annotation has invalid provenance"
+    });
+
+    const count = await service.createAcceptedEvidenceAnnotations(first.id, [validAnnotation]);
+
+    expect(count).toBe(1);
+    const annotations = await service.listAnnotations(first.id, {
+      provenance: "ai",
+      status: "active",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        sourceFileId: null,
+        entityId: "domain.decision",
+        analyzeRunId: origin.analyzeRunId,
+        assemblyId: origin.assemblyId,
+        claimEvidenceId: origin.claimEvidenceId
+      })
+    ]);
+  });
+
   it("returns source excerpts when requested", async () => {
     const project = await createProjectFixture("excerpt");
     const content =
@@ -264,6 +413,86 @@ describeWithDb("createAnnotationService", () => {
 
     expect(indexRun).toBeDefined();
     return indexRun!.id;
+  }
+
+  async function createEvidenceOriginFixture(projectId: string) {
+    const [indexRun] = await db
+      .insert(indexRuns)
+      .values({ projectId, status: "succeeded" })
+      .returning({ id: indexRuns.id });
+    expect(indexRun).toBeDefined();
+    const [analyzeRun] = await db
+      .insert(analyzeRuns)
+      .values({
+        projectId,
+        status: "succeeded",
+        stepsJson: [],
+        proposalIdsJson: [],
+        indexRunId: indexRun!.id
+      })
+      .returning({ id: analyzeRuns.id });
+    expect(analyzeRun).toBeDefined();
+    const [proposal] = await db
+      .insert(aiProposals)
+      .values({
+        projectId,
+        proposalType: "source_spec_entity",
+        title: "Decision",
+        payloadJson: {},
+        evidenceJson: {},
+        status: "accepted",
+        confidence: 1
+      })
+      .returning({ id: aiProposals.id });
+    expect(proposal).toBeDefined();
+    const [assembly] = await db
+      .insert(analyzeReviewAssemblies)
+      .values({
+        projectId,
+        analyzeRunId: analyzeRun!.id,
+        status: "accepted",
+        entityType: "domain_entity",
+        entityId: "domain.decision",
+        title: "Decision",
+        summary: "",
+        filePath: "specs/decision.md"
+      })
+      .returning({ id: analyzeReviewAssemblies.id });
+    expect(assembly).toBeDefined();
+    const [claim] = await db
+      .insert(analyzeReviewClaims)
+      .values({
+        projectId,
+        assemblyId: assembly!.id,
+        text: "Decision evidence",
+        kind: "fact",
+        confidence: 1,
+        sortOrder: 0
+      })
+      .returning({ id: analyzeReviewClaims.id });
+    expect(claim).toBeDefined();
+    const [claimEvidence] = await db
+      .insert(analyzeReviewClaimEvidence)
+      .values({
+        projectId,
+        claimId: claim!.id,
+        proposalId: proposal!.id,
+        sourceFilePath: "src/decision.ts",
+        symbolName: "Decision",
+        startLine: 1,
+        endLine: 1,
+        provenance: "ai",
+        confidence: 1
+      })
+      .returning({ id: analyzeReviewClaimEvidence.id });
+    expect(claimEvidence).toBeDefined();
+
+    return {
+      analyzeRunId: analyzeRun!.id,
+      assemblyId: assembly!.id,
+      claimEvidenceId: claimEvidence!.id,
+      proposalId: proposal!.id
+    };
   }
 });
 
