@@ -105,6 +105,11 @@ type AnalyzeReviewAssemblyServiceOptions = {
 };
 
 const DISCARDED_INPUT_ROLE = "discarded";
+const ACTIVE_INPUT_ROLES = new Set<AnalyzeReviewInputRole>([
+  "primary",
+  "supporting",
+  "duplicate"
+]);
 
 export function createAnalyzeReviewAssemblyService(
   db: Db,
@@ -573,7 +578,9 @@ export function createAnalyzeReviewAssemblyService(
           }
 
           const proposalIds = assembly.inputs
-            .filter((item) => item.assignmentState === "assigned")
+            .filter(
+              (item) => item.assignmentState === "assigned" && isActiveInputRole(item.role)
+            )
             .map((item) => item.proposalId);
           if (proposalIds.length > 0) {
             await lockAssignmentWrites(tx, projectId, proposalIds);
@@ -1394,7 +1401,11 @@ function mapAssembly(
 }
 
 function isActiveInput(input: Pick<AssemblyInputRow, "role">): boolean {
-  return input.role !== "evidence_only" && input.role !== DISCARDED_INPUT_ROLE;
+  return isActiveInputRole(input.role);
+}
+
+function isActiveInputRole(role: string | undefined): boolean {
+  return ACTIVE_INPUT_ROLES.has(role as AnalyzeReviewInputRole);
 }
 
 function mapClaim(claim: ClaimRow, evidenceRows: ClaimEvidenceRow[]): AnalyzeReviewClaimDto {

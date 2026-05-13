@@ -831,6 +831,40 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(proposalRow?.reviewedAt).not.toBeNull();
   });
 
+  it("does not accept proposals attached only as evidence inputs", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Evidence only",
+      entityType: "use_case",
+      entityId: "use-case.evidence-only",
+      filePath: "use-cases/evidence-only.md",
+      summary: "Evidence-only assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+    await service.attachInput(project.id, run.id, assembly.id, {
+      proposalId: proposal.id,
+      role: "evidence_only"
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const [proposalRow] = await db
+      .select()
+      .from(aiProposals)
+      .where(eq(aiProposals.id, proposal.id))
+      .limit(1);
+
+    expect(result.acceptedAssemblyIds).toEqual([assembly.id]);
+    expect(proposalRow).toMatchObject({ status: "pending", reviewedAt: null });
+  });
+
   it("reports index failures after accepting assemblies without rolling back", async () => {
     const { db, project, run } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db, {
