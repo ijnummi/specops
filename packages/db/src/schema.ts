@@ -495,6 +495,75 @@ export const analyzeReviewClaimEvidence = pgTable(
   }),
 );
 
+export const sourceSpecAnnotations = pgTable(
+  "source_spec_annotations",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    sourceFileId: uuid("source_file_id").references(() => sourceFiles.id, { onDelete: "set null" }),
+    sourceFilePath: text("source_file_path").notNull(),
+    symbolName: text("symbol_name"),
+    symbolKind: text("symbol_kind"),
+    startLine: integer("start_line"),
+    endLine: integer("end_line"),
+    annotationLine: integer("annotation_line"),
+    sourceContentHash: text("source_content_hash"),
+    entityId: text("entity_id").notNull(),
+    specFilePath: text("spec_file_path").notNull(),
+    claimId: uuid("claim_id").references(() => analyzeReviewClaims.id, { onDelete: "set null" }),
+    relationshipType: text("relationship_type").notNull(),
+    confidence: doublePrecision("confidence"),
+    provenance: text("provenance").notNull(),
+    status: text("status").notNull().default("active"),
+    analyzeRunId: uuid("analyze_run_id").references(() => analyzeRuns.id, { onDelete: "set null" }),
+    proposalId: uuid("proposal_id").references(() => aiProposals.id, { onDelete: "set null" }),
+    assemblyId: uuid("assembly_id").references(() => analyzeReviewAssemblies.id, {
+      onDelete: "set null",
+    }),
+    claimEvidenceId: uuid("claim_evidence_id").references(() => analyzeReviewClaimEvidence.id, {
+      onDelete: "set null",
+    }),
+    indexRunId: uuid("index_run_id").references(() => indexRuns.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    projectEntityIdx: index("source_spec_annotations_project_entity_idx").on(
+      table.projectId,
+      table.entityId,
+    ),
+    projectSourceFileIdx: index("source_spec_annotations_project_source_file_idx").on(
+      table.projectId,
+      table.sourceFilePath,
+    ),
+    projectRelationshipStatusIdx: index("source_spec_annotations_project_relationship_status_idx").on(
+      table.projectId,
+      table.relationshipType,
+      table.status,
+    ),
+    analyzeOriginIdx: index("source_spec_annotations_analyze_origin_idx").on(
+      table.projectId,
+      table.analyzeRunId,
+      table.assemblyId,
+    ),
+    activeDedupeIdx: uniqueIndex("source_spec_annotations_active_dedupe_idx")
+      .on(
+        table.projectId,
+        table.sourceFilePath,
+        table.entityId,
+        table.relationshipType,
+        table.provenance,
+        sql`coalesce(${table.claimId}::text, '')`,
+        sql`coalesce(${table.symbolName}, '')`,
+        sql`coalesce(${table.startLine}, 0)`,
+        sql`coalesce(${table.endLine}, 0)`,
+      )
+      .where(sql`${table.status} = 'active'`),
+  }),
+);
+
 export const agentRuns = pgTable(
   "agent_runs",
   {

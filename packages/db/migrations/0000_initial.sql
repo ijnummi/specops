@@ -628,3 +628,54 @@ BEGIN
       FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE;
   END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS source_spec_annotations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_file_id uuid,
+  source_file_path text NOT NULL,
+  symbol_name text,
+  symbol_kind text,
+  start_line integer,
+  end_line integer,
+  annotation_line integer,
+  source_content_hash text,
+  entity_id text NOT NULL,
+  spec_file_path text NOT NULL,
+  claim_id uuid REFERENCES analyze_review_claims(id) ON DELETE SET NULL,
+  relationship_type text NOT NULL,
+  confidence double precision,
+  provenance text NOT NULL,
+  status text NOT NULL DEFAULT 'active',
+  analyze_run_id uuid REFERENCES analyze_runs(id) ON DELETE SET NULL,
+  proposal_id uuid REFERENCES ai_proposals(id) ON DELETE SET NULL,
+  assembly_id uuid REFERENCES analyze_review_assemblies(id) ON DELETE SET NULL,
+  claim_evidence_id uuid REFERENCES analyze_review_claim_evidence(id) ON DELETE SET NULL,
+  index_run_id uuid REFERENCES index_runs(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT source_spec_annotations_source_file_fk
+    FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS source_spec_annotations_project_entity_idx
+  ON source_spec_annotations(project_id, entity_id);
+CREATE INDEX IF NOT EXISTS source_spec_annotations_project_source_file_idx
+  ON source_spec_annotations(project_id, source_file_path);
+CREATE INDEX IF NOT EXISTS source_spec_annotations_project_relationship_status_idx
+  ON source_spec_annotations(project_id, relationship_type, status);
+CREATE INDEX IF NOT EXISTS source_spec_annotations_analyze_origin_idx
+  ON source_spec_annotations(project_id, analyze_run_id, assembly_id);
+CREATE UNIQUE INDEX IF NOT EXISTS source_spec_annotations_active_dedupe_idx
+  ON source_spec_annotations(
+    project_id,
+    source_file_path,
+    entity_id,
+    relationship_type,
+    provenance,
+    coalesce(claim_id::text, ''),
+    coalesce(symbol_name, ''),
+    coalesce(start_line, 0),
+    coalesce(end_line, 0)
+  )
+  WHERE status = 'active';

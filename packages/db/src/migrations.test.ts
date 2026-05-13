@@ -153,4 +153,22 @@ describe("initial migration", () => {
       "CONSTRAINT analyze_review_claim_evidence_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE",
     );
   });
+
+  it("creates source spec annotation storage and lookup indexes", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS source_spec_annotations");
+    expect(migration).toContain("relationship_type text NOT NULL");
+    expect(migration).toContain("provenance text NOT NULL");
+    expect(migration).toContain("status text NOT NULL");
+    expect(migration).toContain("annotation_line integer");
+    expect(migration).toContain(
+      "claim_id uuid REFERENCES analyze_review_claims(id) ON DELETE SET NULL",
+    );
+    expect(migration).toContain("CONSTRAINT source_spec_annotations_source_file_fk");
+    expect(migration).toContain("source_spec_annotations_project_entity_idx");
+    expect(migration).toContain("source_spec_annotations_project_source_file_idx");
+    expect(migration).toContain("source_spec_annotations_project_relationship_status_idx");
+    expect(migration).toContain("source_spec_annotations_active_dedupe_idx");
+  });
 });

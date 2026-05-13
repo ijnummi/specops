@@ -1,4 +1,4 @@
-import type { InferSelectModel } from "drizzle-orm";
+import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import type {
   aiProposals,
   analyzeReviewAssemblies,
@@ -8,6 +8,7 @@ import type {
   analyzeRuns,
   indexRuns,
   sourceImports,
+  sourceSpecAnnotations,
   sourceSpecLinks,
   sourceSymbols,
   specLinks,
@@ -27,6 +28,8 @@ type AnalyzeReviewAssembly = InferSelectModel<typeof analyzeReviewAssemblies>;
 type AnalyzeReviewAssemblyInput = InferSelectModel<typeof analyzeReviewAssemblyInputs>;
 type AnalyzeReviewClaim = InferSelectModel<typeof analyzeReviewClaims>;
 type AnalyzeReviewClaimEvidence = InferSelectModel<typeof analyzeReviewClaimEvidence>;
+type SourceSpecAnnotation = InferSelectModel<typeof sourceSpecAnnotations>;
+type NewSourceSpecAnnotation = InferInsertModel<typeof sourceSpecAnnotations>;
 
 type _SpecLinkConfidenceIsNumberOrNull = Expect<Equal<SpecLink["confidence"], number | null>>;
 type _AiProposalConfidenceIsNumberOrNull = Expect<Equal<AiProposal["confidence"], number | null>>;
@@ -47,9 +50,19 @@ type _AnalyzeReviewClaimProjectIdIsString = Expect<Equal<AnalyzeReviewClaim["pro
 type _AnalyzeReviewClaimEvidenceProjectIdIsString = Expect<
   Equal<AnalyzeReviewClaimEvidence["projectId"], string>
 >;
+type _SourceSpecAnnotationStatusIsString = Expect<Equal<SourceSpecAnnotation["status"], string>>;
+type _SourceSpecAnnotationConfidenceIsNullable = Expect<
+  Equal<SourceSpecAnnotation["confidence"], number | null>
+>;
+type _NewSourceSpecAnnotationSourceFileIdIsOptional = Expect<
+  Equal<NewSourceSpecAnnotation["sourceFileId"], string | null | undefined>
+>;
 
 const _sourceSpecLink = null as unknown as SourceSpecLink;
 void _sourceSpecLink;
+
+const _sourceSpecAnnotation = null as unknown as SourceSpecAnnotation;
+void _sourceSpecAnnotation;
 
 const analyzeRun = null as unknown as AnalyzeRun;
 analyzeRun.status satisfies string;
