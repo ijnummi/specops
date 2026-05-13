@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -626,6 +626,166 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     });
     expect(review.assemblies[0]?.status).toBe("discarded");
     expect(review.assemblies[0]?.discardedAt).not.toBeNull();
+  });
+
+  it("does not follow dangling symlink targets when accepting assemblies", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "specops-api-review-escape-"));
+    tempRoots.push(outsideRoot);
+    await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
+    const escapedPath = path.join(outsideRoot, "escaped.md");
+    await symlink(escapedPath, path.join(project.specopsPath, "use-cases/dangling.md"));
+
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Dangling symlink",
+      entityType: "use_case",
+      entityId: "use-case.dangling-symlink",
+      filePath: "use-cases/dangling.md",
+      summary: "Dangling symlink assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(result.acceptedAssemblyIds).toEqual([]);
+    expect(result.failures[0]?.messages[0]?.code).toBe("target_file_exists");
+    await expect(readFile(escapedPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(review.assemblies[0]?.status).toBe("draft");
+  });
+
+  it("cleans up written markdown when acceptance fails after the file write", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db, {
+      acceptTestHooks: {
+        beforeStatusUpdate: () => {
+          throw new Error("Simulated accept status failure");
+        }
+      }
+    });
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Cleanup",
+      entityType: "use_case",
+      entityId: "use-case.cleanup",
+      filePath: "use-cases/cleanup.md",
+      summary: "Cleanup assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, assembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+
+    await expect(
+      service.acceptAssemblies(project.id, run.id, { assemblyIds: [assembly.id] })
+    ).rejects.toThrow("Simulated accept status failure");
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    await expect(
+      readFile(path.join(project.specopsPath, "use-cases/cleanup.md"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(review.assemblies[0]?.status).toBe("draft");
+  });
+
+  it("does not accept assemblies twice", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      proposalIds: [proposal.id]
+    });
+
+    const first = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const second = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(first.acceptedAssemblyIds).toEqual([assembly.id]);
+    expect(second.acceptedAssemblyIds).toEqual([]);
+    expect(second.failures[0]?.messages[0]?.code).toBe("assembly_not_draft");
+    expect(review.assemblies[0]?.status).toBe("accepted");
+  });
+
+  it("does not write assemblies when attached proposals are no longer pending", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      proposalIds: [proposal.id]
+    });
+    await db
+      .update(aiProposals)
+      .set({ status: "accepted", reviewedAt: new Date() })
+      .where(eq(aiProposals.id, proposal.id));
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(result.acceptedAssemblyIds).toEqual([]);
+    expect(result.failures[0]?.messages[0]?.code).toBe("proposal_not_pending");
+    await expect(
+      readFile(path.join(project.specopsPath, "use-cases/review-drafts.md"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(review.assemblies[0]?.status).toBe("draft");
+  });
+
+  it("blocks accepting non-indexable file paths", async () => {
+    const { db, project, run } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const textAssembly = await service.createAssembly(project.id, run.id, {
+      title: "Text file",
+      entityType: "use_case",
+      entityId: "use-case.text-file",
+      filePath: "use-cases/not-markdown.txt",
+      summary: "Text file assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, textAssembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+    const templateAssembly = await service.createAssembly(project.id, run.id, {
+      title: "Template file",
+      entityType: "use_case",
+      entityId: "use-case.template-file",
+      filePath: "use-cases/foo.template.md",
+      summary: "Template file assembly.",
+      proposalIds: []
+    });
+    await service.createClaim(project.id, run.id, templateAssembly.id, {
+      text: "Needs confirmation.",
+      kind: "hypothesis",
+      confidence: 0.2
+    });
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [textAssembly.id, templateAssembly.id]
+    });
+
+    expect(result.acceptedAssemblyIds).toEqual([]);
+    expect(result.failures.map((failure) => failure.messages[0]?.code)).toEqual([
+      "file_path_not_markdown",
+      "file_path_template"
+    ]);
+    await expect(
+      readFile(path.join(project.specopsPath, "use-cases/not-markdown.txt"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(path.join(project.specopsPath, "use-cases/foo.template.md"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("accepts assemblies by writing markdown and reviewing attached proposals", async () => {

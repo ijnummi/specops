@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -79,9 +79,25 @@ type InitialClaim = {
   evidence: Array<Omit<AnalyzeReviewEvidenceDto, "id">>;
 };
 
+type AnalyzeReviewAcceptFailure = AnalyzeReviewAcceptResponse["failures"][number];
+
+type AnalyzeReviewAssemblyServiceOptions = {
+  acceptTestHooks?: {
+    beforeStatusUpdate?: (context: {
+      projectId: string;
+      runId: string;
+      assemblyId: string;
+      targetPath: string;
+    }) => Promise<void> | void;
+  };
+};
+
 const DISCARDED_INPUT_ROLE = "discarded";
 
-export function createAnalyzeReviewAssemblyService(db: Db) {
+export function createAnalyzeReviewAssemblyService(
+  db: Db,
+  options: AnalyzeReviewAssemblyServiceOptions = {}
+) {
   async function listReviewAssemblies(
     projectId: string,
     runId: string
@@ -481,17 +497,25 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
 
     for (const assembly of selectedAssemblies) {
       if (assembly.status === "discarded") {
-        failures.push({
-          assemblyId: assembly.id,
-          messages: [
-            {
-              severity: "blocker",
-              code: "assembly_discarded",
-              message: "Discarded assemblies cannot be accepted.",
-              field: "status"
-            }
-          ]
-        });
+        failures.push(
+          createAcceptFailure(
+            assembly.id,
+            "assembly_discarded",
+            "Discarded assemblies cannot be accepted.",
+            "status"
+          )
+        );
+        continue;
+      }
+      if (assembly.status !== "draft") {
+        failures.push(
+          createAcceptFailure(
+            assembly.id,
+            "assembly_not_draft",
+            "Only draft assemblies can be accepted.",
+            "status"
+          )
+        );
         continue;
       }
 
@@ -527,6 +551,31 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
         continue;
       }
 
+      const proposalIds = assembly.inputs
+        .filter((item) => item.assignmentState === "assigned")
+        .map((item) => item.proposalId);
+      if (proposalIds.length > 0) {
+        const proposalRows = await db
+          .select({ id: aiProposals.id, status: aiProposals.status })
+          .from(aiProposals)
+          .where(and(eq(aiProposals.projectId, projectId), inArray(aiProposals.id, proposalIds)));
+        const proposalById = new Map(proposalRows.map((proposal) => [proposal.id, proposal]));
+        const nonPendingProposalId = proposalIds.find(
+          (proposalId) => proposalById.get(proposalId)?.status !== "pending"
+        );
+        if (nonPendingProposalId) {
+          failures.push(
+            createAcceptFailure(
+              assembly.id,
+              "proposal_not_pending",
+              "Attached proposals must still be pending before the assembly can be accepted.",
+              "inputs"
+            )
+          );
+          continue;
+        }
+      }
+
       const targetPath = assertInsideDirectory(
         realSpecopsPath,
         path.join(realSpecopsPath, assembly.filePath)
@@ -535,54 +584,96 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       await assertExistingParentInsideDirectory(realSpecopsPath, targetParent);
       await mkdir(targetParent, { recursive: true });
       await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
-      if (await pathExists(targetPath)) {
-        failures.push({
+
+      let wroteFile = false;
+      try {
+        await writeFile(targetPath, renderedMarkdown, { encoding: "utf8", flag: "wx" });
+        wroteFile = true;
+        await options.acceptTestHooks?.beforeStatusUpdate?.({
+          projectId,
+          runId,
           assemblyId: assembly.id,
-          messages: [
-            {
-              severity: "blocker",
-              code: "target_file_exists",
-              message: "Target markdown file already exists.",
-              field: "filePath"
-            }
-          ]
+          targetPath
         });
-        continue;
-      }
 
-      await writeFile(targetPath, renderedMarkdown, "utf8");
-      const now = new Date();
-      await db
-        .update(analyzeReviewAssemblies)
-        .set({
-          status: "accepted",
-          acceptedAt: now,
-          renderedMarkdown,
-          updatedAt: now
-        })
-        .where(
-          and(
-            eq(analyzeReviewAssemblies.projectId, projectId),
-            eq(analyzeReviewAssemblies.analyzeRunId, runId),
-            eq(analyzeReviewAssemblies.id, assembly.id)
-          )
-        );
+        const now = new Date();
+        await db.transaction(async (tx) => {
+          const [updatedAssembly] = await tx
+            .update(analyzeReviewAssemblies)
+            .set({
+              status: "accepted",
+              acceptedAt: now,
+              renderedMarkdown,
+              updatedAt: now
+            })
+            .where(
+              and(
+                eq(analyzeReviewAssemblies.projectId, projectId),
+                eq(analyzeReviewAssemblies.analyzeRunId, runId),
+                eq(analyzeReviewAssemblies.id, assembly.id),
+                eq(analyzeReviewAssemblies.status, "draft")
+              )
+            )
+            .returning({ id: analyzeReviewAssemblies.id });
 
-      const proposalIds = assembly.inputs
-        .filter((item) => item.assignmentState === "assigned")
-        .map((item) => item.proposalId);
-      if (proposalIds.length > 0) {
-        await db
-          .update(aiProposals)
-          .set({ status: "accepted", reviewedAt: now })
-          .where(
-            and(
-              eq(aiProposals.projectId, projectId),
-              inArray(aiProposals.id, proposalIds),
-              eq(aiProposals.status, "pending")
+          if (!updatedAssembly) {
+            throw new AcceptValidationFailureError(
+              createAcceptFailure(
+                assembly.id,
+                "assembly_not_draft",
+                "Only draft assemblies can be accepted.",
+                "status"
+              )
+            );
+          }
+
+          if (proposalIds.length > 0) {
+            const updatedProposals = await tx
+              .update(aiProposals)
+              .set({ status: "accepted", reviewedAt: now })
+              .where(
+                and(
+                  eq(aiProposals.projectId, projectId),
+                  inArray(aiProposals.id, proposalIds),
+                  eq(aiProposals.status, "pending")
+                )
+              )
+              .returning({ id: aiProposals.id });
+
+            if (updatedProposals.length !== proposalIds.length) {
+              throw new AcceptValidationFailureError(
+                createAcceptFailure(
+                  assembly.id,
+                  "proposal_not_pending",
+                  "Attached proposals must still be pending before the assembly can be accepted.",
+                  "inputs"
+                )
+              );
+            }
+          }
+        });
+      } catch (error) {
+        if (wroteFile) {
+          await rm(targetPath, { force: true });
+        }
+        if (error instanceof AcceptValidationFailureError) {
+          failures.push(error.failure);
+          continue;
+        }
+        if (isFileExistsError(error)) {
+          failures.push(
+            createAcceptFailure(
+              assembly.id,
+              "target_file_exists",
+              "Target markdown file already exists.",
+              "filePath"
             )
           );
+          continue;
+        }
+        throw error;
       }
+
       acceptedAssemblyIds.push(assembly.id);
     }
 
@@ -1394,6 +1485,22 @@ function validateAssembly(
     }
   }
 
+  if (assembly.filePath.trim().length > 0 && !assembly.filePath.endsWith(".md")) {
+    messages.push({
+      severity: "blocker",
+      code: "file_path_not_markdown",
+      message: "Review assembly filePath must end with .md.",
+      field: "filePath"
+    });
+  } else if (assembly.filePath.endsWith(".template.md")) {
+    messages.push({
+      severity: "blocker",
+      code: "file_path_template",
+      message: "Review assembly filePath cannot target template markdown.",
+      field: "filePath"
+    });
+  }
+
   for (const claim of claims) {
     if (claim.kind === "fact" && claim.evidence.length === 0) {
       messages.push({
@@ -1470,25 +1577,37 @@ function validationMessagesForRenderedMarkdown(
   return messages;
 }
 
-async function pathExists(value: string): Promise<boolean> {
-  try {
-    await access(value);
-    return true;
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return false;
-    }
-
-    throw error;
+class AcceptValidationFailureError extends Error {
+  constructor(readonly failure: AnalyzeReviewAcceptFailure) {
+    super("Analyze review assembly cannot be accepted");
   }
 }
 
-function isNotFoundError(error: unknown): boolean {
+function createAcceptFailure(
+  assemblyId: string,
+  code: string,
+  message: string,
+  field: string
+): AnalyzeReviewAcceptFailure {
+  return {
+    assemblyId,
+    messages: [
+      {
+        severity: "blocker",
+        code,
+        message,
+        field
+      }
+    ]
+  };
+}
+
+function isFileExistsError(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    error.code === "ENOENT"
+    error.code === "EEXIST"
   );
 }
 
