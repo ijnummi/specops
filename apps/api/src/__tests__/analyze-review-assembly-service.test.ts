@@ -80,7 +80,75 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(review.unassignedInputs).toHaveLength(1);
   });
 
-  async function createReviewFixture(_options: { derive?: boolean } = {}) {
+  it("keeps evidence-only inputs unassigned for active assignment counts", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      title: "Review drafts",
+      entityType: "use_case",
+      entityId: "use-case.review-drafts",
+      filePath: "use-cases/review-drafts.md",
+      summary: "Review generated drafts.",
+      proposalIds: []
+    });
+
+    await service.attachInput(project.id, run.id, assembly.id, {
+      proposalId: proposal.id,
+      role: "evidence_only"
+    });
+
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(review.assemblies[0]?.inputs[0]?.role).toBe("evidence_only");
+    expect(review.unassignedInputs.map((input) => input.proposalId)).toContain(proposal.id);
+    expect(review.counts.inputs.assigned).toBe(0);
+  });
+
+  it("blocks creating a second draft assembly with an actively assigned proposal", async () => {
+    const { db, project, run, proposal } = await createReviewFixture();
+    const service = createAnalyzeReviewAssemblyService(db);
+
+    await service.listReviewAssemblies(project.id, run.id);
+
+    await expect(
+      service.createAssembly(project.id, run.id, {
+        proposalIds: [proposal.id]
+      })
+    ).rejects.toMatchObject({
+      name: "ConflictError",
+      message: "Proposal is already assigned to an active assembly"
+    });
+  });
+
+  it("uses the first AI claim text when selected source evidence exists", async () => {
+    const { db, project, run } = await createReviewFixture({
+      claims: [
+        {
+          text: "First generated claim is kept even when its source file does not overlap.",
+          sourceFiles: ["apps/api/src/not-selected.ts"]
+        },
+        {
+          text: "Second generated claim overlaps the selected source file.",
+          sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"]
+        }
+      ]
+    });
+    const service = createAnalyzeReviewAssemblyService(db);
+
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(review.assemblies[0]?.claims[0]?.text).toBe(
+      "First generated claim is kept even when its source file does not overlap."
+    );
+    expect(review.assemblies[0]?.validation.state).toBe("ready");
+  });
+
+  async function createReviewFixture(
+    options: {
+      derive?: boolean;
+      claims?: AiSpecEntityProposalEvidence["claims"];
+    } = {}
+  ) {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-review-assembly-"));
     tempRoots.push(root);
 
@@ -116,10 +184,12 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
         }
       ],
       claims: [
-        {
-          text: "Users review generated draft inputs before accepting specs.",
-          sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"]
-        }
+        ...(options.claims ?? [
+          {
+            text: "Users review generated draft inputs before accepting specs.",
+            sourceFiles: ["apps/web/src/routes/analyze-run-review.tsx"]
+          }
+        ])
       ],
       warnings: []
     };

@@ -92,6 +92,10 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
       throw new BadRequestError("Expected proposalIds or title, entityType, entityId, and filePath");
     }
 
+    for (const proposal of proposalRows) {
+      await assertNoActiveAssignment(projectId, "", proposal.id);
+    }
+
     const assembly = await createDraftAssembly(projectId, runId, {
       entityType,
       entityId,
@@ -518,7 +522,11 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     const assemblyById = new Map(assemblies.map((assembly) => [assembly.id, assembly]));
     const assignedProposalIds = new Set(
       inputs
-        .filter((input) => assemblyById.get(input.assemblyId)?.status !== "discarded")
+        .filter(
+          (input) =>
+            input.role !== "evidence_only" &&
+            assemblyById.get(input.assemblyId)?.status !== "discarded"
+        )
         .map((input) => input.proposalId)
     );
     const discardedProposalIds = new Set(
@@ -816,11 +824,7 @@ function initialClaimsForProposal(proposal: ProposalRow): InitialClaim[] {
   }
 
   const aiEvidence = parseAiEvidence(proposal);
-  const firstAiClaim = aiEvidence?.claims.find((claim) =>
-    claim.sourceFiles.some((sourceFile) =>
-      evidence.some((item) => item.sourceFilePath === sourceFile)
-    )
-  );
+  const firstAiClaim = aiEvidence?.claims[0];
 
   return [
     {
