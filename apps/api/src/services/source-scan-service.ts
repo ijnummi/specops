@@ -1,12 +1,7 @@
-import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
-
 import type {
   SourceAggregateDto,
   SourceFileDetailDto,
   SourceFileListQuery,
-  SourceSpecLinkDto,
   SourceFileSummaryDto
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
@@ -14,7 +9,6 @@ import {
   sourceExports,
   sourceFiles,
   sourceImports,
-  sourceSpecLinks,
   sourceSymbols,
   specEntities,
   validationMessages
@@ -24,16 +18,9 @@ import { and, asc, count, eq, ilike, inArray, sql } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
 import {
-  assertInsideDirectory,
-  assertRealPathInsideDirectory
-} from "../lib/path-safety.js";
-import {
   createAnnotationService,
   type ScannerAnnotationInput
 } from "./annotation-service.js";
-
-const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
-const SOURCE_EXCERPT_CONCURRENCY = 4;
 
 type SourceScanTransactionDb = Pick<Db, "delete" | "execute" | "insert" | "select" | "update">;
 type SourceScanDb = SourceScanTransactionDb & {
@@ -77,14 +64,6 @@ export function createSourceScanService(db: SourceScanDb) {
 
     async getSourceAggregate(projectId: string): Promise<SourceAggregateDto> {
       return withSourceReadSnapshot(db, (snapshotDb) => getSourceAggregate(snapshotDb, projectId));
-    },
-
-    async listSourceSpecLinksForEntity(input: {
-      projectId: string;
-      repoPath: string;
-      entityId: string;
-    }): Promise<SourceSpecLinkDto[]> {
-      return listSourceSpecLinksForEntity(db, input);
     }
   };
 }
@@ -109,7 +88,6 @@ async function persistSourceScan(
   indexRunId: string,
   result: ScanRepositoryResult
 ): Promise<SourceScanCounts> {
-  await db.delete(sourceSpecLinks).where(eq(sourceSpecLinks.projectId, projectId));
   await db.delete(sourceSymbols).where(eq(sourceSymbols.projectId, projectId));
   await db.delete(sourceExports).where(eq(sourceExports.projectId, projectId));
   await db.delete(sourceImports).where(eq(sourceImports.projectId, projectId));
@@ -204,7 +182,7 @@ async function persistSourceScan(
     existingEntityRows.map((row) => [row.entityId, row.filePath])
   );
 
-  const sourceSpecLinkRows = result.files.flatMap((file) => {
+  const sourceAnnotationRows = result.files.flatMap((file) => {
     const sourceFileId = sourceFileIdsByPath.get(file.path);
     if (!sourceFileId) return [];
 
@@ -223,7 +201,7 @@ async function persistSourceScan(
     );
   });
 
-  const invalidAnnotationWarnings = sourceSpecLinkRows
+  const invalidAnnotationWarnings = sourceAnnotationRows
     .filter((link) => !isValidSpecopsEntityId(link.entityId))
     .map((link) => ({
       projectId,
@@ -235,15 +213,11 @@ async function persistSourceScan(
       message: "Source annotation has an invalid SpecOps entity id."
     }));
 
-  const validSourceSpecLinkRows = sourceSpecLinkRows.filter((link) =>
+  const validSourceAnnotationRows = sourceAnnotationRows.filter((link) =>
     isValidSpecopsEntityId(link.entityId)
   );
 
-  if (validSourceSpecLinkRows.length > 0) {
-    await db.insert(sourceSpecLinks).values(validSourceSpecLinkRows).onConflictDoNothing();
-  }
-
-  const missingEntityWarnings = validSourceSpecLinkRows
+  const missingEntityWarnings = validSourceAnnotationRows
     .filter((link) => !existingEntityIds.has(link.entityId))
     .map((link) => ({
       projectId,
@@ -259,7 +233,7 @@ async function persistSourceScan(
     await db.insert(validationMessages).values(missingEntityWarnings);
   }
 
-  const scannerAnnotations: ScannerAnnotationInput[] = validSourceSpecLinkRows
+  const scannerAnnotations: ScannerAnnotationInput[] = validSourceAnnotationRows
     .filter((link) => existingEntityIds.has(link.entityId))
     .map((link) => ({
       sourceFileId: link.sourceFileId,
@@ -306,118 +280,6 @@ async function persistSourceScan(
     sourceSymbolCount: result.files.reduce((total, file) => total + file.symbols.length, 0),
     warningCount: result.warnings.length + missingEntityWarnings.length + invalidAnnotationWarnings.length
   };
-}
-
-async function listSourceSpecLinksForEntity(
-  db: SourceScanDb,
-  input: { projectId: string; repoPath: string; entityId: string }
-): Promise<SourceSpecLinkDto[]> {
-  const rows = await db
-    .select()
-    .from(sourceSpecLinks)
-    .where(and(eq(sourceSpecLinks.projectId, input.projectId), eq(sourceSpecLinks.entityId, input.entityId)))
-    .orderBy(asc(sourceSpecLinks.filePath), asc(sourceSpecLinks.symbolName), asc(sourceSpecLinks.id));
-  const excerptCache = new Map<string, Promise<SourceSpecLinkDto["excerpt"]>>();
-
-  return mapWithConcurrency(rows, SOURCE_EXCERPT_CONCURRENCY, async (row) => {
-    const excerptKey = sourceExcerptCacheKey(row);
-    let excerpt = excerptCache.get(excerptKey);
-    if (!excerpt) {
-      excerpt = readSourceExcerpt(input.repoPath, row);
-      excerptCache.set(excerptKey, excerpt);
-    }
-
-    return {
-      id: row.id,
-      projectId: row.projectId,
-      sourceFileId: row.sourceFileId,
-      filePath: row.filePath,
-      entityId: row.entityId,
-      symbolName: row.symbolName,
-      symbolKind: row.symbolKind,
-      symbolLine: row.symbolLine,
-      annotationLine: row.annotationLine,
-      contentHash: row.contentHash,
-      excerpt: await excerpt,
-      createdAt: row.createdAt.toISOString()
-    };
-  });
-}
-
-async function mapWithConcurrency<T, U>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<U>
-): Promise<U[]> {
-  const results = new Array<U>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (true) {
-        const index = nextIndex;
-        nextIndex += 1;
-
-        if (index >= items.length) {
-          return;
-        }
-
-        results[index] = await mapper(items[index]);
-      }
-    })
-  );
-
-  return results;
-}
-
-function sourceExcerptCacheKey(link: typeof sourceSpecLinks.$inferSelect): string {
-  return [link.filePath, link.contentHash, link.annotationLine ?? "", link.symbolLine ?? ""].join("|");
-}
-
-async function readSourceExcerpt(
-  repoPath: string,
-  link: typeof sourceSpecLinks.$inferSelect
-): Promise<SourceSpecLinkDto["excerpt"]> {
-  try {
-    const targetPath = assertInsideDirectory(repoPath, path.join(repoPath, link.filePath));
-    const safePath = await assertRealPathInsideDirectory(repoPath, targetPath);
-    const fileStats = await stat(safePath);
-
-    if (fileStats.size > MAX_SOURCE_EXCERPT_FILE_BYTES) {
-      return {
-        status: "unavailable",
-        message: "Source file is too large to excerpt."
-      };
-    }
-
-    const content = await readFile(safePath, "utf8");
-
-    if (sha256(content) !== link.contentHash) {
-      return { status: "changed", message: "Source file changed since the last index run." };
-    }
-
-    const text = content.replace(/\r?\n$/, "");
-    const lines = text.length > 0 ? text.split(/\r?\n/) : [""];
-    return {
-      status: "available",
-      startLine: 1,
-      endLine: lines.length,
-      text
-    };
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return {
-        status: "missing",
-        message: "Source file is missing."
-      };
-    }
-
-    return {
-      status: "unavailable",
-      message: "Source excerpt unavailable."
-    };
-  }
 }
 
 async function listSourceFiles(
@@ -642,17 +504,4 @@ function toRecord(value: unknown): Record<string, unknown> {
 
 function isValidSpecopsEntityId(value: string): boolean {
   return value.trim().length > 0 && value === value.trim();
-}
-
-function sha256(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
 }

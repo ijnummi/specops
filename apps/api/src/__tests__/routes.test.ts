@@ -4674,7 +4674,7 @@ describeWithDb("database-backed routes", () => {
     );
   });
 
-  it("persists source spec links during project indexing", async () => {
+  it("persists source spec annotations during project indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
     await mkdir(path.join(project.specopsPath, "domain"), { recursive: true });
@@ -4703,24 +4703,26 @@ describeWithDb("database-backed routes", () => {
     });
     expect(indexResponse.statusCode).toBe(200);
 
-    const links = await pool.query(
-      "select file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line from source_spec_links where project_id = $1",
+    const annotations = await pool.query(
+      "select source_file_path, entity_id, symbol_name, symbol_kind, start_line, annotation_line, provenance, status from source_spec_annotations where project_id = $1",
       [project.id]
     );
 
-    expect(links.rows).toEqual([
+    expect(annotations.rows).toEqual([
       expect.objectContaining({
-        file_path: "src/decision.ts",
+        source_file_path: "src/decision.ts",
         entity_id: "domain.decision",
         symbol_name: "Decision",
         symbol_kind: "interface",
-        symbol_line: 4,
-        annotation_line: 2
+        start_line: 4,
+        annotation_line: 2,
+        provenance: "scanner",
+        status: "active"
       })
     ]);
   });
 
-  it("persists source spec links for non-dotted entity ids accepted by markdown", async () => {
+  it("persists source spec annotations for non-dotted entity ids accepted by markdown", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
     await mkdir(path.join(project.specopsPath, "use-cases"), { recursive: true });
@@ -4746,8 +4748,8 @@ describeWithDb("database-backed routes", () => {
     });
     expect(indexResponse.statusCode).toBe(200);
 
-    const links = await pool.query(
-      "select file_path, entity_id, symbol_name, symbol_kind, symbol_line, annotation_line from source_spec_links where project_id = $1",
+    const annotations = await pool.query(
+      "select source_file_path, entity_id, symbol_name, symbol_kind, start_line, annotation_line, provenance, status from source_spec_annotations where project_id = $1",
       [project.id]
     );
     const messagesResponse = await app.inject({
@@ -4755,14 +4757,16 @@ describeWithDb("database-backed routes", () => {
       url: `/api/projects/${project.id}/validation-messages`
     });
 
-    expect(links.rows).toContainEqual(
+    expect(annotations.rows).toContainEqual(
       expect.objectContaining({
-        file_path: "src/auth.ts",
+        source_file_path: "src/auth.ts",
         entity_id: "feature-auth",
         symbol_name: "authenticate",
         symbol_kind: "function",
-        symbol_line: 2,
-        annotation_line: 1
+        start_line: 2,
+        annotation_line: 1,
+        provenance: "scanner",
+        status: "active"
       })
     );
     expect(messagesResponse.statusCode).toBe(200);
