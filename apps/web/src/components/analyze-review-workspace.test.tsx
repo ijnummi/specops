@@ -105,6 +105,11 @@ describe("AnalyzeReviewWorkspace", () => {
     await clickButton(container, "Save detail");
     await clickButton(container, "Remove");
 
+    expect(textInput(container, "Title").disabled).toBe(true);
+    expect(selectInput(container, "Type").disabled).toBe(true);
+    expect(textarea(container, "Summary").disabled).toBe(true);
+    expect(textarea(container, "New claim").disabled).toBe(true);
+    expect(radioInput(container, "hypothesis").disabled).toBe(true);
     expect(button(container, "Save detail").disabled).toBe(true);
     expect(button(container, "Add claim").disabled).toBe(true);
     expect(button(container, "Mark fact").disabled).toBe(true);
@@ -113,6 +118,17 @@ describe("AnalyzeReviewWorkspace", () => {
     expect(mocks.createClaim).not.toHaveBeenCalled();
     expect(mocks.patchClaim).not.toHaveBeenCalled();
     expect(mocks.removeInput).not.toHaveBeenCalled();
+  });
+
+  it("preserves new claim edits across selected assembly refreshes", async () => {
+    const { container, rerender } = await renderWorkspace();
+
+    await changeTextarea(container, "New claim", "Unsaved claim text");
+    await changeRadio(container, "hypothesis");
+    await rerender(reviewFixture({ readyTitle: "Server refreshed title" }));
+
+    expect(textarea(container, "New claim").value).toBe("Unsaved claim text");
+    expect(radioInput(container, "hypothesis").checked).toBe(true);
   });
 });
 
@@ -227,6 +243,15 @@ async function changeTextarea(container: HTMLElement, label: string, value: stri
   });
 }
 
+async function changeRadio(container: HTMLElement, label: string) {
+  const target = radioInput(container, label);
+
+  await act(async () => {
+    target.click();
+    await waitForRender();
+  });
+}
+
 function button(container: HTMLElement, label: string) {
   const candidates = Array.from(container.querySelectorAll("button"));
   const target =
@@ -256,6 +281,15 @@ function textInput(container: HTMLElement, label: string) {
   return target as HTMLInputElement;
 }
 
+function selectInput(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll("label")).find((candidate) =>
+    candidate.textContent?.includes(label)
+  )?.querySelector("select");
+
+  expect(target).toBeDefined();
+  return target as HTMLSelectElement;
+}
+
 function textarea(container: HTMLElement, label: string) {
   const target = Array.from(container.querySelectorAll("textarea")).find(
     (candidate) =>
@@ -265,6 +299,15 @@ function textarea(container: HTMLElement, label: string) {
 
   expect(target).toBeDefined();
   return target!;
+}
+
+function radioInput(container: HTMLElement, label: string) {
+  const target = Array.from(container.querySelectorAll('input[type="radio"]')).find(
+    (candidate) => candidate.closest("label")?.textContent?.includes(label)
+  );
+
+  expect(target).toBeDefined();
+  return target as HTMLInputElement;
 }
 
 function waitForRender() {

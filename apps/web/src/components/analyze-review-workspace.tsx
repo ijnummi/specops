@@ -81,6 +81,9 @@ export function AnalyzeReviewWorkspace({
   const [newClaimText, setNewClaimText] = useState("");
   const [newClaimKind, setNewClaimKind] =
     useState<AnalyzeReviewCreateClaimRequest["kind"]>("fact");
+  const [claimDraftAssemblyId, setClaimDraftAssemblyId] = useState<string | null>(
+    () => assemblies[0]?.id ?? null
+  );
   const selectedAssembly =
     assemblies.find((assembly) => assembly.id === selectedAssemblyId) ?? assemblies[0] ?? null;
   const [formDraft, setFormDraft] = useState<AssemblyFormDraft>(() => ({
@@ -142,9 +145,17 @@ export function AnalyzeReviewWorkspace({
       }
       return current;
     });
+  }, [selectedAssembly]);
+
+  useEffect(() => {
+    const nextAssemblyId = selectedAssembly?.id ?? null;
+    if (claimDraftAssemblyId === nextAssemblyId) {
+      return;
+    }
+    setClaimDraftAssemblyId(nextAssemblyId);
     setNewClaimText("");
     setNewClaimKind("fact");
-  }, [selectedAssembly]);
+  }, [claimDraftAssemblyId, selectedAssembly?.id]);
 
   const checkedReadyAssemblyIds = useMemo(
     () => assemblies.filter((assembly) => checkedAssemblyIds.has(assembly.id) && isReadyDraft(assembly)).map((assembly) => assembly.id),
@@ -372,6 +383,7 @@ export function AnalyzeReviewWorkspace({
             <div className="mt-4 grid gap-4">
               <ValidationMessages assembly={selectedAssembly} />
               <AssemblyFields
+                disabled={!canEditSelected}
                 formState={formState}
                 onChange={(next) =>
                   setFormDraft((current) => ({
@@ -489,16 +501,24 @@ function AssemblyRow({
 }
 
 function AssemblyFields({
+  disabled,
   formState,
   onChange
 }: {
+  disabled: boolean;
   formState: AssemblyFormState;
   onChange: (next: Partial<AssemblyFormState>) => void;
 }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
-      <LabeledInput label="Title" value={formState.title} onChange={(title) => onChange({ title })} />
       <LabeledInput
+        disabled={disabled}
+        label="Title"
+        value={formState.title}
+        onChange={(title) => onChange({ title })}
+      />
+      <LabeledInput
+        disabled={disabled}
         label="Entity id"
         value={formState.entityId}
         onChange={(entityId) => onChange({ entityId })}
@@ -507,6 +527,7 @@ function AssemblyFields({
         Type
         <select
           className="rounded border border-slate-300 px-2 py-1.5 text-sm font-normal text-slate-900"
+          disabled={disabled}
           value={formState.entityType}
           onChange={(event) =>
             onChange({ entityType: event.currentTarget.value as AssemblyFormState["entityType"] })
@@ -517,11 +538,17 @@ function AssemblyFields({
           <option value="use_case">use_case</option>
         </select>
       </label>
-      <LabeledInput label="Path" value={formState.filePath} onChange={(filePath) => onChange({ filePath })} />
+      <LabeledInput
+        disabled={disabled}
+        label="Path"
+        value={formState.filePath}
+        onChange={(filePath) => onChange({ filePath })}
+      />
       <label className="grid gap-1 text-sm font-medium text-slate-700 md:col-span-2">
         Summary
         <textarea
           className="min-h-20 rounded border border-slate-300 px-2 py-1.5 text-sm font-normal text-slate-900"
+          disabled={disabled}
           value={formState.summary}
           onInput={(event) => onChange({ summary: event.currentTarget.value })}
         />
@@ -531,10 +558,12 @@ function AssemblyFields({
 }
 
 function LabeledInput({
+  disabled,
   label,
   onChange,
   value
 }: {
+  disabled: boolean;
   label: string;
   onChange: (value: string) => void;
   value: string;
@@ -544,6 +573,7 @@ function LabeledInput({
       {label}
       <input
         className="rounded border border-slate-300 px-2 py-1.5 text-sm font-normal text-slate-900"
+        disabled={disabled}
         value={value}
         onInput={(event) => onChange(event.currentTarget.value)}
       />
@@ -643,6 +673,7 @@ function ClaimsPanel({
         <textarea
           className="min-h-16 rounded border border-slate-300 px-2 py-1.5 text-sm"
           aria-label="New claim"
+          disabled={disabled}
           placeholder="Add claim"
           value={newClaimText}
           onInput={(event) => onNewClaimTextChange(event.currentTarget.value)}
