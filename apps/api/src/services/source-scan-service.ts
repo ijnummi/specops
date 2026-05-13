@@ -35,7 +35,7 @@ import {
 const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
 const SOURCE_EXCERPT_CONCURRENCY = 4;
 
-type SourceScanTransactionDb = Pick<Db, "delete" | "execute" | "insert" | "select">;
+type SourceScanTransactionDb = Pick<Db, "delete" | "execute" | "insert" | "select" | "update">;
 type SourceScanDb = SourceScanTransactionDb & {
   transaction?: <T>(callback: (tx: SourceScanTransactionDb) => Promise<T>) => Promise<T>;
 };
@@ -276,12 +276,12 @@ async function persistSourceScan(
       confidence: 1
     }));
 
-  await createAnnotationService(db as Db).replaceScannerAnnotations(
-    projectId,
-    indexRunId,
-    scannerAnnotations,
-    db
-  );
+  const annotationService = createAnnotationService(db as Db);
+  const currentSourceHashes = new Map(result.files.map((file) => [file.path, file.contentHash]));
+  if (currentSourceHashes.size > 0) {
+    await annotationService.markStaleAnnotations(projectId, { currentSourceHashes }, db);
+  }
+  await annotationService.replaceScannerAnnotations(projectId, indexRunId, scannerAnnotations, db);
 
   if (invalidAnnotationWarnings.length > 0) {
     await db.insert(validationMessages).values(invalidAnnotationWarnings);

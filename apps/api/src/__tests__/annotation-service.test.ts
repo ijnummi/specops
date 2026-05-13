@@ -15,6 +15,7 @@ import {
   indexRuns,
   projects,
   sourceFiles,
+  sourceSpecAnnotations,
   specEntities
 } from "@specops/db";
 import { eq } from "drizzle-orm";
@@ -217,6 +218,230 @@ describeWithDb("createAnnotationService", () => {
       expect.objectContaining({
         sourceFileId: null,
         entityId: "domain.decision"
+      })
+    ]);
+  });
+
+  it("marks generated active annotations stale when the current source hash differs", async () => {
+    const project = await createProjectFixture("stale-hash");
+    const source = await createSourceFileFixture(project.id, "src/decision.ts", "export interface Decision {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const indexRunId = await createIndexRunFixture(project.id);
+    const service = createAnnotationService(db);
+
+    await service.replaceScannerAnnotations(project.id, indexRunId, [
+      {
+        sourceFileId: source.id,
+        sourceFilePath: source.path,
+        symbolName: "Decision",
+        symbolKind: "interface",
+        startLine: 1,
+        endLine: 1,
+        annotationLine: 1,
+        sourceContentHash: source.contentHash,
+        entityId: "domain.decision",
+        specFilePath: "specs/decision.md",
+        relationshipType: "references",
+        confidence: 1
+      }
+    ]);
+
+    const staleCount = await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([[source.path, sha256("export interface Decision { id: string }\n")]])
+    });
+
+    expect(staleCount).toBe(1);
+    const annotations = await service.listAnnotations(project.id, {
+      provenance: "scanner",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        sourceFilePath: source.path,
+        sourceContentHash: source.contentHash,
+        status: "stale"
+      })
+    ]);
+  });
+
+  it("marks generated active annotations stale when the source path is missing from current hashes", async () => {
+    const project = await createProjectFixture("stale-missing");
+    const source = await createSourceFileFixture(project.id, "src/missing.ts", "export interface Missing {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const indexRunId = await createIndexRunFixture(project.id);
+    const service = createAnnotationService(db);
+
+    await service.replaceScannerAnnotations(project.id, indexRunId, [
+      {
+        sourceFileId: source.id,
+        sourceFilePath: source.path,
+        symbolName: "Missing",
+        symbolKind: "interface",
+        startLine: 1,
+        endLine: 1,
+        annotationLine: 1,
+        sourceContentHash: source.contentHash,
+        entityId: "domain.decision",
+        specFilePath: "specs/decision.md",
+        relationshipType: "references",
+        confidence: 1
+      }
+    ]);
+
+    const staleCount = await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([["src/other.ts", sha256("export interface Other {}\n")]])
+    });
+
+    expect(staleCount).toBe(1);
+    const annotations = await service.listAnnotations(project.id, {
+      provenance: "scanner",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        sourceFilePath: source.path,
+        status: "stale"
+      })
+    ]);
+  });
+
+  it("does not mark user annotations stale from scan hashes", async () => {
+    const project = await createProjectFixture("stale-user");
+    const source = await createSourceFileFixture(project.id, "src/decision.ts", "export interface Decision {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const service = createAnnotationService(db);
+
+    await service.createUserAnnotation(project.id, {
+      sourceFileId: source.id,
+      entityId: "domain.decision",
+      relationshipType: "implements",
+      symbolName: "Decision",
+      symbolKind: "interface",
+      startLine: 1,
+      endLine: 1,
+      annotationLine: 1,
+      claimId: null,
+      confidence: 1
+    });
+
+    const staleCount = await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([[source.path, sha256("export interface Decision { id: string }\n")]])
+    });
+
+    expect(staleCount).toBe(0);
+    const annotations = await service.listAnnotations(project.id, {
+      provenance: "user",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        sourceFilePath: source.path,
+        status: "active"
+      })
+    ]);
+  });
+
+  it("keeps generated annotations with null source hashes active when the source path still exists", async () => {
+    const project = await createProjectFixture("stale-null-hash");
+    await createSourceFileFixture(project.id, "src/decision.ts", "export interface Decision {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const indexRunId = await createIndexRunFixture(project.id);
+    const service = createAnnotationService(db);
+
+    await service.replaceScannerAnnotations(project.id, indexRunId, [
+      {
+        sourceFileId: null,
+        sourceFilePath: "src/decision.ts",
+        symbolName: "Decision",
+        symbolKind: "interface",
+        startLine: 1,
+        endLine: 1,
+        annotationLine: 1,
+        sourceContentHash: null,
+        entityId: "domain.decision",
+        specFilePath: "specs/decision.md",
+        relationshipType: "references",
+        confidence: 1
+      }
+    ]);
+
+    const staleCount = await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([["src/decision.ts", sha256("export interface Decision { id: string }\n")]])
+    });
+
+    expect(staleCount).toBe(0);
+    const [annotation] = await db
+      .select()
+      .from(sourceSpecAnnotations)
+      .where(eq(sourceSpecAnnotations.projectId, project.id));
+
+    expect(annotation).toMatchObject({
+      sourceFilePath: "src/decision.ts",
+      sourceContentHash: null,
+      status: "active"
+    });
+  });
+
+  it("preserves stale scanner annotations when replacing current scanner annotations", async () => {
+    const project = await createProjectFixture("stale-scanner-preserved");
+    const oldSource = await createSourceFileFixture(project.id, "src/old.ts", "export interface Old {}\n");
+    const currentSource = await createSourceFileFixture(project.id, "src/current.ts", "export interface Current {}\n");
+    await createSpecEntityFixture(project.id, "domain.decision", "specs/decision.md");
+    const firstIndexRunId = await createIndexRunFixture(project.id);
+    const secondIndexRunId = await createIndexRunFixture(project.id);
+    const service = createAnnotationService(db);
+
+    await service.replaceScannerAnnotations(project.id, firstIndexRunId, [
+      {
+        sourceFileId: oldSource.id,
+        sourceFilePath: oldSource.path,
+        symbolName: "Old",
+        symbolKind: "interface",
+        startLine: 1,
+        endLine: 1,
+        annotationLine: 1,
+        sourceContentHash: oldSource.contentHash,
+        entityId: "domain.decision",
+        specFilePath: "specs/decision.md",
+        relationshipType: "references",
+        confidence: 1
+      }
+    ]);
+    await service.markStaleAnnotations(project.id, {
+      currentSourceHashes: new Map([[currentSource.path, currentSource.contentHash]])
+    });
+
+    await service.replaceScannerAnnotations(project.id, secondIndexRunId, [
+      {
+        sourceFileId: currentSource.id,
+        sourceFilePath: currentSource.path,
+        symbolName: "Current",
+        symbolKind: "interface",
+        startLine: 1,
+        endLine: 1,
+        annotationLine: 1,
+        sourceContentHash: currentSource.contentHash,
+        entityId: "domain.decision",
+        specFilePath: "specs/decision.md",
+        relationshipType: "references",
+        confidence: 1
+      }
+    ]);
+
+    const annotations = await service.listAnnotations(project.id, {
+      provenance: "scanner",
+      includeExcerpt: false
+    });
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        sourceFilePath: currentSource.path,
+        status: "active",
+        indexRunId: secondIndexRunId
+      }),
+      expect.objectContaining({
+        sourceFilePath: oldSource.path,
+        status: "stale",
+        indexRunId: firstIndexRunId
       })
     ]);
   });

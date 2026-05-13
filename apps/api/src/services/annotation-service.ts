@@ -23,7 +23,7 @@ import {
   sourceSpecAnnotations,
   specEntities
 } from "@specops/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { BadRequestError, NotFoundError } from "../lib/http-errors.js";
 import { assertInsideDirectory, assertRealPathInsideDirectory } from "../lib/path-safety.js";
@@ -32,7 +32,7 @@ const MAX_SOURCE_EXCERPT_FILE_BYTES = 256 * 1024;
 const SOURCE_EXCERPT_CONCURRENCY = 4;
 
 type SourceSpecAnnotationRow = typeof sourceSpecAnnotations.$inferSelect;
-type AnnotationWriteClient = Pick<Db, "delete" | "insert" | "select">;
+type AnnotationWriteClient = Pick<Db, "delete" | "insert" | "select" | "update">;
 
 type BaseAnnotationInput = {
   sourceFileId?: string | null;
@@ -206,7 +206,8 @@ export function createAnnotationService(db: Db) {
         .where(
           and(
             eq(sourceSpecAnnotations.projectId, projectId),
-            eq(sourceSpecAnnotations.provenance, "scanner")
+            eq(sourceSpecAnnotations.provenance, "scanner"),
+            eq(sourceSpecAnnotations.status, "active")
           )
         );
 
@@ -225,6 +226,65 @@ export function createAnnotationService(db: Db) {
           }))
         )
         .onConflictDoNothing();
+    },
+
+    async markStaleAnnotations(
+      projectId: string,
+      input: { currentSourceHashes: Map<string, string> },
+      client: AnnotationWriteClient = db
+    ): Promise<number> {
+      const activeRows = await client
+        .select({
+          id: sourceSpecAnnotations.id,
+          sourceFilePath: sourceSpecAnnotations.sourceFilePath,
+          sourceContentHash: sourceSpecAnnotations.sourceContentHash,
+          provenance: sourceSpecAnnotations.provenance
+        })
+        .from(sourceSpecAnnotations)
+        .where(
+          and(
+            eq(sourceSpecAnnotations.projectId, projectId),
+            eq(sourceSpecAnnotations.status, "active")
+          )
+        );
+
+      const staleAnnotationIds = activeRows.flatMap((row) => {
+        if (row.provenance === "user") {
+          return [];
+        }
+
+        const currentHash = input.currentSourceHashes.get(row.sourceFilePath);
+        if (currentHash === undefined) {
+          return [row.id];
+        }
+
+        if (row.sourceContentHash !== null && row.sourceContentHash !== currentHash) {
+          return [row.id];
+        }
+
+        return [];
+      });
+
+      if (staleAnnotationIds.length === 0) {
+        return 0;
+      }
+
+      const updatedRows = await client
+        .update(sourceSpecAnnotations)
+        .set({
+          status: "stale",
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(sourceSpecAnnotations.projectId, projectId),
+            eq(sourceSpecAnnotations.status, "active"),
+            inArray(sourceSpecAnnotations.id, staleAnnotationIds)
+          )
+        )
+        .returning({ id: sourceSpecAnnotations.id });
+
+      return updatedRows.length;
     },
 
     async createAcceptedEvidenceAnnotations(
