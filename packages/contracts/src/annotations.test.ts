@@ -64,6 +64,12 @@ describe("annotation contracts", () => {
     });
   });
 
+  it("parses includeExcerpt query booleans explicitly", () => {
+    expect(annotationListQuerySchema.parse({}).includeExcerpt).toBe(false);
+    expect(annotationListQuerySchema.parse({ includeExcerpt: "false" }).includeExcerpt).toBe(false);
+    expect(annotationListQuerySchema.parse({ includeExcerpt: "true" }).includeExcerpt).toBe(true);
+  });
+
   it("requires a source target, entity id, and relationship type to create an annotation", () => {
     const parsed = annotationCreateRequestSchema.parse({
       sourceFilePath: "apps/api/src/routes/analyze-review-assemblies.ts",

@@ -322,11 +322,25 @@ describeWithDb("database-backed routes", () => {
       status: "active"
     });
 
-    const listResponse = await app.inject({
+    const listWithoutExcerptResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/annotations?entityId=use-case.review-drafts&includeExcerpt=false`
+    });
+    const listedWithoutExcerpt = listWithoutExcerptResponse.json() as Array<{
+      id: string;
+      excerpt?: unknown;
+    }>;
+
+    expect(listWithoutExcerptResponse.statusCode).toBe(200);
+    expect(listedWithoutExcerpt).toHaveLength(1);
+    expect(listedWithoutExcerpt[0]).toMatchObject({ id: created.id });
+    expect(listedWithoutExcerpt[0]).not.toHaveProperty("excerpt");
+
+    const listWithExcerptResponse = await app.inject({
       method: "GET",
       url: `/api/projects/${project.id}/annotations?entityId=use-case.review-drafts&includeExcerpt=true`
     });
-    const listed = listResponse.json() as Array<{
+    const listedWithExcerpt = listWithExcerptResponse.json() as Array<{
       id: string;
       excerpt?: {
         status: string;
@@ -334,9 +348,9 @@ describeWithDb("database-backed routes", () => {
       };
     }>;
 
-    expect(listResponse.statusCode).toBe(200);
-    expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({
+    expect(listWithExcerptResponse.statusCode).toBe(200);
+    expect(listedWithExcerpt).toHaveLength(1);
+    expect(listedWithExcerpt[0]).toMatchObject({
       id: created.id,
       excerpt: {
         status: "available",

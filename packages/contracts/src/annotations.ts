@@ -26,6 +26,10 @@ const lineRangeMessage = {
 };
 
 const nullableUuid = z.string().uuid().nullable();
+const queryBooleanSchema = z.union([
+  z.boolean(),
+  z.enum(["true", "false"]).transform((value) => value === "true"),
+]);
 
 export const sourceSpecAnnotationSchema = z
   .object({
@@ -64,7 +68,7 @@ export const annotationListQuerySchema = z.object({
   relationshipType: annotationRelationshipTypeSchema.optional(),
   status: annotationStatusSchema.optional(),
   provenance: annotationProvenanceSchema.optional(),
-  includeExcerpt: z.coerce.boolean().default(false),
+  includeExcerpt: queryBooleanSchema.default(false),
 });
 
 export const annotationCreateRequestSchema = z
