@@ -5,8 +5,8 @@ import type {
   ImpactSourceEvidenceDto
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
-import { sourceSpecLinks, specEntities, specLinks } from "@specops/db";
-import { asc, eq } from "drizzle-orm";
+import { sourceSpecAnnotations, specEntities, specLinks } from "@specops/db";
+import { and, asc, eq } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
 import { createProjectService } from "./project-service.js";
@@ -102,12 +102,18 @@ export function createImpactService(db: Db) {
       const sourceRows = input.includeSource
         ? await db
             .select()
-            .from(sourceSpecLinks)
-            .where(eq(sourceSpecLinks.projectId, input.projectId))
+            .from(sourceSpecAnnotations)
+            .where(
+              and(
+                eq(sourceSpecAnnotations.projectId, input.projectId),
+                eq(sourceSpecAnnotations.status, "active")
+              )
+            )
             .orderBy(
-              asc(sourceSpecLinks.entityId),
-              asc(sourceSpecLinks.filePath),
-              asc(sourceSpecLinks.symbolName)
+              asc(sourceSpecAnnotations.entityId),
+              asc(sourceSpecAnnotations.sourceFilePath),
+              asc(sourceSpecAnnotations.symbolName),
+              asc(sourceSpecAnnotations.id)
             )
         : [];
 
@@ -130,14 +136,16 @@ export function createImpactService(db: Db) {
           linkType: link.linkType,
           source: link.source
         })),
-        sourceEvidence: sourceRows.map((link) => ({
-          entityId: link.entityId,
-          filePath: link.filePath,
-          sourceFileId: link.sourceFileId,
-          symbolName: link.symbolName,
-          symbolKind: link.symbolKind,
-          symbolLine: link.symbolLine,
-          annotationLine: link.annotationLine
+        sourceEvidence: sourceRows.map((annotation) => ({
+          entityId: annotation.entityId,
+          filePath: annotation.sourceFilePath,
+          sourceFileId:
+            annotation.sourceFileId ?? `${annotation.sourceFilePath}:annotation:${annotation.id}`,
+          symbolName: annotation.symbolName ?? annotation.sourceFilePath,
+          symbolKind: annotation.symbolKind ?? "unknown",
+          symbolLine: annotation.startLine,
+          annotationLine: annotation.annotationLine,
+          relationshipType: annotation.relationshipType as ImpactSourceEvidenceDto["relationshipType"]
         }))
       });
     }

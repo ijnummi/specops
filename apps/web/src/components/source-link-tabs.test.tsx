@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { SourceSpecLinkDto } from "@specops/contracts";
+import type { SourceSpecAnnotationDto } from "@specops/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { SourceLinkTabs } from "./source-link-tabs.js";
@@ -29,7 +29,7 @@ describe("SourceLinkTabs", () => {
       specTitle: "Decision Model",
       sourceLinks: [
         sourceLink({
-          filePath: "src/domain/decision-model.ts",
+          sourceFilePath: "src/domain/decision-model.ts",
           symbolKind: "function",
           symbolName: "createDecisionModel",
           excerpt: {
@@ -53,9 +53,13 @@ describe("SourceLinkTabs", () => {
     const buttons = Array.from(container.querySelectorAll("button"));
     expect(buttons[0]?.textContent).toContain("Spec: Decision Model");
     expect(container.textContent).toContain("Spec editor panel");
+    expect(container.textContent).toContain("Source/spec annotations");
+    expect(container.textContent).toContain("Implements");
+    expect(container.textContent).toContain("scanner");
 
     await clickButton(container, "decision-model.ts");
 
+    expect(container.textContent).toContain("Source/spec annotations");
     expect(container.textContent).toContain("src/domain/decision-model.ts");
     expect(container.textContent).toContain("function");
     expect(container.textContent).toContain("createDecisionModel");
@@ -69,12 +73,12 @@ describe("SourceLinkTabs", () => {
       sourceLinks: [
         sourceLink({
           id: "missing-excerpt",
-          filePath: "src/missing.ts",
+          sourceFilePath: "src/missing.ts",
           excerpt: undefined
         }),
         sourceLink({
           id: "changed-excerpt",
-          filePath: "src/changed.ts",
+          sourceFilePath: "src/changed.ts",
           excerpt: {
             status: "changed",
             message: "Source changed since this evidence was indexed."
@@ -82,7 +86,7 @@ describe("SourceLinkTabs", () => {
         }),
         sourceLink({
           id: "unavailable-excerpt",
-          filePath: "src/unavailable.ts",
+          sourceFilePath: "src/unavailable.ts",
           excerpt: {
             status: "unavailable",
             message: "Source file could not be read."
@@ -108,7 +112,7 @@ describe("SourceLinkTabs", () => {
       sourceLinks: Array.from({ length: 6 }, (_, index) =>
         sourceLink({
           id: `source-link-${index + 1}`,
-          filePath: `src/source-${index + 1}.ts`
+          sourceFilePath: `src/source-${index + 1}.ts`
         })
       ),
       specPanel: <div>Spec editor panel</div>
@@ -164,12 +168,12 @@ describe("SourceLinkTabs", () => {
       sourceLinks: [
         sourceLink({
           id: "domain-source",
-          filePath: "src/domain/decision-model.ts",
+          sourceFilePath: "src/domain/decision-model.ts",
           symbolName: "createDecisionModel"
         }),
         sourceLink({
           id: "app-source",
-          filePath: "src/app/decision-model.ts",
+          sourceFilePath: "src/app/decision-model.ts",
           symbolName: "renderDecisionModel"
         })
       ],
@@ -204,7 +208,7 @@ describe("SourceLinkTabs", () => {
           sourceLinks={[
             sourceLink({
               id: "shared-source-link",
-              filePath: "src/domain/workspace.ts"
+              sourceFilePath: "src/domain/workspace.ts"
             })
           ]}
           specPanel={<div>Workspace spec panel</div>}
@@ -214,13 +218,13 @@ describe("SourceLinkTabs", () => {
 
     expect(container.textContent).toContain("Spec: Workspace");
     expect(container.textContent).toContain("Workspace spec panel");
-    expect(container.textContent).not.toContain("src/domain/workspace.ts");
+    expect(container.querySelector('[data-testid="source-link-panel"]')).toBeNull();
   });
 });
 
 async function renderTabs(props: {
   specTitle: string;
-  sourceLinks: SourceSpecLinkDto[];
+  sourceLinks: SourceSpecAnnotationDto[];
   sourceLinksError?: string | null;
   specPanel: React.ReactNode;
 }) {
@@ -249,18 +253,30 @@ async function clickButton(container: HTMLElement, label: string) {
   });
 }
 
-function sourceLink(input: Partial<SourceSpecLinkDto> = {}): SourceSpecLinkDto {
+function sourceLink(input: Partial<SourceSpecAnnotationDto> = {}): SourceSpecAnnotationDto {
   return {
     id: "source-link-1",
     projectId: "project-1",
     sourceFileId: "source-file-1",
-    filePath: "src/domain/decision-model.ts",
+    sourceFilePath: "src/domain/decision-model.ts",
     entityId: "domain.decision",
+    specFilePath: "domain/decision.md",
+    claimId: null,
+    relationshipType: "implements",
+    confidence: 1,
+    provenance: "scanner",
+    status: "active",
+    analyzeRunId: null,
+    proposalId: null,
+    assemblyId: null,
+    claimEvidenceId: null,
+    indexRunId: null,
     symbolName: "createDecisionModel",
     symbolKind: "function",
-    symbolLine: 14,
+    startLine: 14,
+    endLine: 14,
     annotationLine: 13,
-    contentHash: "source-content-hash",
+    sourceContentHash: "source-content-hash",
     excerpt: {
       status: "available",
       startLine: 12,
@@ -268,6 +284,7 @@ function sourceLink(input: Partial<SourceSpecLinkDto> = {}): SourceSpecLinkDto {
       text: "export function createDecisionModel() {}"
     },
     createdAt: "2026-05-10T12:00:00.000Z",
+    updatedAt: "2026-05-10T12:00:00.000Z",
     ...input
   };
 }

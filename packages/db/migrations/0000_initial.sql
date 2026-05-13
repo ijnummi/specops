@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS index_runs (
   source_import_count integer NOT NULL DEFAULT 0,
   source_export_count integer NOT NULL DEFAULT 0,
   source_symbol_count integer NOT NULL DEFAULT 0,
-  git_commit text
+  git_commit text,
+  CONSTRAINT index_runs_id_project_id_unique UNIQUE (id, project_id)
 );
 
 ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS source_file_count integer NOT NULL DEFAULT 0;
@@ -36,6 +37,19 @@ ALTER TABLE index_runs ADD COLUMN IF NOT EXISTS source_symbol_count integer NOT 
 
 CREATE INDEX IF NOT EXISTS index_runs_project_id_idx ON index_runs(project_id);
 CREATE INDEX IF NOT EXISTS index_runs_project_started_at_idx ON index_runs(project_id, started_at);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'index_runs_id_project_id_unique'
+      AND conrelid = 'index_runs'::regclass
+  ) THEN
+    ALTER TABLE index_runs
+      ADD CONSTRAINT index_runs_id_project_id_unique UNIQUE (id, project_id);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS spec_files (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -584,6 +598,7 @@ CREATE TABLE IF NOT EXISTS analyze_review_claim_evidence (
   provenance text NOT NULL,
   confidence double precision,
   created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT analyze_review_claim_evidence_id_project_id_unique UNIQUE (id, project_id),
   CONSTRAINT analyze_review_claim_evidence_claim_project_fk FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id) ON DELETE CASCADE,
   CONSTRAINT analyze_review_claim_evidence_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE
 );
@@ -600,6 +615,19 @@ WHERE analyze_review_claim_evidence.claim_id = analyze_review_claims.id
   AND analyze_review_claim_evidence.project_id IS NULL;
 
 ALTER TABLE analyze_review_claim_evidence ALTER COLUMN project_id SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'analyze_review_claim_evidence_id_project_id_unique'
+      AND conrelid = 'analyze_review_claim_evidence'::regclass
+  ) THEN
+    ALTER TABLE analyze_review_claim_evidence
+      ADD CONSTRAINT analyze_review_claim_evidence_id_project_id_unique UNIQUE (id, project_id);
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -628,3 +656,156 @@ BEGIN
       FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE CASCADE;
   END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS source_spec_annotations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_file_id uuid,
+  source_file_path text NOT NULL,
+  symbol_name text,
+  symbol_kind text,
+  start_line integer,
+  end_line integer,
+  annotation_line integer,
+  source_content_hash text,
+  entity_id text NOT NULL,
+  spec_file_path text NOT NULL,
+  claim_id uuid,
+  relationship_type text NOT NULL,
+  confidence double precision,
+  provenance text NOT NULL,
+  status text NOT NULL DEFAULT 'active',
+  analyze_run_id uuid,
+  proposal_id uuid,
+  assembly_id uuid,
+  claim_evidence_id uuid,
+  index_run_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT source_spec_annotations_claim_project_fk FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id) ON DELETE SET NULL (claim_id),
+  CONSTRAINT source_spec_annotations_analyze_run_project_fk FOREIGN KEY (analyze_run_id, project_id) REFERENCES analyze_runs(id, project_id) ON DELETE SET NULL (analyze_run_id),
+  CONSTRAINT source_spec_annotations_proposal_project_fk FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id) ON DELETE SET NULL (proposal_id),
+  CONSTRAINT source_spec_annotations_assembly_project_fk FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id) ON DELETE SET NULL (assembly_id),
+  CONSTRAINT source_spec_annotations_claim_evidence_project_fk FOREIGN KEY (claim_evidence_id, project_id) REFERENCES analyze_review_claim_evidence(id, project_id) ON DELETE SET NULL (claim_evidence_id),
+  CONSTRAINT source_spec_annotations_index_run_project_fk FOREIGN KEY (index_run_id, project_id) REFERENCES index_runs(id, project_id) ON DELETE SET NULL (index_run_id)
+);
+
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_source_file_fk;
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_claim_id_fkey;
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_analyze_run_id_fkey;
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_proposal_id_fkey;
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_assembly_id_fkey;
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_claim_evidence_id_fkey;
+ALTER TABLE source_spec_annotations DROP CONSTRAINT IF EXISTS source_spec_annotations_index_run_id_fkey;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_spec_annotations_claim_project_fk'
+      AND conrelid = 'source_spec_annotations'::regclass
+  ) THEN
+    ALTER TABLE source_spec_annotations
+      ADD CONSTRAINT source_spec_annotations_claim_project_fk
+      FOREIGN KEY (claim_id, project_id) REFERENCES analyze_review_claims(id, project_id)
+      ON DELETE SET NULL (claim_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_spec_annotations_analyze_run_project_fk'
+      AND conrelid = 'source_spec_annotations'::regclass
+  ) THEN
+    ALTER TABLE source_spec_annotations
+      ADD CONSTRAINT source_spec_annotations_analyze_run_project_fk
+      FOREIGN KEY (analyze_run_id, project_id) REFERENCES analyze_runs(id, project_id)
+      ON DELETE SET NULL (analyze_run_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_spec_annotations_proposal_project_fk'
+      AND conrelid = 'source_spec_annotations'::regclass
+  ) THEN
+    ALTER TABLE source_spec_annotations
+      ADD CONSTRAINT source_spec_annotations_proposal_project_fk
+      FOREIGN KEY (proposal_id, project_id) REFERENCES ai_proposals(id, project_id)
+      ON DELETE SET NULL (proposal_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_spec_annotations_assembly_project_fk'
+      AND conrelid = 'source_spec_annotations'::regclass
+  ) THEN
+    ALTER TABLE source_spec_annotations
+      ADD CONSTRAINT source_spec_annotations_assembly_project_fk
+      FOREIGN KEY (assembly_id, project_id) REFERENCES analyze_review_assemblies(id, project_id)
+      ON DELETE SET NULL (assembly_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_spec_annotations_claim_evidence_project_fk'
+      AND conrelid = 'source_spec_annotations'::regclass
+  ) THEN
+    ALTER TABLE source_spec_annotations
+      ADD CONSTRAINT source_spec_annotations_claim_evidence_project_fk
+      FOREIGN KEY (claim_evidence_id, project_id) REFERENCES analyze_review_claim_evidence(id, project_id)
+      ON DELETE SET NULL (claim_evidence_id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'source_spec_annotations_index_run_project_fk'
+      AND conrelid = 'source_spec_annotations'::regclass
+  ) THEN
+    ALTER TABLE source_spec_annotations
+      ADD CONSTRAINT source_spec_annotations_index_run_project_fk
+      FOREIGN KEY (index_run_id, project_id) REFERENCES index_runs(id, project_id)
+      ON DELETE SET NULL (index_run_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS source_spec_annotations_project_entity_idx
+  ON source_spec_annotations(project_id, entity_id);
+CREATE INDEX IF NOT EXISTS source_spec_annotations_project_source_file_idx
+  ON source_spec_annotations(project_id, source_file_path);
+CREATE INDEX IF NOT EXISTS source_spec_annotations_project_relationship_status_idx
+  ON source_spec_annotations(project_id, relationship_type, status);
+CREATE INDEX IF NOT EXISTS source_spec_annotations_analyze_origin_idx
+  ON source_spec_annotations(project_id, analyze_run_id, assembly_id);
+CREATE UNIQUE INDEX IF NOT EXISTS source_spec_annotations_active_dedupe_idx
+  ON source_spec_annotations(
+    project_id,
+    source_file_path,
+    entity_id,
+    relationship_type,
+    provenance,
+    coalesce(claim_id::text, ''),
+    coalesce(symbol_name, ''),
+    coalesce(start_line, 0),
+    coalesce(end_line, 0)
+  )
+  WHERE status = 'active';

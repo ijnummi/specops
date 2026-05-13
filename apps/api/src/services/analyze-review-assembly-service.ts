@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  AnnotationRelationshipType,
   AnalyzeReviewAcceptRequest,
   AnalyzeReviewAcceptResponse,
   AnalyzeReviewAssemblyDto,
@@ -39,7 +41,8 @@ import {
   analyzeReviewAssemblyInputs,
   analyzeReviewClaimEvidence,
   analyzeReviewClaims,
-  analyzeRuns
+  analyzeRuns,
+  specEntities
 } from "@specops/db";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
@@ -51,6 +54,10 @@ import {
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
 import { renderAnalyzeReviewAssemblyMarkdown } from "./analyze-review-renderer.js";
+import {
+  createAnnotationService,
+  type AcceptedEvidenceAnnotationInput
+} from "./annotation-service.js";
 import { createIndexerService } from "./indexer-service.js";
 import { createProjectService } from "./project-service.js";
 
@@ -501,6 +508,7 @@ export function createAnalyzeReviewAssemblyService(
     const specopsPath = assertAbsolutePath("specopsPath", project.specopsPath);
     const acceptedAssemblyIds: string[] = [];
     const failures: AnalyzeReviewAcceptResponse["failures"] = [];
+    let annotationCount = 0;
 
     assertInsideDirectory(repoPath, specopsPath);
     await assertRealPathInsideDirectory(repoPath, repoPath);
@@ -511,6 +519,7 @@ export function createAnalyzeReviewAssemblyService(
     for (const assemblyId of input.assemblyIds) {
       let targetPath: string | null = null;
       let wroteFile = false;
+      let insertedAnnotationCount = 0;
       try {
         await options.acceptTestHooks?.beforeAcceptAssembly?.({
           projectId,
@@ -552,19 +561,25 @@ export function createAnalyzeReviewAssemblyService(
           }
 
           const proposedLinks = await getProposedLinksForAssembly(tx, projectId, assembly.id);
+          const annotationInputs = buildAcceptedEvidenceAnnotations(assembly, runId);
           const renderedMarkdown = renderAnalyzeReviewAssemblyMarkdown({
             entityId: assembly.entityId,
             entityType: assembly.entityType,
             title: assembly.title,
             summary: assembly.summary,
             claims: assembly.claims.map((claim) => ({
+              id: claim.id,
               text: claim.text,
               kind: claim.kind,
               evidence: claim.evidence.map((evidence) => ({
                 sourceFilePath: evidence.sourceFilePath,
                 symbolName: evidence.symbolName,
                 startLine: evidence.startLine,
-                endLine: evidence.endLine
+                endLine: evidence.endLine,
+                relationshipType: inferEvidenceRelationshipType(
+                  assembly.entityType,
+                  evidence.sourceFilePath
+                )
               }))
             })),
             proposedLinks
@@ -616,6 +631,12 @@ export function createAnalyzeReviewAssemblyService(
           await assertRealPathInsideDirectory(realSpecopsPath, targetParent);
           await writeFile(targetPath, renderedMarkdown, { encoding: "utf8", flag: "wx" });
           wroteFile = true;
+          await ensureAcceptedSpecEntity(tx, projectId, assembly.filePath, renderedMarkdown);
+          insertedAnnotationCount = await createAnnotationService(db).createAcceptedEvidenceAnnotations(
+            projectId,
+            annotationInputs,
+            tx
+          );
           await options.acceptTestHooks?.beforeStatusUpdate?.({
             projectId,
             runId,
@@ -701,6 +722,7 @@ export function createAnalyzeReviewAssemblyService(
       }
 
       acceptedAssemblyIds.push(assemblyId);
+      annotationCount += insertedAnnotationCount;
     }
 
     let indexRun: AnalyzeReviewAcceptResponse["indexRun"] = null;
@@ -728,7 +750,7 @@ export function createAnalyzeReviewAssemblyService(
       }
     }
 
-    return { acceptedAssemblyIds, failures, indexRun };
+    return { acceptedAssemblyIds, annotationCount, failures, indexRun };
   }
 
   async function ensureInitialAssemblies(projectId: string, run: AnalyzeRunRow): Promise<void> {
@@ -1323,9 +1345,12 @@ export function createAnalyzeReviewAssemblyService(
       title: assembly.title,
       summary: assembly.summary,
       claims: claims.map((claim) => ({
+        id: claim.id,
         text: claim.text,
         kind: claim.kind as "fact" | "hypothesis",
-        evidence: evidence.filter((item) => item.claimId === claim.id).map(mapRenderEvidence)
+        evidence: evidence
+          .filter((item) => item.claimId === claim.id)
+          .map((item) => mapRenderEvidence(item, assembly.entityType as AnalyzeReviewEntityType))
       })),
       proposedLinks
     });
@@ -1432,13 +1457,63 @@ function mapEvidence(row: ClaimEvidenceRow): AnalyzeReviewEvidenceDto {
   };
 }
 
-function mapRenderEvidence(row: ClaimEvidenceRow) {
+function mapRenderEvidence(row: ClaimEvidenceRow, entityType: AnalyzeReviewEntityType) {
   return {
     sourceFilePath: row.sourceFilePath,
     symbolName: row.symbolName,
     startLine: row.startLine,
-    endLine: row.endLine
+    endLine: row.endLine,
+    relationshipType: inferEvidenceRelationshipType(entityType, row.sourceFilePath)
   };
+}
+
+function buildAcceptedEvidenceAnnotations(
+  assembly: AnalyzeReviewAssemblyDto,
+  runId: string
+): AcceptedEvidenceAnnotationInput[] {
+  return assembly.claims.flatMap((claim) =>
+    claim.evidence.map((evidence) => ({
+      sourceFilePath: evidence.sourceFilePath,
+      symbolName: evidence.symbolName,
+      startLine: evidence.startLine,
+      endLine: evidence.endLine,
+      entityId: assembly.entityId,
+      specFilePath: assembly.filePath,
+      relationshipType: inferEvidenceRelationshipType(assembly.entityType, evidence.sourceFilePath),
+      confidence: evidence.confidence ?? claim.confidence,
+      provenance: evidence.provenance,
+      claimId: claim.id,
+      analyzeRunId: runId,
+      proposalId: evidence.proposalId,
+      assemblyId: assembly.id,
+      claimEvidenceId: evidence.id
+    }))
+  );
+}
+
+function inferEvidenceRelationshipType(
+  entityType: AnalyzeReviewEntityType,
+  sourceFilePath: string
+): AnnotationRelationshipType {
+  const normalized = sourceFilePath.toLowerCase().replace(/\\/g, "/");
+  if (
+    normalized.includes(".test.") ||
+    normalized.includes(".spec.") ||
+    normalized.includes("/__tests__/")
+  ) {
+    return "tests";
+  }
+  if (/(^|[/._-])(schemas?|models?|types?|contracts)([/._-]|$)/.test(normalized)) {
+    return "defines";
+  }
+  if (
+    entityType === "use_case" &&
+    /(^|\/)(routes?|services?|handlers?|components?)(\/|$)/.test(normalized)
+  ) {
+    return "implements";
+  }
+
+  return "references";
 }
 
 function mapProposalInput(
@@ -1686,6 +1761,55 @@ function validationMessagesForRenderedMarkdown(
   }
 
   return messages;
+}
+
+async function ensureAcceptedSpecEntity(
+  client: QueryClient,
+  projectId: string,
+  filePath: string,
+  markdown: string
+): Promise<void> {
+  const parsed = parseSpecMarkdown(filePath, markdown);
+  if (!parsed.entity) {
+    return;
+  }
+
+  const now = new Date();
+  const contentHash = sha256(parsed.entity.bodyMarkdown);
+  await client
+    .insert(specEntities)
+    .values({
+      projectId,
+      entityId: parsed.entity.entityId,
+      type: parsed.entity.type,
+      title: parsed.entity.title,
+      status: parsed.entity.status,
+      filePath: parsed.entity.filePath,
+      frontmatterJson: parsed.entity.frontmatter,
+      bodyMarkdown: parsed.entity.bodyMarkdown,
+      bodyText: parsed.entity.bodyText,
+      contentHash,
+      createdAt: now,
+      updatedAt: now
+    })
+    .onConflictDoUpdate({
+      target: [specEntities.projectId, specEntities.entityId],
+      set: {
+        type: parsed.entity.type,
+        title: parsed.entity.title,
+        status: parsed.entity.status,
+        filePath: parsed.entity.filePath,
+        frontmatterJson: parsed.entity.frontmatter,
+        bodyMarkdown: parsed.entity.bodyMarkdown,
+        bodyText: parsed.entity.bodyText,
+        contentHash,
+        updatedAt: now
+      }
+    });
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 class AcceptValidationFailureError extends Error {

@@ -213,6 +213,7 @@ export const analyzeReviewAcceptFailureSchema = z.object({
 
 export const analyzeReviewAcceptResponseSchema = z.object({
   acceptedAssemblyIds: z.array(z.string().uuid()),
+  annotationCount: z.number().int().min(0).default(0),
   failures: z.array(analyzeReviewAcceptFailureSchema),
   indexRun: indexRunSchema.nullable()
 });

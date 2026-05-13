@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { annotationRelationshipTypeSchema } from "./annotations.js";
+
 export const impactDepthSchema = z.enum(["1", "2", "all"]);
 export const impactDirectionSchema = z.enum([
   "both",
@@ -102,7 +104,8 @@ export const impactSourceEvidenceSchema = z.object({
   symbolName: z.string(),
   symbolKind: z.string(),
   symbolLine: z.number().nullable(),
-  annotationLine: z.number().nullable()
+  annotationLine: z.number().nullable(),
+  relationshipType: annotationRelationshipTypeSchema.optional()
 });
 
 export const impactTruncationSchema = z.object({

@@ -15,7 +15,7 @@ import type {
   ProjectReadinessQueueItemDto
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
-import { projects, sourceSpecLinks, specEntities, specLinks, validationMessages } from "@specops/db";
+import { projects, sourceSpecAnnotations, specEntities, specLinks, validationMessages } from "@specops/db";
 import { classifySourceFile, isSupportedSourcePath, shouldExcludePath } from "@specops/repo-scanner";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -24,7 +24,7 @@ import { createSpecReadinessService } from "./spec-readiness-service.js";
 
 type ProjectRow = typeof projects.$inferSelect;
 type SpecEntityRow = typeof specEntities.$inferSelect;
-type SourceSpecLinkRow = typeof sourceSpecLinks.$inferSelect;
+type SourceSpecAnnotationRow = typeof sourceSpecAnnotations.$inferSelect;
 type SpecLinkRow = typeof specLinks.$inferSelect;
 type ValidationMessageRow = typeof validationMessages.$inferSelect;
 
@@ -71,11 +71,12 @@ export async function buildAgentRunReviewSummary(input: {
     input.changedFiles.source.length > 0
       ? input.db
           .select()
-          .from(sourceSpecLinks)
+          .from(sourceSpecAnnotations)
           .where(
             and(
-              eq(sourceSpecLinks.projectId, input.project.id),
-              inArray(sourceSpecLinks.filePath, input.changedFiles.source)
+              eq(sourceSpecAnnotations.projectId, input.project.id),
+              eq(sourceSpecAnnotations.status, "active"),
+              inArray(sourceSpecAnnotations.sourceFilePath, input.changedFiles.source)
             )
           )
       : Promise.resolve([]),
@@ -137,11 +138,12 @@ export async function buildDiffReviewSummary(input: {
     input.changedFiles.source.length > 0
       ? input.db
           .select()
-          .from(sourceSpecLinks)
+          .from(sourceSpecAnnotations)
           .where(
             and(
-              eq(sourceSpecLinks.projectId, input.project.id),
-              inArray(sourceSpecLinks.filePath, input.changedFiles.source)
+              eq(sourceSpecAnnotations.projectId, input.project.id),
+              eq(sourceSpecAnnotations.status, "active"),
+              inArray(sourceSpecAnnotations.sourceFilePath, input.changedFiles.source)
             )
           )
       : Promise.resolve([]),
@@ -417,7 +419,7 @@ function collectAffectedSpecs(input: {
   project: ProjectRow;
   changedFiles: AgentRunChangedFiles;
   entitiesById: Map<string, SpecEntityRow>;
-  sourceLinks: SourceSpecLinkRow[];
+  sourceLinks: SourceSpecAnnotationRow[];
   taskContext: AgentRunReview["taskContext"];
 }): AgentRunReview["affectedSpecs"] {
   const affected = new Map<string, AgentRunReview["affectedSpecs"][number]>();
@@ -464,7 +466,7 @@ function collectDiffAffectedSpecs(input: {
   project: ProjectRow;
   changedFiles: DiffReviewChangedFiles;
   entitiesById: Map<string, SpecEntityRow>;
-  sourceLinks: SourceSpecLinkRow[];
+  sourceLinks: SourceSpecAnnotationRow[];
 }): DiffReviewAffectedSpec[] {
   const affected = new Map<string, DiffReviewAffectedSpec>();
   const specopsPrefix = toRepoRelativeSpecopsPrefix(input.project);
@@ -558,7 +560,7 @@ function collectAgentRunFindings(input: {
   project: ProjectRow;
   task: SpecEntityRow;
   changedFiles: AgentRunChangedFiles;
-  sourceLinks: SourceSpecLinkRow[];
+  sourceLinks: SourceSpecAnnotationRow[];
   taskContext: AgentRunReview["taskContext"];
   affectedSpecs: AgentRunReview["affectedSpecs"];
   validationMessages: ValidationMessageRow[];
@@ -612,7 +614,7 @@ function collectAgentRunFindings(input: {
     );
   }
 
-  const linkedSourceFiles = new Set(input.sourceLinks.map((link) => link.filePath));
+  const linkedSourceFiles = new Set(input.sourceLinks.map((link) => link.sourceFilePath));
   for (const filePath of input.changedFiles.source) {
     if (!linkedSourceFiles.has(filePath)) {
       addFinding(
@@ -722,7 +724,7 @@ function collectAgentRunFindings(input: {
 
 function collectDiffReviewFindings(input: {
   changedFiles: DiffReviewChangedFiles;
-  sourceLinks: SourceSpecLinkRow[];
+  sourceLinks: SourceSpecAnnotationRow[];
   affectedSpecs: DiffReviewAffectedSpec[];
   relatedTasks: DiffReviewRelatedTask[];
   taskLinks: SpecLinkRow[];
@@ -776,7 +778,7 @@ function collectDiffReviewFindings(input: {
     );
   }
 
-  const linkedSourceFiles = new Set(input.sourceLinks.map((link) => link.filePath));
+  const linkedSourceFiles = new Set(input.sourceLinks.map((link) => link.sourceFilePath));
   for (const filePath of input.changedFiles.source) {
     if (!linkedSourceFiles.has(filePath)) {
       addFinding(

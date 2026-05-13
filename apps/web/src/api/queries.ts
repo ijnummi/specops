@@ -6,6 +6,8 @@ import type {
   AgentRunSummary as AgentRunSummaryDto,
   AgentTaskPreviewRequest,
   AgentTaskPreviewResponse,
+  AnnotationCreateRequest,
+  AnnotationListQuery,
   AnalyzeRunDetailDto,
   AnalyzeReviewAcceptRequest,
   AnalyzeReviewAcceptResponse,
@@ -50,7 +52,8 @@ import type {
   SpecLinkDto,
   SourceFileListQuery,
   SourceFileSummaryDto,
-  SourceSpecLinkDto,
+  SourceSpecAnnotationDto,
+  SourceSpecAnnotationUpdateRequest,
   StartAgentRunRequest,
   StartAgentRunResponse,
   UpdateDiffReviewStatusRequest,
@@ -100,6 +103,8 @@ export type AdminDatabaseRowsDto = {
   limit: number;
 };
 
+type AnnotationQueryInput = Partial<AnnotationListQuery>;
+
 export const queryKeys = {
   adminDatabaseTables: ["admin", "database", "tables"] as const,
   adminDatabaseSchema: (table: string) => ["admin", "database", table, "schema"] as const,
@@ -133,6 +138,9 @@ export const queryKeys = {
     ["projects", projectId, "diff-reviews", reviewId] as const,
   sourceFiles: (projectId: string, input: SourceFileListQuery) =>
     ["projects", projectId, "source-files", input] as const,
+  annotationsRoot: (projectId: string) => ["projects", projectId, "annotations"] as const,
+  annotations: (projectId: string, input: AnnotationQueryInput = {}) =>
+    [...queryKeys.annotationsRoot(projectId), input] as const,
   entities: (projectId: string) => ["projects", projectId, "entities"] as const,
   entity: (projectId: string, entityId: string) =>
     ["projects", projectId, "entities", entityId] as const,
@@ -319,6 +327,40 @@ export function sourceFilesQuery(projectId: string, input: SourceFileListQuery) 
   });
 }
 
+export function annotationsQuery(projectId: string, input: AnnotationQueryInput = {}) {
+  const search = new URLSearchParams();
+  if (input.entityId) {
+    search.set("entityId", input.entityId);
+  }
+  if (input.sourceFileId) {
+    search.set("sourceFileId", input.sourceFileId);
+  }
+  if (input.filePath) {
+    search.set("filePath", input.filePath);
+  }
+  if (input.relationshipType) {
+    search.set("relationshipType", input.relationshipType);
+  }
+  if (input.status) {
+    search.set("status", input.status);
+  }
+  if (input.provenance) {
+    search.set("provenance", input.provenance);
+  }
+  if (input.includeExcerpt !== undefined) {
+    search.set("includeExcerpt", String(input.includeExcerpt));
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+
+  return queryOptions({
+    queryKey: queryKeys.annotations(projectId, input),
+    queryFn: () =>
+      apiGet<SourceSpecAnnotationDto[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/annotations${suffix}`
+      )
+  });
+}
+
 export function entitiesQuery(projectId: string) {
   return queryOptions({
     queryKey: queryKeys.entities(projectId),
@@ -373,14 +415,10 @@ export function backlinksQuery(projectId: string, entityId: string) {
 }
 
 export function entitySourceLinksQuery(projectId: string, entityId: string) {
-  return queryOptions({
-    queryKey: queryKeys.sourceLinks(projectId, entityId),
-    queryFn: () =>
-      apiGet<SourceSpecLinkDto[]>(
-        `/api/projects/${encodeURIComponent(projectId)}/entities/${encodeURIComponent(
-          entityId
-        )}/source-links`
-      )
+  return annotationsQuery(projectId, {
+    entityId,
+    status: "active",
+    includeExcerpt: true
   });
 }
 
@@ -544,6 +582,37 @@ export function initializeSpecops(projectId: string) {
 
 export function reindexProject(projectId: string) {
   return apiSend<IndexRunDto>("POST", `/api/projects/${encodeURIComponent(projectId)}/index`);
+}
+
+export function createAnnotation(projectId: string, input: AnnotationCreateRequest) {
+  return apiSend<SourceSpecAnnotationDto>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/annotations`,
+    input
+  );
+}
+
+export function patchAnnotation(
+  projectId: string,
+  annotationId: string,
+  input: SourceSpecAnnotationUpdateRequest
+) {
+  return apiSend<SourceSpecAnnotationDto>(
+    "PATCH",
+    `/api/projects/${encodeURIComponent(projectId)}/annotations/${encodeURIComponent(
+      annotationId
+    )}`,
+    input
+  );
+}
+
+export function deleteAnnotation(projectId: string, annotationId: string) {
+  return apiSend<void>(
+    "DELETE",
+    `/api/projects/${encodeURIComponent(projectId)}/annotations/${encodeURIComponent(
+      annotationId
+    )}`
+  );
 }
 
 export function startAnalyzeRun(projectId: string) {

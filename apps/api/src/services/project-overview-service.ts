@@ -6,7 +6,7 @@ import {
   sourceExports,
   sourceFiles,
   sourceImports,
-  sourceSpecLinks,
+  sourceSpecAnnotations,
   sourceSymbols,
   specEntities,
   specLinks,
@@ -92,10 +92,15 @@ export function createProjectOverviewService(db: OverviewDb) {
       )
       .orderBy(asc(specEntities.entityId));
     const sourceEvidenceRows = await snapshotDb
-      .select({ entityId: sourceSpecLinks.entityId })
-      .from(sourceSpecLinks)
-      .where(eq(sourceSpecLinks.projectId, projectId))
-      .orderBy(asc(sourceSpecLinks.entityId));
+      .select({ entityId: sourceSpecAnnotations.entityId })
+      .from(sourceSpecAnnotations)
+      .where(
+        and(
+          eq(sourceSpecAnnotations.projectId, projectId),
+          eq(sourceSpecAnnotations.status, "active")
+        )
+      )
+      .orderBy(asc(sourceSpecAnnotations.entityId));
     const agentTaskCount = await countAgentTasks(snapshotDb, projectId);
     const recentAgentTasks = await snapshotDb
       .select({

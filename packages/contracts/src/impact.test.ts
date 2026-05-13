@@ -79,7 +79,8 @@ describe("entityImpactResponseSchema", () => {
           symbolName: "Decision",
           symbolKind: "interface",
           symbolLine: 3,
-          annotationLine: 2
+          annotationLine: 2,
+          relationshipType: "implements"
         }
       ],
       truncated: {
@@ -93,5 +94,6 @@ describe("entityImpactResponseSchema", () => {
 
     expect(parsed.rootEntity.entityId).toBe("domain.decision");
     expect(parsed.nodes).toHaveLength(2);
+    expect(parsed.sourceEvidence[0]?.relationshipType).toBe("implements");
   });
 });
