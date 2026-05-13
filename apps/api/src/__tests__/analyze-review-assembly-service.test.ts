@@ -601,6 +601,33 @@ describeWithDb("createAnalyzeReviewAssemblyService", () => {
     expect(review.assemblies[0]?.renderedMarkdown).toContain("## Hypotheses and Unknowns");
   });
 
+  it("does not accept discarded tombstone assemblies", async () => {
+    const { db, project, run, proposal } = await createReviewFixture({ derive: false });
+    const service = createAnalyzeReviewAssemblyService(db);
+    const assembly = await service.createAssembly(project.id, run.id, {
+      proposalIds: [proposal.id]
+    });
+
+    await service.removeInput(project.id, run.id, assembly.id, proposal.id);
+
+    const result = await service.acceptAssemblies(project.id, run.id, {
+      assemblyIds: [assembly.id]
+    });
+    const review = await service.listReviewAssemblies(project.id, run.id);
+
+    expect(result.acceptedAssemblyIds).toEqual([]);
+    expect(result.indexRun).toBeNull();
+    expect(result.failures[0]?.assemblyId).toBe(assembly.id);
+    expect(result.failures[0]?.messages[0]?.code).toBe("assembly_discarded");
+    await expect(
+      readFile(path.join(project.specopsPath, "use-cases/review-drafts.md"), "utf8")
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    expect(review.assemblies[0]?.status).toBe("discarded");
+    expect(review.assemblies[0]?.discardedAt).not.toBeNull();
+  });
+
   it("accepts assemblies by writing markdown and reviewing attached proposals", async () => {
     const { db, project, run, proposal } = await createReviewFixture({ derive: false });
     const service = createAnalyzeReviewAssemblyService(db);

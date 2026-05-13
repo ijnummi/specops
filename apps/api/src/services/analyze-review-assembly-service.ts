@@ -480,6 +480,21 @@ export function createAnalyzeReviewAssemblyService(db: Db) {
     });
 
     for (const assembly of selectedAssemblies) {
+      if (assembly.status === "discarded") {
+        failures.push({
+          assemblyId: assembly.id,
+          messages: [
+            {
+              severity: "blocker",
+              code: "assembly_discarded",
+              message: "Discarded assemblies cannot be accepted.",
+              field: "status"
+            }
+          ]
+        });
+        continue;
+      }
+
       const blockerMessages = assembly.validation.messages.filter(
         (message) => message.severity === "blocker"
       );
