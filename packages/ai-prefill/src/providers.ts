@@ -37,6 +37,22 @@ export function createAiPrefillProvider(
 
         const text = readOllamaMessageContent(json);
         return result(input.provider, providerInput.model, text);
+      },
+      async generateConceptGraph(providerInput) {
+        const json = await postJson({
+          url: `${baseUrl}/api/chat`,
+          timeoutMs,
+          body: {
+            model: providerInput.model,
+            messages: providerInput.packet.messages,
+            stream: false,
+            format: "json",
+            options: { temperature: providerInput.temperature }
+          }
+        });
+
+        const text = readOllamaMessageContent(json);
+        return result(input.provider, providerInput.model, text);
       }
     };
   }
@@ -49,6 +65,22 @@ export function createAiPrefillProvider(
   const baseUrl = trimTrailingSlash(input.openAiBaseUrl ?? "https://api.openai.com/v1");
   return {
     async generateSpecProposals(providerInput) {
+      const json = await postJson({
+        url: `${baseUrl}/chat/completions`,
+        timeoutMs,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: {
+          model: providerInput.model,
+          messages: providerInput.packet.messages,
+          temperature: providerInput.temperature,
+          response_format: { type: "json_object" }
+        }
+      });
+
+      const text = readOpenAiMessageContent(json);
+      return result(input.provider, providerInput.model, text);
+    },
+    async generateConceptGraph(providerInput) {
       const json = await postJson({
         url: `${baseUrl}/chat/completions`,
         timeoutMs,
