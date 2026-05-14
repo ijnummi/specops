@@ -201,6 +201,29 @@ describeWithDb("createProjectGraphService", () => {
     expect(latest.version.indexRunId).toBe(newerRun.id);
   });
 
+  it("prefers an index-run-backed graph over a later null-index-run graph", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture({
+      startedAt: new Date("2026-05-10T10:00:00.000Z"),
+      finishedAt: new Date("2026-05-10T10:00:01.000Z"),
+    });
+    const service = createProjectGraphService(db);
+    const indexedGraph = await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+    await delay(20);
+    const nullIndexRunGraph = await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: null,
+    });
+
+    const latest = await service.getProjectGraph(project.id);
+
+    expect(nullIndexRunGraph.version.indexRunId).toBeNull();
+    expect(latest.version.id).toBe(indexedGraph.version.id);
+    expect(latest.version.indexRunId).toBe(indexRun.id);
+  });
+
   it("includes missing endpoint nodes when graph queries return matching edges", async () => {
     const { project, indexRun } = await createIndexedGraphFixture();
     const service = createProjectGraphService(db);
