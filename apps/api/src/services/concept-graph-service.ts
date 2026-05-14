@@ -42,7 +42,7 @@ import type {
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import type { ApiConfig } from "../config.js";
-import { BadGatewayError, BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
 
 type AiPrefillConfig = ApiConfig["aiPrefill"];
 type AiPrefillProviderFactory = (input: CreateAiPrefillProviderInput) => AiPrefillProvider;
@@ -328,55 +328,79 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
     packet: ReturnType<typeof buildConceptGraphPromptPacket>,
     graphNodes: ProjectGraphNodeRow[],
   ) {
+    let provider: AiPrefillProvider;
     try {
-      const provider = (options.providerFactory ?? createAiPrefillProvider)({
+      provider = (options.providerFactory ?? createAiPrefillProvider)({
         provider: input.provider,
         ollamaBaseUrl: options.config.ollamaBaseUrl,
         openAiApiKey: options.config.openAiApiKey,
         openAiBaseUrl: options.config.openAiBaseUrl,
         timeoutMs: options.config.timeoutMs,
       });
-      const providerResult = await provider.generateConceptGraph({
+    } catch (error) {
+      return failedProviderGeneration(input, "provider_setup_failed", error);
+    }
+
+    let providerResult: Awaited<ReturnType<AiPrefillProvider["generateConceptGraph"]>>;
+    try {
+      providerResult = await provider.generateConceptGraph({
         packet,
         model: input.model,
         temperature: input.temperature,
       });
-
-      try {
-        const normalized = normalizeConceptGraphProviderResponse({
-          text: providerResult.text,
-          graphNodeIds: new Set(graphNodes.map((node) => node.id)),
-          graphNodeKeys: new Map(graphNodes.map((node) => [node.nodeKey, node.id])),
-        });
-
-        return {
-          status: "normalized" as const,
-          provider: providerResult.provider,
-          model: providerResult.model,
-          ...normalized,
-        };
-      } catch (error) {
-        return {
-          status: "failed" as const,
-          provider: providerResult.provider,
-          model: providerResult.model,
-          diagnostics: [
-            {
-              level: "error" as const,
-              code: error instanceof SyntaxError ? "invalid_provider_output" : "concept_normalization_failed",
-              message: errorMessage(error),
-            },
-          ],
-        };
-      }
     } catch (error) {
-      throw new BadGatewayError("Concept graph provider request failed", {
-        message: errorMessage(error),
+      return failedProviderGeneration(input, "provider_request_failed", error);
+    }
+
+    try {
+      const normalized = normalizeConceptGraphProviderResponse({
+        text: providerResult.text,
+        graphNodeIds: new Set(graphNodes.map((node) => node.id)),
+        graphNodeKeys: new Map(graphNodes.map((node) => [node.nodeKey, node.id])),
       });
+
+      return {
+        status: "normalized" as const,
+        provider: providerResult.provider,
+        model: providerResult.model,
+        ...normalized,
+      };
+    } catch (error) {
+      return {
+        status: "failed" as const,
+        provider: providerResult.provider,
+        model: providerResult.model,
+        diagnostics: [
+          {
+            level: "error" as const,
+            code: error instanceof SyntaxError ? "invalid_provider_output" : "concept_normalization_failed",
+            message: errorMessage(error),
+          },
+        ],
+      };
     }
   }
 
   return { buildConceptGraph, getLatestConceptGraph, getConceptDetail };
+}
+
+function failedProviderGeneration(
+  input: BuildConceptGraphRequest,
+  code: "provider_setup_failed" | "provider_request_failed",
+  error: unknown,
+) {
+  return {
+    status: "failed" as const,
+    provider: input.provider,
+    model: input.model,
+    diagnostics: [
+      {
+        level: "error" as const,
+        code,
+        message: errorMessage(error),
+      },
+    ],
+  };
 }
 
 type PersistConceptVersionInput = {

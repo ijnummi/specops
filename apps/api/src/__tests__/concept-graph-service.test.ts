@@ -538,6 +538,62 @@ describeWithDb("createConceptGraphService", () => {
     expect(relationshipRows).toEqual([]);
   });
 
+  it("persists provider request failures as failed concept graph diagnostics", async () => {
+    const { project, graphVersion } = await createProjectGraphFixture();
+    const provider = rejectingConceptProvider(new Error("OpenAI request timed out"));
+    const service = createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () => provider,
+    });
+
+    const built = await service.buildConceptGraph(project.id, buildInput());
+    const latest = await service.getLatestConceptGraph(project.id);
+
+    expect(conceptGraphLatestResponseSchema.parse(built)).toEqual(built);
+    expect(built.version.status).toBe("failed");
+    expect(built.version.projectGraphVersionId).toBe(graphVersion.id);
+    expect(built.version.provider).toBe("openai");
+    expect(built.version.model).toBe("gpt-4.1-mini");
+    expect(built.version.summary).toBe("Concept graph generation failed.");
+    expect(built.concepts).toEqual([]);
+    expect(built.version.coverage).toEqual({
+      conceptCounts: {},
+      membershipCounts: {},
+      relationshipCounts: {},
+      rejectedConceptCount: 0,
+      rejectedMembershipCount: 0,
+      graphNodeCoverageCount: 0,
+      lowConfidenceConceptCount: 0,
+    });
+    expect(built.diagnostics).toEqual([
+      expect.objectContaining({
+        level: "error",
+        code: "provider_request_failed",
+        message: "OpenAI request timed out",
+      }),
+    ]);
+    expect(latest.version.id).toBe(built.version.id);
+    expect(latest.diagnostics).toEqual(built.diagnostics);
+
+    const [conceptRows, membershipRows, relationshipRows] = await Promise.all([
+      db
+        .select()
+        .from(projectConcepts)
+        .where(eq(projectConcepts.conceptVersionId, built.version.id)),
+      db
+        .select()
+        .from(projectConceptMemberships)
+        .where(eq(projectConceptMemberships.conceptVersionId, built.version.id)),
+      db
+        .select()
+        .from(projectConceptRelationships)
+        .where(eq(projectConceptRelationships.conceptVersionId, built.version.id)),
+    ]);
+    expect(conceptRows).toEqual([]);
+    expect(membershipRows).toEqual([]);
+    expect(relationshipRows).toEqual([]);
+  });
+
   it("returns concept detail with graph node DTOs and grouped relationships", async () => {
     const { project, graphNode, supportGraphNode } = await createProjectGraphFixture();
     const service = createConceptGraphService(db, {
@@ -823,6 +879,17 @@ function invalidConceptProvider(text: string): AiPrefillProvider {
       model: input.model,
       text,
     })),
+  };
+}
+
+function rejectingConceptProvider(error: Error): AiPrefillProvider {
+  return {
+    generateSpecProposals: vi.fn(async () => {
+      throw new Error("generateSpecProposals should not be called");
+    }),
+    generateConceptGraph: vi.fn(async () => {
+      throw error;
+    }),
   };
 }
 
