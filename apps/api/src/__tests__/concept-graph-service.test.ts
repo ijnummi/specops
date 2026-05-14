@@ -333,6 +333,101 @@ describeWithDb("createConceptGraphService", () => {
     expect(firstVersion?.status).toBe("superseded");
   });
 
+  it("rejects without writing when the project graph changes during provider generation", async () => {
+    const { project, graphVersion, graphNode } = await createProjectGraphFixture();
+    const firstProvider = conceptProvider({
+      concepts: [
+        {
+          key: "workflow:checkout",
+          type: "workflow",
+          name: "Checkout",
+          summary: "Checkout order flow.",
+          confidence: 0.87,
+          evidenceSummary: "Route file drives checkout.",
+          memberships: [
+            {
+              graphNodeId: graphNode.id,
+              role: "primary",
+              confidence: 0.92,
+              rationale: "Checkout route is the workflow entrypoint.",
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    });
+    const service = createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () => firstProvider,
+    });
+    const existing = await service.buildConceptGraph(project.id, buildInput());
+    const updatedOutput = {
+      concepts: [
+        {
+          key: "workflow:checkout-updated",
+          type: "workflow",
+          name: "Checkout Updated",
+          summary: "Updated checkout order flow.",
+          confidence: 0.87,
+          evidenceSummary: "Route file still drives checkout.",
+          memberships: [
+            {
+              graphNodeId: graphNode.id,
+              role: "primary",
+              confidence: 0.92,
+              rationale: "Checkout route is the workflow entrypoint.",
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    };
+    const racingProvider = conceptProvider(updatedOutput);
+    let currentProjectGraphVersionId: string | undefined;
+    vi.mocked(racingProvider.generateConceptGraph).mockImplementationOnce(async (input) => {
+      const current = await createNewerProjectGraphVersion(project.id);
+      currentProjectGraphVersionId = current.graphVersion.id;
+      return {
+        provider: "openai" as const,
+        model: input.model,
+        text: JSON.stringify(updatedOutput),
+      };
+    });
+
+    let buildError: unknown;
+    try {
+      await createConceptGraphService(db, {
+        config: testAiConfig(),
+        providerFactory: () => racingProvider,
+      }).buildConceptGraph(project.id, buildInput());
+    } catch (error) {
+      buildError = error;
+    }
+
+    expect(currentProjectGraphVersionId).toEqual(expect.any(String));
+    expect(buildError).toMatchObject({
+      name: "ConflictError",
+      message: "Project graph changed during concept consolidation",
+      details: expect.objectContaining({
+        projectId: project.id,
+        selectedProjectGraphVersionId: graphVersion.id,
+        currentProjectGraphVersionId,
+      }),
+    });
+
+    const versions = await db
+      .select()
+      .from(projectConceptVersions)
+      .where(eq(projectConceptVersions.projectId, project.id));
+
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({
+      id: existing.version.id,
+      status: "ready",
+      projectGraphVersionId: graphVersion.id,
+    });
+  });
+
   it("returns failed concept graphs when failed is latest or only version", async () => {
     const { project: latestFailedProject, graphVersion: latestFailedGraphVersion, graphNode } =
       await createProjectGraphFixture();
@@ -538,6 +633,54 @@ describeWithDb("createConceptGraphService", () => {
     });
 
     return { project, graphVersion: graphVersion!, graphNode: graphNode!, supportGraphNode: supportGraphNode! };
+  }
+
+  async function createNewerProjectGraphVersion(projectId: string) {
+    const [indexRun] = await db
+      .insert(indexRuns)
+      .values({
+        projectId,
+        status: "completed",
+        startedAt: new Date("2026-01-02T10:00:00.000Z"),
+        finishedAt: new Date("2026-01-02T10:05:00.000Z"),
+      })
+      .returning();
+    const [graphVersion] = await db
+      .insert(projectGraphVersions)
+      .values({
+        projectId,
+        indexRunId: indexRun!.id,
+        status: "ready",
+        summary: "Newer project graph ready.",
+        coverageJson: {
+          nodeCounts: { file: 1 },
+          edgeCounts: {},
+          sourceFileCount: 1,
+          specEntityCount: 0,
+          unresolvedImportCount: 0,
+          heuristicEdgeCount: 0,
+        },
+        diagnosticsJson: [],
+      })
+      .returning();
+    const [graphNode] = await db
+      .insert(projectGraphNodes)
+      .values({
+        projectId,
+        graphVersionId: graphVersion!.id,
+        nodeKey: "file:apps/web/src/newer-checkout.tsx",
+        nodeType: "file",
+        label: "newer-checkout.tsx",
+        path: "apps/web/src/newer-checkout.tsx",
+        symbolName: null,
+        entityId: null,
+        sourceRefJson: { path: "apps/web/src/newer-checkout.tsx" },
+        metadataJson: { classification: "route" },
+        confidence: 1,
+      })
+      .returning();
+
+    return { graphVersion: graphVersion!, graphNode: graphNode! };
   }
 
   async function createProjectFixture() {

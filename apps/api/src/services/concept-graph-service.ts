@@ -42,7 +42,7 @@ import type {
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import type { ApiConfig } from "../config.js";
-import { BadGatewayError, BadRequestError, NotFoundError } from "../lib/http-errors.js";
+import { BadGatewayError, BadRequestError, ConflictError, NotFoundError } from "../lib/http-errors.js";
 
 type AiPrefillConfig = ApiConfig["aiPrefill"];
 type AiPrefillProviderFactory = (input: CreateAiPrefillProviderInput) => AiPrefillProvider;
@@ -264,24 +264,7 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
   }
 
   async function getLatestProjectGraphVersion(projectId: string): Promise<ProjectGraphVersionRow> {
-    const [row] = await db
-      .select({ version: projectGraphVersions })
-      .from(projectGraphVersions)
-      .leftJoin(indexRuns, eq(projectGraphVersions.indexRunId, indexRuns.id))
-      .where(
-        and(
-          eq(projectGraphVersions.projectId, projectId),
-          or(eq(projectGraphVersions.status, "ready"), eq(projectGraphVersions.status, "limited")),
-        ),
-      )
-      .orderBy(
-        sql`case when ${indexRuns.id} is null then 0 else 1 end desc`,
-        sql`coalesce(${indexRuns.finishedAt}, ${indexRuns.startedAt}) desc nulls last`,
-        desc(projectGraphVersions.createdAt),
-        desc(projectGraphVersions.id),
-      )
-      .limit(1);
-    const version = row?.version;
+    const version = await selectLatestProjectGraphVersion(db, projectId);
 
     if (!version) {
       throw new BadRequestError("Project graph is required before concept consolidation", { projectId });
@@ -382,9 +365,19 @@ async function persistConceptVersion(
   input: PersistConceptVersionInput,
 ): Promise<ConceptGraphLatestResponse> {
   return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`${input.projectId}:concept_graph`}, 0))`,
     );
+    const latestProjectGraphVersion = await selectLatestProjectGraphVersion(tx, input.projectId);
+    if (latestProjectGraphVersion?.id !== input.projectGraphVersionId) {
+      throw new ConflictError("Project graph changed during concept consolidation", {
+        projectId: input.projectId,
+        selectedProjectGraphVersionId: input.projectGraphVersionId,
+        currentProjectGraphVersionId: latestProjectGraphVersion?.id ?? null,
+      });
+    }
+
     await tx
       .update(projectConceptVersions)
       .set({ status: "superseded", updatedAt: new Date() })
@@ -491,6 +484,31 @@ async function persistConceptVersion(
 
     return readConceptGraph(tx, input.projectId, version.id);
   });
+}
+
+async function selectLatestProjectGraphVersion(
+  readDb: ConceptGraphReadDb,
+  projectId: string,
+): Promise<ProjectGraphVersionRow | undefined> {
+  const [row] = await readDb
+    .select({ version: projectGraphVersions })
+    .from(projectGraphVersions)
+    .leftJoin(indexRuns, eq(projectGraphVersions.indexRunId, indexRuns.id))
+    .where(
+      and(
+        eq(projectGraphVersions.projectId, projectId),
+        or(eq(projectGraphVersions.status, "ready"), eq(projectGraphVersions.status, "limited")),
+      ),
+    )
+    .orderBy(
+      sql`case when ${indexRuns.id} is null then 0 else 1 end desc`,
+      sql`coalesce(${indexRuns.finishedAt}, ${indexRuns.startedAt}) desc nulls last`,
+      desc(projectGraphVersions.createdAt),
+      desc(projectGraphVersions.id),
+    )
+    .limit(1);
+
+  return row?.version;
 }
 
 async function readConceptGraph(
