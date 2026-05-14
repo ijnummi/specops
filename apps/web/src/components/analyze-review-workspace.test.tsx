@@ -35,6 +35,19 @@ describe("AnalyzeReviewWorkspace", () => {
     expect(container.textContent).toContain("fact_missing_evidence");
   });
 
+  it("filters draft inputs and assemblies to focused proposal ids", async () => {
+    const { container } = await renderWorkspace(workspaceMocks(), reviewFixture(), {
+      focusLabel: "Backend routes",
+      focusProposalIds: ["proposal-unassigned"]
+    });
+
+    expect(container.textContent).toContain("Related draft review for Backend routes");
+    expect(container.textContent).toContain("Review draft pool");
+    expect(container.textContent).not.toContain("Review drafts");
+    expect(container.textContent).not.toContain("Blocked draft");
+    expect(container.textContent).toContain("No assemblies yet.");
+  });
+
   it("creates an empty assembly", async () => {
     const mocks = workspaceMocks();
     const { container } = await renderWorkspace(mocks);
@@ -144,7 +157,11 @@ function workspaceMocks() {
   };
 }
 
-async function renderWorkspace(mocks = workspaceMocks(), review = reviewFixture()) {
+async function renderWorkspace(
+  mocks = workspaceMocks(),
+  review = reviewFixture(),
+  focus: { focusLabel?: string | null; focusProposalIds?: string[] | null } = {}
+) {
   const container = document.createElement("div");
   document.body.append(container);
   containers.push(container);
@@ -157,6 +174,8 @@ async function renderWorkspace(mocks = workspaceMocks(), review = reviewFixture(
         projectId="project-1"
         runId="run-1"
         review={nextReview}
+        focusLabel={focus.focusLabel}
+        focusProposalIds={focus.focusProposalIds}
         mutationPending={false}
         onAcceptAssemblies={(assemblyIds) =>
           mocks.acceptAssemblies("project-1", "run-1", { assemblyIds })

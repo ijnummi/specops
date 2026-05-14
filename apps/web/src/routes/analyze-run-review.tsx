@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
@@ -9,7 +9,8 @@ import type {
   AnalyzeReviewCreateAssemblyRequest,
   AnalyzeReviewCreateClaimRequest,
   AnalyzeReviewUpdateAssemblyRequest,
-  AnalyzeReviewUpdateClaimRequest
+  AnalyzeReviewUpdateClaimRequest,
+  SystemMapAreaDto
 } from "@specops/contracts";
 
 import {
@@ -36,8 +37,32 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
   const queryClient = useQueryClient();
   const [acceptFailures, setAcceptFailures] = useState<AnalyzeReviewAcceptFailure[]>([]);
   const [acceptResponse, setAcceptResponse] = useState<AnalyzeReviewAcceptResponse | null>(null);
+  const [selectedMapAreaId, setSelectedMapAreaId] = useState<string | null>(null);
   const review = useQuery(analyzeReviewAssembliesQuery(projectId, runId));
   const systemMap = useQuery(analyzeRunSystemMapQuery(projectId, runId));
+  const sortedSystemMapAreas = useMemo(
+    () =>
+      systemMap.data
+        ? [...systemMap.data.areas].sort(compareSystemMapAreas)
+        : [],
+    [systemMap.data]
+  );
+  const selectedMapArea =
+    sortedSystemMapAreas.find((area) => area.id === selectedMapAreaId) ??
+    sortedSystemMapAreas[0] ??
+    null;
+
+  useEffect(() => {
+    if (!systemMap.data) {
+      return;
+    }
+
+    setSelectedMapAreaId((current) =>
+      current && sortedSystemMapAreas.some((area) => area.id === current)
+        ? current
+        : (sortedSystemMapAreas[0]?.id ?? null)
+    );
+  }, [sortedSystemMapAreas, systemMap.data]);
 
   const invalidateReviewAssemblies = async () => {
     await queryClient.invalidateQueries({
@@ -165,13 +190,19 @@ export function AnalyzeRunReviewPage({ projectId, runId }: AnalyzeRunReviewPageP
             <p className="panel-section mb-3 text-sm text-slate-500">Loading system map...</p>
           ) : systemMap.data ? (
             <div className="mb-3">
-              <SystemMapReviewPanel map={systemMap.data} />
+              <SystemMapReviewPanel
+                map={systemMap.data}
+                selectedAreaId={selectedMapArea?.id ?? null}
+                onSelectArea={setSelectedMapAreaId}
+              />
             </div>
           ) : null}
           <AnalyzeReviewWorkspace
             projectId={projectId}
             runId={runId}
             review={review.data}
+            focusLabel={selectedMapArea?.name ?? null}
+            focusProposalIds={selectedMapArea?.relatedProposalIds ?? null}
             acceptFailures={acceptFailures}
             mutationPending={mutationPending}
             onAcceptAssemblies={(assemblyIds) => {
@@ -251,6 +282,10 @@ function formatCount(count: number, singular: string, plural: string) {
 
 function formatNeedsReview(count: number) {
   return `${formatCount(count, "assembly", "assemblies")} ${count === 1 ? "needs" : "need"} review.`;
+}
+
+function compareSystemMapAreas(a: SystemMapAreaDto, b: SystemMapAreaDto) {
+  return a.sortOrder - b.sortOrder || a.name.localeCompare(b.name);
 }
 
 function MutationErrors({ errors }: { errors: Array<[string, unknown]> }) {

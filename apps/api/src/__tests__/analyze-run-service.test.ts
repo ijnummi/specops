@@ -182,6 +182,44 @@ describeWithDb("createAnalyzeRunService", () => {
     });
   });
 
+  it("succeeds with a limited system map when no supported source files exist", async () => {
+    const project = await createProjectFixture();
+    await writeUnsupportedSource(project.repoPath);
+    const service = createAnalyzeRunService(db, {
+      aiPrefillConfig: aiPrefillConfig(),
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals() {
+          throw new Error("AI Prefill should be skipped when there are no source files");
+        }
+      })
+    });
+
+    const started = await service.startAnalyzeRun(project.id);
+    const finished = await waitForTerminalRun(service, project.id, started.id);
+
+    expect(finished.status).toBe("succeeded");
+    expect(finished.sourceProposalCount).toBe(0);
+    expect(finished.aiProposalCount).toBe(0);
+    expect(finished.proposalIds).toEqual([]);
+    expect(finished.steps.find((step) => step.name === "build_system_map")).toMatchObject({
+      status: "succeeded",
+      counts: {
+        systemMapAreaCount: expect.any(Number),
+        mappedSourceFileCount: 0,
+        unmappedSourceFileCount: 0
+      }
+    });
+    expect(finished.steps.find((step) => step.name === "source_proposals")).toMatchObject({
+      status: "succeeded",
+      message: "No supported source files found",
+      counts: { sourceProposalCount: 0 }
+    });
+    expect(finished.steps.find((step) => step.name === "ai_prefill")).toMatchObject({
+      status: "skipped",
+      message: "No source files selected for AI Prefill"
+    });
+  });
+
   async function createProjectFixture() {
     const root = await mkdtemp(path.join(os.tmpdir(), "specops-api-analyze-run-"));
     tempRoots.push(root);
@@ -214,6 +252,10 @@ async function writeAnalyzeSource(repoPath: string) {
 
   await mkdir(path.dirname(sourcePath), { recursive: true });
   await writeFile(sourcePath, content);
+}
+
+async function writeUnsupportedSource(repoPath: string) {
+  await writeFile(path.join(repoPath, "README.md"), "# Analyze fixture\n");
 }
 
 function successfulProviderFactory(): AiPrefillProviderFactory {

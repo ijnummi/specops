@@ -202,14 +202,14 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
             counts: { sourceProposalCount: proposals.length }
           };
         } catch (error) {
-          if (!isNoEligibleExportedSourceSymbolsError(error)) {
+          if (!isNonFatalSourceProposalError(error)) {
             throw error;
           }
 
           await updateRun({ sourceProposalCount: 0 });
           return {
             status: "succeeded",
-            message: "No eligible exported source symbols found",
+            message: errorMessage(error),
             counts: { sourceProposalCount: 0 }
           };
         }
@@ -553,11 +553,12 @@ function toIso(value: Date | string | null): string | null {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-function isNoEligibleExportedSourceSymbolsError(error: unknown): boolean {
+function isNonFatalSourceProposalError(error: unknown): boolean {
   return (
     isHttpError(error) &&
     error.statusCode === 400 &&
-    error.message === "No eligible exported source symbols found"
+    (error.message === "No eligible exported source symbols found" ||
+      error.message === "No supported source files found")
   );
 }
 

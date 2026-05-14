@@ -7,6 +7,8 @@ import type {
 
 type SystemMapReviewPanelProps = {
   map: SystemMapResponseDto;
+  selectedAreaId?: string | null;
+  onSelectArea?: (areaId: string) => void;
 };
 
 const areaTypeLabels: Record<SystemMapAreaType, string> = {
@@ -21,14 +23,25 @@ const areaTypeLabels: Record<SystemMapAreaType, string> = {
   unknown: "Unknown"
 };
 
-export function SystemMapReviewPanel({ map }: SystemMapReviewPanelProps) {
+export function SystemMapReviewPanel({
+  map,
+  onSelectArea,
+  selectedAreaId
+}: SystemMapReviewPanelProps) {
   const sortedAreas = useMemo(
     () => [...map.areas].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
     [map.areas]
   );
-  const [selectedAreaId, setSelectedAreaId] = useState(sortedAreas[0]?.id ?? null);
+  const [internalSelectedAreaId, setInternalSelectedAreaId] = useState(sortedAreas[0]?.id ?? null);
+  const effectiveSelectedAreaId =
+    selectedAreaId !== undefined ? selectedAreaId : internalSelectedAreaId;
   const selectedArea =
-    sortedAreas.find((area) => area.id === selectedAreaId) ?? sortedAreas[0] ?? null;
+    sortedAreas.find((area) => area.id === effectiveSelectedAreaId) ?? sortedAreas[0] ?? null;
+
+  const selectArea = (areaId: string) => {
+    setInternalSelectedAreaId(areaId);
+    onSelectArea?.(areaId);
+  };
 
   return (
     <section className="grid min-h-0 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)]">
@@ -72,7 +85,7 @@ export function SystemMapReviewPanel({ map }: SystemMapReviewPanelProps) {
                       ? "rounded border border-slate-900 bg-slate-900 px-2 py-2 text-left text-sm text-white"
                       : "rounded border border-slate-200 px-2 py-2 text-left text-sm text-slate-700 hover:border-slate-300 hover:bg-slate-50"
                   }
-                  onClick={() => setSelectedAreaId(area.id)}
+                  onClick={() => selectArea(area.id)}
                 >
                   <span className="block truncate font-medium">{area.name}</span>
                   <span className={selected ? "text-slate-200" : "text-slate-500"}>

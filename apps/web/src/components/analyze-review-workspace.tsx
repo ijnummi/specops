@@ -35,6 +35,8 @@ export type AnalyzeReviewWorkspaceProps = {
   onAcceptAssemblies: (assemblyIds: string[]) => void;
   mutationPending: boolean;
   acceptFailures?: AnalyzeReviewAcceptFailure[];
+  focusProposalIds?: string[] | null;
+  focusLabel?: string | null;
 };
 
 type AssemblyFormState = {
@@ -63,15 +65,37 @@ export function AnalyzeReviewWorkspace({
   onRemoveInput,
   projectId,
   review,
-  runId
+  runId,
+  focusLabel = null,
+  focusProposalIds = null
 }: AnalyzeReviewWorkspaceProps) {
+  const focusedProposalIds = useMemo(
+    () => (focusProposalIds ? new Set(focusProposalIds) : null),
+    [focusProposalIds]
+  );
+  const displayedUnassignedInputs = useMemo(
+    () =>
+      focusedProposalIds
+        ? review.unassignedInputs.filter((input) => focusedProposalIds.has(input.proposalId))
+        : review.unassignedInputs,
+    [focusedProposalIds, review.unassignedInputs]
+  );
+  const displayedReviewAssemblies = useMemo(
+    () =>
+      focusedProposalIds
+        ? review.assemblies.filter((assembly) =>
+            assembly.inputs.some((input) => focusedProposalIds.has(input.proposalId))
+          )
+        : review.assemblies,
+    [focusedProposalIds, review.assemblies]
+  );
   const draftGroups = useMemo(
-    () => groupAnalyzeReviewInputs(review.unassignedInputs),
-    [review.unassignedInputs]
+    () => groupAnalyzeReviewInputs(displayedUnassignedInputs),
+    [displayedUnassignedInputs]
   );
   const assemblies = useMemo(
-    () => sortAnalyzeReviewAssemblies(review.assemblies),
-    [review.assemblies]
+    () => sortAnalyzeReviewAssemblies(displayedReviewAssemblies),
+    [displayedReviewAssemblies]
   );
   const [selectedAssemblyId, setSelectedAssemblyId] = useState<string | null>(
     () => assemblies[0]?.id ?? null
@@ -94,6 +118,19 @@ export function AnalyzeReviewWorkspace({
   const formState = formDraft.value;
   const selectedAssemblyIsDraft = selectedAssembly?.status === "draft";
   const canEditSelected = selectedAssemblyIsDraft && !mutationPending;
+  const focusedAssemblyCounts = useMemo(
+    () => ({
+      accepted: assemblies.filter((assembly) => assembly.status === "accepted").length,
+      draft: assemblies.filter((assembly) => assembly.status === "draft").length
+    }),
+    [assemblies]
+  );
+  const draftPoolSubcount = focusedProposalIds
+    ? `${displayedUnassignedInputs.length} related unassigned inputs`
+    : `${review.counts.inputs.unassigned} unassigned inputs`;
+  const assemblyListSubcount = focusedProposalIds
+    ? `${focusedAssemblyCounts.draft} draft, ${focusedAssemblyCounts.accepted} accepted related`
+    : `${review.counts.assemblies.draft} draft, ${review.counts.assemblies.accepted} accepted`;
 
   useEffect(() => {
     setSelectedAssemblyId((current) =>
@@ -102,6 +139,14 @@ export function AnalyzeReviewWorkspace({
         : (assemblies[0]?.id ?? null)
     );
   }, [assemblies]);
+
+  useEffect(() => {
+    setSelectedInputIds((current) => {
+      const visibleInputIds = new Set(displayedUnassignedInputs.map((input) => input.proposalId));
+      const next = new Set([...current].filter((proposalId) => visibleInputIds.has(proposalId)));
+      return sameSet(current, next) ? current : next;
+    });
+  }, [displayedUnassignedInputs]);
 
   useEffect(() => {
     setCheckedAssemblyIds((current) => {
@@ -163,8 +208,8 @@ export function AnalyzeReviewWorkspace({
   );
   const selectedInputs = useMemo(
     () =>
-      review.unassignedInputs.filter((input) => selectedInputIds.has(input.proposalId)),
-    [review.unassignedInputs, selectedInputIds]
+      displayedUnassignedInputs.filter((input) => selectedInputIds.has(input.proposalId)),
+    [displayedUnassignedInputs, selectedInputIds]
   );
   const selectedAssemblyInputIds = useMemo(
     () => new Set(selectedAssembly?.inputs.map((input) => input.proposalId) ?? []),
@@ -245,9 +290,13 @@ export function AnalyzeReviewWorkspace({
     <div className="flex h-full min-h-0 flex-col gap-3">
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold">Analyze review</h1>
+          <h1 className="truncate text-base font-semibold">
+            {focusLabel ? `Related draft review for ${focusLabel}` : "Analyze review"}
+          </h1>
           <p className="max-w-3xl text-sm text-slate-600">
-            Assemble generated drafts for analyze run {runId} in project {projectId}.
+            {focusedProposalIds
+              ? `Drafts linked to the selected system map area for analyze run ${runId} in project ${projectId}.`
+              : `Assemble generated drafts for analyze run ${runId} in project ${projectId}.`}
           </p>
         </div>
         <button
@@ -271,9 +320,7 @@ export function AnalyzeReviewWorkspace({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="section-heading">Draft pool</h2>
-              <p className="text-xs text-slate-500">
-                {review.counts.inputs.unassigned} unassigned inputs
-              </p>
+              <p className="text-xs text-slate-500">{draftPoolSubcount}</p>
             </div>
             <button
               type="button"
@@ -325,9 +372,7 @@ export function AnalyzeReviewWorkspace({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="section-heading">Assembly list</h2>
-              <p className="text-xs text-slate-500">
-                {review.counts.assemblies.draft} draft, {review.counts.assemblies.accepted} accepted
-              </p>
+              <p className="text-xs text-slate-500">{assemblyListSubcount}</p>
             </div>
             <span className="text-xs text-slate-500">{checkedReadyAssemblyIds.length} selected</span>
           </div>

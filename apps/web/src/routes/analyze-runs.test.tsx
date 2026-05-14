@@ -312,9 +312,23 @@ describe("AnalyzeRunReviewPage", () => {
     expect(html).toContain("Draft pool");
     expect(html).toContain("Assembly list");
     expect(html).toContain("Assembly detail");
-    expect(html).toContain("fact_missing_evidence");
+    expect(html).toContain("Related draft review for Backend routes");
     expect(html).toContain("Accept selected");
     expect(html).toContain("/projects/project-1/analyze-runs/run-1");
+  });
+
+  it("changes visible related drafts when a system map area is selected", async () => {
+    const { container } = await renderAnalyzeRunReviewPage();
+
+    expect(container.textContent).toContain("Related draft review for Backend routes");
+    expect(container.textContent).toContain("Review drafts");
+    expect(container.textContent).not.toContain("Review draft pool");
+
+    await clickButton(container, "Frontend components");
+
+    expect(container.textContent).toContain("Related draft review for Frontend components");
+    expect(container.textContent).toContain("Review draft pool");
+    expect(container.textContent).not.toContain("Review drafts");
   });
 
   it("accepts selected ready assemblies and invalidates derived project data", async () => {
@@ -661,7 +675,7 @@ function systemMapFixture(): SystemMapResponseDto {
         sourceFileCount: 1,
         mappedSourceFileCount: 1,
         unmappedSourceFileCount: 0,
-        areaCounts: { backend_routes: 1 }
+        areaCounts: { backend_routes: 1, frontend_components: 1 }
       },
       diagnostics: [],
       createdAt: "2026-05-14T10:00:00.000Z",
@@ -687,9 +701,25 @@ function systemMapFixture(): SystemMapResponseDto {
         ],
         keyFiles: ["apps/api/src/routes/projects.ts"],
         keySymbols: ["registerProjectRoutes"],
-        relatedProposalIds: ["66666666-6666-4666-8666-666666666666"],
+        relatedProposalIds: ["proposal-ready"],
         diagnostics: [],
         sortOrder: 0,
+        createdAt: "2026-05-14T10:00:00.000Z",
+        updatedAt: "2026-05-14T10:00:00.000Z"
+      },
+      {
+        id: "99999999-9999-4999-8999-999999999999",
+        snapshotId: "11111111-1111-4111-8111-111111111111",
+        areaType: "frontend_components",
+        name: "Frontend components",
+        summary: "Frontend components render review controls.",
+        confidence: 0.75,
+        evidence: [],
+        keyFiles: ["apps/web/src/components/analyze-review-workspace.tsx"],
+        keySymbols: ["AnalyzeReviewWorkspace"],
+        relatedProposalIds: ["proposal-unassigned"],
+        diagnostics: [],
+        sortOrder: 1,
         createdAt: "2026-05-14T10:00:00.000Z",
         updatedAt: "2026-05-14T10:00:00.000Z"
       }
