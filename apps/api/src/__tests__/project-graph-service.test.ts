@@ -198,6 +198,29 @@ describeWithDb("createProjectGraphService", () => {
     expect(lockIndex).toBeLessThan(insertIndex);
   });
 
+  it("takes the project advisory lock before loading facts in direct graph builds", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const observed = observeProjectGraphPersistenceOperations(db);
+
+    await createProjectGraphService(observed.db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const lockIndex = observed.operations.indexOf("execute:advisory_lock");
+    const factLoadIndex = observed.operations.indexOf("select:source_files");
+    const updateIndex = observed.operations.indexOf("update:project_graph_versions");
+    const insertIndex = observed.operations.indexOf("insert:project_graph_versions");
+
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(factLoadIndex).toBeGreaterThanOrEqual(0);
+    expect(updateIndex).toBeGreaterThanOrEqual(0);
+    expect(insertIndex).toBeGreaterThanOrEqual(0);
+    expect(lockIndex).toBeLessThan(factLoadIndex);
+    expect(lockIndex).toBeLessThan(updateIndex);
+    expect(lockIndex).toBeLessThan(insertIndex);
+  });
+
   it("returns the latest graph by index run recency instead of graph creation time", async () => {
     const { project, indexRun: olderRun } = await createIndexedGraphFixture({
       startedAt: new Date("2026-05-10T10:00:00.000Z"),
@@ -929,9 +952,9 @@ function observeProjectGraphPersistenceOperations(db: Db): {
 }
 
 function observeProjectGraphWriteTx<T extends object>(tx: T, operations: string[]): T {
-  const txMethods = tx as Record<"execute" | "update" | "insert", (...args: unknown[]) => unknown>;
+  const txMethods = tx as Record<"execute" | "select" | "update" | "insert", (...args: unknown[]) => unknown>;
   const observedTx = Object.create(tx) as Record<
-    "execute" | "update" | "insert",
+    "execute" | "select" | "update" | "insert",
     (...args: unknown[]) => unknown
   >;
 
@@ -941,6 +964,8 @@ function observeProjectGraphWriteTx<T extends object>(tx: T, operations: string[
     }
     return txMethods.execute(...args);
   };
+  observedTx.select = (...args: unknown[]) =>
+    observeProjectGraphFactSelects(txMethods.select(...args), operations);
   observedTx.update = (...args: unknown[]) => {
     if (args[0] === projectGraphVersions) {
       operations.push("update:project_graph_versions");
@@ -955,6 +980,30 @@ function observeProjectGraphWriteTx<T extends object>(tx: T, operations: string[
   };
 
   return observedTx as T;
+}
+
+function observeProjectGraphFactSelects<T>(builder: T, operations: string[]): T {
+  return new Proxy(builder as object, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      return (...args: unknown[]) => {
+        if (property === "from" && args[0] === sourceFiles) {
+          operations.push("select:source_files");
+        }
+        const result = value.apply(target, args);
+
+        if (result && typeof result === "object") {
+          return observeProjectGraphFactSelects(result, operations);
+        }
+
+        return result;
+      };
+    },
+  }) as T;
 }
 
 function isProjectAdvisoryLockQuery(query: unknown): boolean {

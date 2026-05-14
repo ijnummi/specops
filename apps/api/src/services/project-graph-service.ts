@@ -96,6 +96,7 @@ const nodeDetailEdgeLimit = 100;
 export function createProjectGraphService(db: Db) {
   async function buildProjectGraph(input: BuildProjectGraphInput): Promise<ProjectGraphListResponse> {
     return db.transaction(async (tx) => {
+      await acquireProjectGraphAdvisoryLock(tx, input.projectId);
       const facts = await loadProjectGraphFacts(input.projectId, tx);
       return persistProjectGraphFromFacts(tx, input, facts);
     });
@@ -112,7 +113,7 @@ export function createProjectGraphService(db: Db) {
     input: BuildProjectGraphInput,
     facts: ProjectGraphFacts,
   ): Promise<ProjectGraphListResponse> {
-    await writeDb.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
+    await acquireProjectGraphAdvisoryLock(writeDb, input.projectId);
 
     const drafts = buildGraphDrafts(facts);
     const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
@@ -545,6 +546,10 @@ export function createProjectGraphService(db: Db) {
     loadProjectGraphFacts,
     recordFailedGraphVersion,
   };
+}
+
+async function acquireProjectGraphAdvisoryLock(writeDb: Pick<Db, "execute">, projectId: string) {
+  await writeDb.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
 }
 
 function buildGraphDrafts(facts: ProjectGraphFacts): {
