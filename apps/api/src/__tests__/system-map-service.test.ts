@@ -108,6 +108,18 @@ describeWithDb("createSystemMapService", () => {
     expect(result.areas).toEqual([]);
   });
 
+  it("throws NotFoundError when no system map snapshot exists", async () => {
+    const project = await createProjectFixture();
+    const analyzeRun = await insertAnalyzeRun(project.id);
+    const service = createSystemMapService(db);
+
+    await expect(service.getSystemMap(project.id, analyzeRun.id)).rejects.toMatchObject({
+      name: "NotFoundError",
+      message: "System map not found",
+      details: { projectId: project.id, analyzeRunId: analyzeRun.id },
+    });
+  });
+
   it("reports actual symbol counts in area summaries while capping key symbols", async () => {
     const project = await createProjectFixture();
     const analyzeRun = await insertAnalyzeRun(project.id);
