@@ -23,8 +23,11 @@ import type {
   AnalyzeReviewUpdateClaimRequest,
   AiPrefillGenerateRequest,
   AiPrefillGenerateResponse,
+  BuildConceptGraphRequest,
   ChangeImpactPreviewQuery,
   ChangeImpactPreviewResponseDto,
+  ConceptDetailResponse,
+  ConceptGraphLatestResponse,
   CreateDiffReviewRequest,
   CreateDiffReviewResponse,
   CreateEntityRequest,
@@ -127,6 +130,9 @@ export const queryKeys = {
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
   projectReadiness: (projectId: string) => ["projects", projectId, "readiness"] as const,
+  conceptGraph: (projectId: string) => ["projects", projectId, "concept-graph"] as const,
+  conceptDetail: (projectId: string, conceptId: string | null) =>
+    ["projects", projectId, "concepts", conceptId] as const,
   proposalsRoot: (projectId: string) => ["projects", projectId, "proposals"] as const,
   proposals: (projectId: string, input: ProposalListQuery = {}) =>
     ["projects", projectId, "proposals", input] as const,
@@ -544,6 +550,29 @@ export function projectGraphNodeQuery(projectId: string, nodeId: string | null) 
   });
 }
 
+export function conceptGraphQuery(projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.conceptGraph(projectId),
+    queryFn: () =>
+      apiGet<ConceptGraphLatestResponse>(
+        `/api/projects/${encodeURIComponent(projectId)}/concept-graphs/latest`
+      )
+  });
+}
+
+export function conceptDetailQuery(projectId: string, conceptId: string | null) {
+  return queryOptions({
+    queryKey: queryKeys.conceptDetail(projectId, conceptId),
+    enabled: conceptId !== null,
+    queryFn: () =>
+      apiGet<ConceptDetailResponse>(
+        `/api/projects/${encodeURIComponent(projectId)}/concepts/${encodeURIComponent(
+          conceptId ?? ""
+        )}`
+      )
+  });
+}
+
 export function searchQuery(projectId: string, input: EntitySearchQuery) {
   const search = new URLSearchParams({
     q: input.q,
@@ -642,6 +671,14 @@ export function initializeSpecops(projectId: string) {
 
 export function reindexProject(projectId: string) {
   return apiSend<IndexRunDto>("POST", `/api/projects/${encodeURIComponent(projectId)}/index`);
+}
+
+export function buildConceptGraph(projectId: string, input: BuildConceptGraphRequest) {
+  return apiSend<ConceptGraphLatestResponse>(
+    "POST",
+    `/api/projects/${encodeURIComponent(projectId)}/concept-graphs`,
+    input
+  );
 }
 
 export function createAnnotation(projectId: string, input: AnnotationCreateRequest) {
