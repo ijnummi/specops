@@ -46,7 +46,7 @@ describe("health queue contracts", () => {
       generatedAt: timestamp,
       sourceState: {
         latestIndexRunId: "00000000-0000-4000-8000-000000000001",
-        latestIndexRunStatus: "completed",
+        latestIndexRunStatus: "succeeded",
         latestProjectGraphVersionId: "00000000-0000-4000-8000-000000000002",
         latestProjectGraphStatus: "ready",
         latestConceptGraphVersionId: "00000000-0000-4000-8000-000000000003",
@@ -96,5 +96,57 @@ describe("health queue contracts", () => {
 
     expect(parsed.summary.total).toBe(1);
     expect(parsed.items[0]?.primaryTarget.kind).toBe("spec");
+  });
+
+  it("rejects invalid source-state statuses", () => {
+    expect(() =>
+      healthQueueResponseSchema.parse({
+        generatedAt: timestamp,
+        sourceState: {
+          latestIndexRunId: "00000000-0000-4000-8000-000000000001",
+          latestIndexRunStatus: "completed",
+          latestProjectGraphVersionId: "00000000-0000-4000-8000-000000000002",
+          latestProjectGraphStatus: "done",
+          latestConceptGraphVersionId: "00000000-0000-4000-8000-000000000003",
+          latestConceptGraphStatus: "done",
+          hasProjectGraph: true,
+          hasConceptGraph: true
+        },
+        summary: {
+          total: 0,
+          byFamily: { spec: 0, source: 0, concept: 0 },
+          bySeverity: { blocker: 0, review: 0, context: 0 },
+          byKind: {}
+        },
+        diagnostics: [],
+        items: []
+      })
+    ).toThrow();
+  });
+
+  it("rejects unknown summary kind keys", () => {
+    expect(() =>
+      healthQueueResponseSchema.parse({
+        generatedAt: timestamp,
+        sourceState: {
+          latestIndexRunId: null,
+          latestIndexRunStatus: null,
+          latestProjectGraphVersionId: null,
+          latestProjectGraphStatus: null,
+          latestConceptGraphVersionId: null,
+          latestConceptGraphStatus: null,
+          hasProjectGraph: false,
+          hasConceptGraph: false
+        },
+        summary: {
+          total: 1,
+          byFamily: { spec: 1, source: 0, concept: 0 },
+          bySeverity: { blocker: 0, review: 1, context: 0 },
+          byKind: { unknown_kind: 1 }
+        },
+        diagnostics: [],
+        items: []
+      })
+    ).toThrow();
   });
 });

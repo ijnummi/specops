@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import { conceptGraphStatusSchema } from "./concepts.js";
+import { indexRunStatusSchema } from "./indexing.js";
+import { projectGraphStatusSchema } from "./project-graph.js";
+
 export const healthQueueFamilySchema = z.enum(["spec", "source", "concept"]);
 
 export const healthQueueSeveritySchema = z.enum(["blocker", "review", "context"]);
@@ -26,11 +30,11 @@ export const healthQueueDiagnosticSchema = z.object({
 
 export const healthQueueSourceStateSchema = z.object({
   latestIndexRunId: z.string().uuid().nullable(),
-  latestIndexRunStatus: z.string().min(1).nullable(),
+  latestIndexRunStatus: indexRunStatusSchema.nullable(),
   latestProjectGraphVersionId: z.string().uuid().nullable(),
-  latestProjectGraphStatus: z.string().min(1).nullable(),
+  latestProjectGraphStatus: projectGraphStatusSchema.nullable(),
   latestConceptGraphVersionId: z.string().uuid().nullable(),
-  latestConceptGraphStatus: z.string().min(1).nullable(),
+  latestConceptGraphStatus: conceptGraphStatusSchema.nullable(),
   hasProjectGraph: z.boolean(),
   hasConceptGraph: z.boolean()
 });
@@ -141,7 +145,7 @@ export const healthQueueSummarySchema = z.object({
     review: z.number().int().nonnegative(),
     context: z.number().int().nonnegative()
   }),
-  byKind: z.record(z.string(), z.number().int().nonnegative())
+  byKind: z.partialRecord(healthQueueKindSchema, z.number().int().nonnegative())
 });
 
 export const healthQueueResponseSchema = z.object({
