@@ -121,6 +121,7 @@ export type ProjectGraphNodeType = z.infer<typeof projectGraphNodeTypeSchema>;
 export type ProjectGraphEdgeType = z.infer<typeof projectGraphEdgeTypeSchema>;
 export type ProjectGraphProvenance = z.infer<typeof projectGraphProvenanceSchema>;
 export type ProjectGraphDiagnostic = z.infer<typeof projectGraphDiagnosticSchema>;
+export type ProjectGraphCounts = z.infer<typeof projectGraphCountsSchema>;
 export type ProjectGraphCoverage = z.infer<typeof projectGraphCoverageSchema>;
 export type ProjectGraphVersionDto = z.infer<typeof projectGraphVersionSchema>;
 export type ProjectGraphNodeDto = z.infer<typeof projectGraphNodeSchema>;
