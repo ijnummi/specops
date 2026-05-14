@@ -12,7 +12,8 @@ type ProjectGraphPageProps = {
 export function ProjectGraphPage({ projectId }: ProjectGraphPageProps) {
   const graph = useQuery(projectGraphQuery(projectId, { limit: 50 }));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const effectiveNodeId = selectedNodeId ?? graph.data?.nodes[0]?.id ?? null;
+  const selectedVisibleNode = graph.data?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const effectiveNodeId = selectedVisibleNode?.id ?? graph.data?.nodes[0]?.id ?? null;
   const nodeDetail = useQuery(projectGraphNodeQuery(projectId, effectiveNodeId));
   const nodeCounts = useMemo(() => countEntries(graph.data?.nodeCounts ?? {}), [graph.data]);
   const edgeCounts = useMemo(() => countEntries(graph.data?.edgeCounts ?? {}), [graph.data]);
@@ -77,6 +78,7 @@ export function ProjectGraphPage({ projectId }: ProjectGraphPageProps) {
                     <li key={node.id}>
                       <button
                         type="button"
+                        aria-pressed={node.id === effectiveNodeId}
                         className={
                           node.id === effectiveNodeId
                             ? "w-full rounded border border-slate-900 bg-slate-900 p-2 text-left text-sm text-white"
