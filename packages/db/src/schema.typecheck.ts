@@ -7,6 +7,9 @@ import type {
   analyzeReviewClaims,
   analyzeRuns,
   indexRuns,
+  projectGraphEdges,
+  projectGraphNodes,
+  projectGraphVersions,
   sourceImports,
   sourceSpecAnnotations,
   sourceSpecLinks,
@@ -36,6 +39,12 @@ type SystemMapSnapshotSelect = typeof systemMapSnapshots.$inferSelect;
 type SystemMapSnapshotInsert = typeof systemMapSnapshots.$inferInsert;
 type SystemMapAreaSelect = typeof systemMapAreas.$inferSelect;
 type SystemMapAreaInsert = typeof systemMapAreas.$inferInsert;
+type ProjectGraphVersionSelect = typeof projectGraphVersions.$inferSelect;
+type ProjectGraphVersionInsert = typeof projectGraphVersions.$inferInsert;
+type ProjectGraphNodeSelect = typeof projectGraphNodes.$inferSelect;
+type ProjectGraphNodeInsert = typeof projectGraphNodes.$inferInsert;
+type ProjectGraphEdgeSelect = typeof projectGraphEdges.$inferSelect;
+type ProjectGraphEdgeInsert = typeof projectGraphEdges.$inferInsert;
 
 type _SpecLinkConfidenceIsNumberOrNull = Expect<Equal<SpecLink["confidence"], number | null>>;
 type _AiProposalConfidenceIsNumberOrNull = Expect<Equal<AiProposal["confidence"], number | null>>;
@@ -63,6 +72,11 @@ type _SourceSpecAnnotationConfidenceIsNullable = Expect<
 type _NewSourceSpecAnnotationSourceFileIdIsOptional = Expect<
   Equal<NewSourceSpecAnnotation["sourceFileId"], string | null | undefined>
 >;
+type _ProjectGraphVersionStatusIsString = Expect<Equal<ProjectGraphVersionSelect["status"], string>>;
+type _ProjectGraphNodeConfidenceIsNullable = Expect<
+  Equal<ProjectGraphNodeSelect["confidence"], number | null>
+>;
+type _ProjectGraphEdgeProvenanceIsString = Expect<Equal<ProjectGraphEdgeSelect["provenance"], string>>;
 
 const _sourceSpecLink = null as unknown as SourceSpecLink;
 void _sourceSpecLink;
@@ -81,3 +95,16 @@ void systemMapSnapshotSelect;
 void systemMapSnapshotInsert;
 void systemMapAreaSelect;
 void systemMapAreaInsert;
+
+const projectGraphVersionSelect = null as unknown as ProjectGraphVersionSelect;
+const projectGraphVersionInsert = null as unknown as ProjectGraphVersionInsert;
+const projectGraphNodeSelect = null as unknown as ProjectGraphNodeSelect;
+const projectGraphNodeInsert = null as unknown as ProjectGraphNodeInsert;
+const projectGraphEdgeSelect = null as unknown as ProjectGraphEdgeSelect;
+const projectGraphEdgeInsert = null as unknown as ProjectGraphEdgeInsert;
+void projectGraphVersionSelect;
+void projectGraphVersionInsert;
+void projectGraphNodeSelect;
+void projectGraphNodeInsert;
+void projectGraphEdgeSelect;
+void projectGraphEdgeInsert;

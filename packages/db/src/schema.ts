@@ -429,6 +429,127 @@ export const systemMapAreas = pgTable(
   }),
 );
 
+export const projectGraphVersions = pgTable(
+  "project_graph_versions",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    indexRunId: uuid("index_run_id").references(() => indexRuns.id, { onDelete: "set null" }),
+    status: text("status").notNull(),
+    summary: text("summary").notNull().default(""),
+    coverageJson: jsonb("coverage_json").notNull().default(sql`'{}'::jsonb`),
+    diagnosticsJson: jsonb("diagnostics_json").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    projectIdx: index("project_graph_versions_project_id_idx").on(table.projectId),
+    projectStatusCreatedIdx: index("project_graph_versions_project_status_created_idx").on(
+      table.projectId,
+      table.status,
+      table.createdAt,
+    ),
+    indexRunIdx: index("project_graph_versions_index_run_id_idx").on(table.indexRunId),
+    indexRunProjectFk: foreignKey({
+      name: "project_graph_versions_index_run_project_fk",
+      columns: [table.indexRunId, table.projectId],
+      foreignColumns: [indexRuns.id, indexRuns.projectId],
+    }).onDelete("set null"),
+    idProjectUnique: unique("project_graph_versions_id_project_id_unique").on(
+      table.id,
+      table.projectId,
+    ),
+  }),
+);
+
+export const projectGraphNodes = pgTable(
+  "project_graph_nodes",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    graphVersionId: uuid("graph_version_id")
+      .notNull()
+      .references(() => projectGraphVersions.id, { onDelete: "cascade" }),
+    nodeKey: text("node_key").notNull(),
+    nodeType: text("node_type").notNull(),
+    label: text("label").notNull(),
+    path: text("path"),
+    symbolName: text("symbol_name"),
+    entityId: text("entity_id"),
+    sourceRefJson: jsonb("source_ref_json").notNull().default(sql`'{}'::jsonb`),
+    metadataJson: jsonb("metadata_json").notNull().default(sql`'{}'::jsonb`),
+    confidence: doublePrecision("confidence"),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    versionIdx: index("project_graph_nodes_graph_version_id_idx").on(table.graphVersionId),
+    versionTypeIdx: index("project_graph_nodes_version_type_idx").on(
+      table.graphVersionId,
+      table.nodeType,
+    ),
+    projectTypeIdx: index("project_graph_nodes_project_type_idx").on(table.projectId, table.nodeType),
+    versionKeyUnique: unique("project_graph_nodes_version_key_unique").on(
+      table.graphVersionId,
+      table.nodeKey,
+    ),
+    idProjectUnique: unique("project_graph_nodes_id_project_id_unique").on(table.id, table.projectId),
+    versionProjectFk: foreignKey({
+      name: "project_graph_nodes_version_project_fk",
+      columns: [table.graphVersionId, table.projectId],
+      foreignColumns: [projectGraphVersions.id, projectGraphVersions.projectId],
+    }).onDelete("cascade"),
+  }),
+);
+
+export const projectGraphEdges = pgTable(
+  "project_graph_edges",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    graphVersionId: uuid("graph_version_id")
+      .notNull()
+      .references(() => projectGraphVersions.id, { onDelete: "cascade" }),
+    fromNodeId: uuid("from_node_id").notNull(),
+    toNodeId: uuid("to_node_id").notNull(),
+    edgeType: text("edge_type").notNull(),
+    provenance: text("provenance").notNull(),
+    sourceRefJson: jsonb("source_ref_json").notNull().default(sql`'{}'::jsonb`),
+    metadataJson: jsonb("metadata_json").notNull().default(sql`'{}'::jsonb`),
+    confidence: doublePrecision("confidence"),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    versionIdx: index("project_graph_edges_graph_version_id_idx").on(table.graphVersionId),
+    versionTypeIdx: index("project_graph_edges_version_type_idx").on(
+      table.graphVersionId,
+      table.edgeType,
+    ),
+    fromNodeIdx: index("project_graph_edges_from_node_idx").on(table.fromNodeId),
+    toNodeIdx: index("project_graph_edges_to_node_idx").on(table.toNodeId),
+    versionProjectFk: foreignKey({
+      name: "project_graph_edges_version_project_fk",
+      columns: [table.graphVersionId, table.projectId],
+      foreignColumns: [projectGraphVersions.id, projectGraphVersions.projectId],
+    }).onDelete("cascade"),
+    fromNodeProjectFk: foreignKey({
+      name: "project_graph_edges_from_node_project_fk",
+      columns: [table.fromNodeId, table.projectId],
+      foreignColumns: [projectGraphNodes.id, projectGraphNodes.projectId],
+    }).onDelete("cascade"),
+    toNodeProjectFk: foreignKey({
+      name: "project_graph_edges_to_node_project_fk",
+      columns: [table.toNodeId, table.projectId],
+      foreignColumns: [projectGraphNodes.id, projectGraphNodes.projectId],
+    }).onDelete("cascade"),
+  }),
+);
+
 export const analyzeReviewAssemblies = pgTable(
   "analyze_review_assemblies",
   {

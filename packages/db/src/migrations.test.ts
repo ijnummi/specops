@@ -142,6 +142,33 @@ describe("initial migration", () => {
     );
   });
 
+  it("creates project graph storage and lookup indexes", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_versions"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_nodes"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_edges"');
+    expect(migration).toContain('CONSTRAINT "project_graph_versions_id_project_id_unique" UNIQUE("id","project_id")');
+    expect(migration).toContain('CONSTRAINT "project_graph_nodes_id_project_id_unique" UNIQUE("id","project_id")');
+    expect(migration).toContain('CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key")');
+    expect(migration).toContain("project_graph_versions_project_id_idx");
+    expect(migration).toContain("project_graph_versions_project_status_created_idx");
+    expect(migration).toContain("project_graph_nodes_version_type_idx");
+    expect(migration).toContain("project_graph_nodes_project_type_idx");
+    expect(migration).toContain("project_graph_edges_version_type_idx");
+    expect(migration).toContain("project_graph_edges_from_node_idx");
+    expect(migration).toContain("project_graph_edges_to_node_idx");
+    for (const constraintName of [
+      "project_graph_versions_index_run_project_fk",
+      "project_graph_nodes_version_project_fk",
+      "project_graph_edges_version_project_fk",
+      "project_graph_edges_from_node_project_fk",
+      "project_graph_edges_to_node_project_fk"
+    ]) {
+      expect(migration).toContain(`conname = '${constraintName}'`);
+    }
+  });
+
   it("creates analyze review assembly storage", async () => {
     const migration = await readFile(migrationPath, "utf8");
 

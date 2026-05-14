@@ -587,6 +587,137 @@ CREATE INDEX IF NOT EXISTS "system_map_areas_snapshot_type_idx"
 CREATE INDEX IF NOT EXISTS "system_map_areas_project_id_idx"
   ON "system_map_areas" ("project_id");
 
+CREATE TABLE IF NOT EXISTS "project_graph_versions" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "index_run_id" uuid REFERENCES "index_runs"("id") ON DELETE set null,
+  "status" text NOT NULL,
+  "summary" text NOT NULL DEFAULT '',
+  "coverage_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "diagnostics_json" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "project_graph_versions_id_project_id_unique" UNIQUE("id","project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "project_graph_nodes" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "graph_version_id" uuid NOT NULL REFERENCES "project_graph_versions"("id") ON DELETE cascade,
+  "node_key" text NOT NULL,
+  "node_type" text NOT NULL,
+  "label" text NOT NULL,
+  "path" text,
+  "symbol_name" text,
+  "entity_id" text,
+  "source_ref_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "metadata_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "confidence" double precision,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key"),
+  CONSTRAINT "project_graph_nodes_id_project_id_unique" UNIQUE("id","project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "project_graph_edges" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "graph_version_id" uuid NOT NULL REFERENCES "project_graph_versions"("id") ON DELETE cascade,
+  "from_node_id" uuid NOT NULL,
+  "to_node_id" uuid NOT NULL,
+  "edge_type" text NOT NULL,
+  "provenance" text NOT NULL,
+  "source_ref_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "metadata_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "confidence" double precision,
+  "created_at" timestamptz NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_graph_versions_index_run_project_fk'
+      AND conrelid = 'project_graph_versions'::regclass
+  ) THEN
+    ALTER TABLE "project_graph_versions"
+      ADD CONSTRAINT "project_graph_versions_index_run_project_fk"
+      FOREIGN KEY ("index_run_id","project_id") REFERENCES "index_runs"("id","project_id") ON DELETE set null;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_graph_nodes_version_project_fk'
+      AND conrelid = 'project_graph_nodes'::regclass
+  ) THEN
+    ALTER TABLE "project_graph_nodes"
+      ADD CONSTRAINT "project_graph_nodes_version_project_fk"
+      FOREIGN KEY ("graph_version_id","project_id") REFERENCES "project_graph_versions"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_graph_edges_version_project_fk'
+      AND conrelid = 'project_graph_edges'::regclass
+  ) THEN
+    ALTER TABLE "project_graph_edges"
+      ADD CONSTRAINT "project_graph_edges_version_project_fk"
+      FOREIGN KEY ("graph_version_id","project_id") REFERENCES "project_graph_versions"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_graph_edges_from_node_project_fk'
+      AND conrelid = 'project_graph_edges'::regclass
+  ) THEN
+    ALTER TABLE "project_graph_edges"
+      ADD CONSTRAINT "project_graph_edges_from_node_project_fk"
+      FOREIGN KEY ("from_node_id","project_id") REFERENCES "project_graph_nodes"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_graph_edges_to_node_project_fk'
+      AND conrelid = 'project_graph_edges'::regclass
+  ) THEN
+    ALTER TABLE "project_graph_edges"
+      ADD CONSTRAINT "project_graph_edges_to_node_project_fk"
+      FOREIGN KEY ("to_node_id","project_id") REFERENCES "project_graph_nodes"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "project_graph_versions_project_id_idx"
+  ON "project_graph_versions" ("project_id");
+CREATE INDEX IF NOT EXISTS "project_graph_versions_project_status_created_idx"
+  ON "project_graph_versions" ("project_id","status","created_at");
+CREATE INDEX IF NOT EXISTS "project_graph_versions_index_run_id_idx"
+  ON "project_graph_versions" ("index_run_id");
+CREATE INDEX IF NOT EXISTS "project_graph_nodes_graph_version_id_idx"
+  ON "project_graph_nodes" ("graph_version_id");
+CREATE INDEX IF NOT EXISTS "project_graph_nodes_version_type_idx"
+  ON "project_graph_nodes" ("graph_version_id","node_type");
+CREATE INDEX IF NOT EXISTS "project_graph_nodes_project_type_idx"
+  ON "project_graph_nodes" ("project_id","node_type");
+CREATE INDEX IF NOT EXISTS "project_graph_edges_graph_version_id_idx"
+  ON "project_graph_edges" ("graph_version_id");
+CREATE INDEX IF NOT EXISTS "project_graph_edges_version_type_idx"
+  ON "project_graph_edges" ("graph_version_id","edge_type");
+CREATE INDEX IF NOT EXISTS "project_graph_edges_from_node_idx"
+  ON "project_graph_edges" ("from_node_id");
+CREATE INDEX IF NOT EXISTS "project_graph_edges_to_node_idx"
+  ON "project_graph_edges" ("to_node_id");
+
 CREATE TABLE IF NOT EXISTS analyze_review_assemblies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
