@@ -185,6 +185,59 @@ describeWithDb("createConceptGraphService", () => {
     expect(firstVersion?.status).toBe("superseded");
   });
 
+  it("returns failed concept graphs when failed is latest or only version", async () => {
+    const { project: latestFailedProject, graphVersion: latestFailedGraphVersion, graphNode } =
+      await createProjectGraphFixture();
+    const service = createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () =>
+        conceptProvider({
+          concepts: [
+            {
+              key: "workflow:checkout",
+              type: "workflow",
+              name: "Checkout",
+              summary: "Checkout order flow.",
+              confidence: 0.87,
+              evidenceSummary: "Route file drives checkout.",
+              memberships: [
+                {
+                  graphNodeId: graphNode.id,
+                  role: "primary",
+                  confidence: 0.92,
+                  rationale: "Checkout route is the workflow entrypoint.",
+                },
+              ],
+            },
+          ],
+          relationships: [],
+        }),
+    });
+    const ready = await service.buildConceptGraph(latestFailedProject.id, buildInput());
+    const latestFailed = await createFailedConceptVersion(
+      latestFailedProject.id,
+      latestFailedGraphVersion.id,
+    );
+
+    const latest = await service.getLatestConceptGraph(latestFailedProject.id);
+
+    expect(latest.version.id).toBe(latestFailed.id);
+    expect(latest.version.status).toBe("failed");
+    expect(latest.version.id).not.toBe(ready.version.id);
+
+    const { project: onlyFailedProject, graphVersion: onlyFailedGraphVersion } =
+      await createProjectGraphFixture();
+    const onlyFailed = await createFailedConceptVersion(
+      onlyFailedProject.id,
+      onlyFailedGraphVersion.id,
+    );
+
+    const onlyLatest = await service.getLatestConceptGraph(onlyFailedProject.id);
+
+    expect(onlyLatest.version.id).toBe(onlyFailed.id);
+    expect(onlyLatest.version.status).toBe("failed");
+  });
+
   it("returns concept detail with graph node DTOs and grouped relationships", async () => {
     const { project, graphNode, supportGraphNode } = await createProjectGraphFixture();
     const service = createConceptGraphService(db, {
@@ -351,6 +404,41 @@ describeWithDb("createConceptGraphService", () => {
       .returning();
     projectIds.push(project!.id);
     return project!;
+  }
+
+  async function createFailedConceptVersion(projectId: string, projectGraphVersionId: string) {
+    const [version] = await db
+      .insert(projectConceptVersions)
+      .values({
+        projectId,
+        projectGraphVersionId,
+        status: "failed",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        promptVersion: "concept-graph-v1",
+        summary: "Concept graph generation failed.",
+        coverageJson: {
+          conceptCounts: {},
+          membershipCounts: {},
+          relationshipCounts: {},
+          rejectedConceptCount: 0,
+          rejectedMembershipCount: 0,
+          graphNodeCoverageCount: 0,
+          lowConfidenceConceptCount: 0,
+        },
+        diagnosticsJson: [
+          {
+            level: "error",
+            code: "provider_request_failed",
+            message: "Provider request failed.",
+          },
+        ],
+        createdAt: new Date(Date.now() + 1_000),
+        updatedAt: new Date(Date.now() + 1_000),
+      })
+      .returning();
+
+    return version!;
   }
 });
 

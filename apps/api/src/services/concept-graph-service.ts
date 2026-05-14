@@ -158,7 +158,7 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
   }
 
   async function getLatestConceptGraph(projectId: string): Promise<ConceptGraphLatestResponse> {
-    const version = await getLatestConceptVersion(projectId);
+    const version = await getLatestConceptVersion(projectId, { includeFailed: true });
     return readConceptGraph(db, projectId, version.id);
   }
 
@@ -282,14 +282,18 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
     return version;
   }
 
-  async function getLatestConceptVersion(projectId: string): Promise<ProjectConceptVersionRow> {
+  async function getLatestConceptVersion(
+    projectId: string,
+    options: { includeFailed?: boolean } = {},
+  ): Promise<ProjectConceptVersionRow> {
+    const statuses = options.includeFailed ? ["ready", "limited", "failed"] : ["ready", "limited"];
     const [version] = await db
       .select()
       .from(projectConceptVersions)
       .where(
         and(
           eq(projectConceptVersions.projectId, projectId),
-          or(eq(projectConceptVersions.status, "ready"), eq(projectConceptVersions.status, "limited")),
+          inArray(projectConceptVersions.status, statuses),
         ),
       )
       .orderBy(desc(projectConceptVersions.createdAt), desc(projectConceptVersions.id))
