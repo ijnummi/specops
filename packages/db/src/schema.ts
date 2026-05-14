@@ -494,6 +494,11 @@ export const projectGraphNodes = pgTable(
       table.nodeKey,
     ),
     idProjectUnique: unique("project_graph_nodes_id_project_id_unique").on(table.id, table.projectId),
+    idProjectVersionUnique: unique("project_graph_nodes_id_project_id_graph_version_id_unique").on(
+      table.id,
+      table.projectId,
+      table.graphVersionId,
+    ),
     versionProjectFk: foreignKey({
       name: "project_graph_nodes_version_project_fk",
       columns: [table.graphVersionId, table.projectId],
@@ -536,13 +541,21 @@ export const projectGraphEdges = pgTable(
     }).onDelete("cascade"),
     fromNodeProjectFk: foreignKey({
       name: "project_graph_edges_from_node_project_fk",
-      columns: [table.fromNodeId, table.projectId],
-      foreignColumns: [projectGraphNodes.id, projectGraphNodes.projectId],
+      columns: [table.fromNodeId, table.projectId, table.graphVersionId],
+      foreignColumns: [
+        projectGraphNodes.id,
+        projectGraphNodes.projectId,
+        projectGraphNodes.graphVersionId,
+      ],
     }).onDelete("cascade"),
     toNodeProjectFk: foreignKey({
       name: "project_graph_edges_to_node_project_fk",
-      columns: [table.toNodeId, table.projectId],
-      foreignColumns: [projectGraphNodes.id, projectGraphNodes.projectId],
+      columns: [table.toNodeId, table.projectId, table.graphVersionId],
+      foreignColumns: [
+        projectGraphNodes.id,
+        projectGraphNodes.projectId,
+        projectGraphNodes.graphVersionId,
+      ],
     }).onDelete("cascade"),
   }),
 );

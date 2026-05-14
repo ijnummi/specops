@@ -150,6 +150,7 @@ describe("initial migration", () => {
     expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_edges"');
     expect(migration).toContain('CONSTRAINT "project_graph_versions_id_project_id_unique" UNIQUE("id","project_id")');
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_id_project_id_unique" UNIQUE("id","project_id")');
+    expect(migration).toContain('CONSTRAINT "project_graph_nodes_id_project_id_graph_version_id_unique" UNIQUE("id","project_id","graph_version_id")');
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key")');
     expect(migration).toContain("project_graph_versions_project_id_idx");
     expect(migration).toContain("project_graph_versions_project_status_created_idx");
@@ -172,6 +173,12 @@ describe("initial migration", () => {
     }
     expect(migration).toContain(
       'FOREIGN KEY ("index_run_id","project_id") REFERENCES "index_runs"("id","project_id") ON DELETE SET NULL ("index_run_id")',
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("from_node_id","project_id","graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade',
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("to_node_id","project_id","graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade',
     );
   });
 

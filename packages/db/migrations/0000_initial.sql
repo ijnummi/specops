@@ -615,7 +615,8 @@ CREATE TABLE IF NOT EXISTS "project_graph_nodes" (
   "confidence" double precision,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key"),
-  CONSTRAINT "project_graph_nodes_id_project_id_unique" UNIQUE("id","project_id")
+  CONSTRAINT "project_graph_nodes_id_project_id_unique" UNIQUE("id","project_id"),
+  CONSTRAINT "project_graph_nodes_id_project_id_graph_version_id_unique" UNIQUE("id","project_id","graph_version_id")
 );
 
 CREATE TABLE IF NOT EXISTS "project_graph_edges" (
@@ -649,6 +650,18 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_graph_nodes_id_project_id_graph_version_id_unique'
+      AND conrelid = 'project_graph_nodes'::regclass
+  ) THEN
+    ALTER TABLE "project_graph_nodes"
+      ADD CONSTRAINT "project_graph_nodes_id_project_id_graph_version_id_unique" UNIQUE("id","project_id","graph_version_id");
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
     WHERE conname = 'project_graph_nodes_version_project_fk'
       AND conrelid = 'project_graph_nodes'::regclass
   ) THEN
@@ -671,6 +684,9 @@ BEGIN
   END IF;
 END $$;
 
+ALTER TABLE "project_graph_edges" DROP CONSTRAINT IF EXISTS "project_graph_edges_from_node_project_fk";
+ALTER TABLE "project_graph_edges" DROP CONSTRAINT IF EXISTS "project_graph_edges_to_node_project_fk";
+
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -680,7 +696,7 @@ BEGIN
   ) THEN
     ALTER TABLE "project_graph_edges"
       ADD CONSTRAINT "project_graph_edges_from_node_project_fk"
-      FOREIGN KEY ("from_node_id","project_id") REFERENCES "project_graph_nodes"("id","project_id") ON DELETE cascade;
+      FOREIGN KEY ("from_node_id","project_id","graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade;
   END IF;
 END $$;
 
@@ -693,7 +709,7 @@ BEGIN
   ) THEN
     ALTER TABLE "project_graph_edges"
       ADD CONSTRAINT "project_graph_edges_to_node_project_fk"
-      FOREIGN KEY ("to_node_id","project_id") REFERENCES "project_graph_nodes"("id","project_id") ON DELETE cascade;
+      FOREIGN KEY ("to_node_id","project_id","graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade;
   END IF;
 END $$;
 
