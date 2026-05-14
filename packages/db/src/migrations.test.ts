@@ -157,7 +157,9 @@ describe("initial migration", () => {
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_id_project_id_graph_version_id_unique" UNIQUE("id","project_id","graph_version_id")');
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key")');
     expect(migration).toContain('CONSTRAINT "project_concept_versions_id_project_id_unique" UNIQUE("id","project_id")');
+    expect(migration).toContain('CONSTRAINT "project_concept_versions_id_project_id_project_graph_version_id_unique" UNIQUE("id","project_id","project_graph_version_id")');
     expect(migration).toContain('CONSTRAINT "project_concepts_version_key_unique" UNIQUE("concept_version_id","concept_key")');
+    expect(migration).toContain('"project_graph_version_id" uuid NOT NULL');
     expect(migration).toContain("project_graph_versions_project_id_idx");
     expect(migration).toContain("project_graph_versions_project_status_created_idx");
     expect(migration).toContain("project_graph_versions_index_run_id_idx");
@@ -170,6 +172,7 @@ describe("initial migration", () => {
     expect(migration).toContain("project_graph_edges_to_node_idx");
     expect(migration).toContain("project_concept_versions_project_status_created_idx");
     expect(migration).toContain("project_concepts_version_type_idx");
+    expect(migration).toContain("project_concept_memberships_graph_version_id_idx");
     expect(migration).toContain("project_concept_memberships_concept_id_idx");
     expect(migration).toContain("project_concept_relationships_from_concept_idx");
     for (const constraintName of [
@@ -180,7 +183,8 @@ describe("initial migration", () => {
       "project_graph_edges_to_node_project_fk",
       "project_concept_versions_graph_version_project_fk",
       "project_concepts_version_project_fk",
-      "project_concept_memberships_graph_node_project_fk",
+      "project_concept_memberships_version_project_graph_version_fk",
+      "project_concept_memberships_graph_node_project_graph_version_fk",
       "project_concept_relationships_to_concept_project_fk"
     ]) {
       expect(migration).toContain(`conname = '${constraintName}'`);
@@ -193,6 +197,12 @@ describe("initial migration", () => {
     );
     expect(migration).toContain(
       'FOREIGN KEY ("to_node_id","project_id","graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade',
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("concept_version_id","project_id","project_graph_version_id") REFERENCES "project_concept_versions"("id","project_id","project_graph_version_id") ON DELETE cascade',
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("graph_node_id","project_id","project_graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade',
     );
   });
 

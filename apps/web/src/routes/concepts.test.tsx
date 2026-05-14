@@ -154,7 +154,9 @@ describe("ConceptsPage", () => {
     expect(html).toContain("checkout.ts");
     expect(html).toContain("entrypoint");
     expect(html).toContain("payments.ts");
+    expect(html).toContain("Incoming relationships");
     expect(html).toContain("Outgoing relationships");
+    expect(html).toContain("relates_to");
     expect(html).toContain("uses");
     expect(html).toContain("Payment interface");
   });
@@ -346,7 +348,21 @@ function conceptDetailFixture(): ConceptDetailResponse {
         path: "apps/api/src/payments.ts"
       })
     ],
-    incomingRelationships: {},
+    incomingRelationships: {
+      relates_to: [
+        {
+          id: "00000000-0000-4000-8000-000000000402",
+          projectId: "00000000-0000-4000-8000-000000000001",
+          conceptVersionId: "00000000-0000-4000-8000-000000000100",
+          fromConceptId: "00000000-0000-4000-8000-000000000102",
+          toConceptId: "00000000-0000-4000-8000-000000000101",
+          relationshipType: "relates_to",
+          confidence: 0.78,
+          rationale: "Payment callback returns to checkout.",
+          createdAt: "2026-05-14T10:00:00.000Z"
+        }
+      ]
+    },
     outgoingRelationships: {
       uses: [
         {

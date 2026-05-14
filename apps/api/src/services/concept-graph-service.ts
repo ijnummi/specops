@@ -506,6 +506,7 @@ async function persistConceptVersion(
       return concept.memberships.map((membership) => ({
         projectId: input.projectId,
         conceptVersionId: version.id,
+        projectGraphVersionId: input.projectGraphVersionId,
         conceptId,
         graphNodeId: membership.graphNodeId,
         role: membership.role,

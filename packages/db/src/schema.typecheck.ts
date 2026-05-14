@@ -99,6 +99,12 @@ type _ProjectConceptInsertStatusIsOptional = Expect<
 type _ProjectConceptMembershipRoleIsString = Expect<
   Equal<ProjectConceptMembershipSelect["role"], string>
 >;
+type _ProjectConceptMembershipGraphVersionIdIsString = Expect<
+  Equal<ProjectConceptMembershipSelect["projectGraphVersionId"], string>
+>;
+type _ProjectConceptMembershipInsertGraphVersionIdIsRequired = Expect<
+  Equal<ProjectConceptMembershipInsert["projectGraphVersionId"], string>
+>;
 type _ProjectConceptRelationshipTypeIsString = Expect<
   Equal<ProjectConceptRelationshipSelect["relationshipType"], string>
 >;

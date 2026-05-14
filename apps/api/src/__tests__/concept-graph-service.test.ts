@@ -101,6 +101,59 @@ describeWithDb("createConceptGraphService", () => {
     expect(built.version.coverage.graphNodeCoverageCount).toBe(1);
   });
 
+  it("rejects concept memberships that point at graph nodes from another graph version", async () => {
+    const { project, graphVersion, graphNode } = await createProjectGraphFixture();
+    const provider = conceptProvider({
+      concepts: [
+        {
+          key: "workflow:checkout",
+          type: "workflow",
+          name: "Checkout",
+          summary: "Checkout order flow.",
+          confidence: 0.87,
+          evidenceSummary: "Route file drives checkout.",
+          memberships: [
+            {
+              graphNodeId: graphNode.id,
+              role: "primary",
+              confidence: 0.92,
+              rationale: "Checkout route is the workflow entrypoint.",
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    });
+    const built = await createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () => provider,
+    }).buildConceptGraph(project.id, buildInput());
+    const newerGraph = await createNewerProjectGraphVersion(project.id);
+    const [concept] = built.concepts;
+    const [persistedMembership] = await db
+      .select()
+      .from(projectConceptMemberships)
+      .where(eq(projectConceptMemberships.conceptVersionId, built.version.id));
+
+    expect(persistedMembership?.projectGraphVersionId).toBe(graphVersion.id);
+    await expect(
+      db.insert(projectConceptMemberships).values({
+        projectId: project.id,
+        projectGraphVersionId: graphVersion.id,
+        conceptVersionId: built.version.id,
+        conceptId: concept!.id,
+        graphNodeId: newerGraph.graphNode.id,
+        role: "mismatched",
+        confidence: 0.5,
+        rationale: "Node belongs to a different graph version.",
+      }),
+    ).rejects.toMatchObject({
+      cause: {
+        constraint: "project_concept_memberships_graph_node_project_graph_version_fk",
+      },
+    });
+  });
+
   it("builds from the latest project graph by index run recency", async () => {
     const project = await createProjectFixture();
     const [olderIndexRun, newerIndexRun] = await db

@@ -594,6 +594,9 @@ export const projectConceptVersions = pgTable(
       table.id,
       table.projectId,
     ),
+    idProjectGraphVersionUnique: unique(
+      "project_concept_versions_id_project_id_project_graph_version_id_unique",
+    ).on(table.id, table.projectId, table.projectGraphVersionId),
     graphVersionProjectFk: foreignKey({
       name: "project_concept_versions_graph_version_project_fk",
       columns: [table.projectGraphVersionId, table.projectId],
@@ -658,9 +661,8 @@ export const projectConceptMemberships = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    conceptVersionId: uuid("concept_version_id")
-      .notNull()
-      .references(() => projectConceptVersions.id, { onDelete: "cascade" }),
+    conceptVersionId: uuid("concept_version_id").notNull(),
+    projectGraphVersionId: uuid("project_graph_version_id").notNull(),
     conceptId: uuid("concept_id").notNull(),
     graphNodeId: uuid("graph_node_id").notNull(),
     role: text("role").notNull(),
@@ -672,12 +674,19 @@ export const projectConceptMemberships = pgTable(
     conceptVersionIdx: index("project_concept_memberships_concept_version_id_idx").on(
       table.conceptVersionId,
     ),
+    graphVersionIdx: index("project_concept_memberships_graph_version_id_idx").on(
+      table.projectGraphVersionId,
+    ),
     conceptIdx: index("project_concept_memberships_concept_id_idx").on(table.conceptId),
     graphNodeIdx: index("project_concept_memberships_graph_node_id_idx").on(table.graphNodeId),
     versionProjectFk: foreignKey({
-      name: "project_concept_memberships_version_project_fk",
-      columns: [table.conceptVersionId, table.projectId],
-      foreignColumns: [projectConceptVersions.id, projectConceptVersions.projectId],
+      name: "project_concept_memberships_version_project_graph_version_fk",
+      columns: [table.conceptVersionId, table.projectId, table.projectGraphVersionId],
+      foreignColumns: [
+        projectConceptVersions.id,
+        projectConceptVersions.projectId,
+        projectConceptVersions.projectGraphVersionId,
+      ],
     }).onDelete("cascade"),
     conceptProjectFk: foreignKey({
       name: "project_concept_memberships_concept_project_fk",
@@ -685,9 +694,13 @@ export const projectConceptMemberships = pgTable(
       foreignColumns: [projectConcepts.id, projectConcepts.projectId, projectConcepts.conceptVersionId],
     }).onDelete("cascade"),
     graphNodeProjectFk: foreignKey({
-      name: "project_concept_memberships_graph_node_project_fk",
-      columns: [table.graphNodeId, table.projectId],
-      foreignColumns: [projectGraphNodes.id, projectGraphNodes.projectId],
+      name: "project_concept_memberships_graph_node_project_graph_version_fk",
+      columns: [table.graphNodeId, table.projectId, table.projectGraphVersionId],
+      foreignColumns: [
+        projectGraphNodes.id,
+        projectGraphNodes.projectId,
+        projectGraphNodes.graphVersionId,
+      ],
     }).onDelete("cascade"),
   }),
 );

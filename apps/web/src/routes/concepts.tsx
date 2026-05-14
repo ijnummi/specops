@@ -274,9 +274,16 @@ function ConceptDetail({ detail }: { detail: ConceptDetailResponse }) {
       </div>
       <MembershipGroups groups={membershipsByRole} graphNodesById={graphNodesById} />
       <RelationshipGroups
+        title="Incoming relationships"
+        groups={detail.incomingRelationships}
+        relatedConceptsById={relatedConceptsById}
+        getRelatedConceptId={(relationship) => relationship.fromConceptId}
+      />
+      <RelationshipGroups
         title="Outgoing relationships"
         groups={detail.outgoingRelationships}
         relatedConceptsById={relatedConceptsById}
+        getRelatedConceptId={(relationship) => relationship.toConceptId}
       />
     </div>
   );
@@ -338,11 +345,13 @@ function MembershipGroups({
 function RelationshipGroups({
   title,
   groups,
-  relatedConceptsById
+  relatedConceptsById,
+  getRelatedConceptId
 }: {
   title: string;
   groups: Record<string, ProjectConceptRelationshipDto[]>;
   relatedConceptsById: Map<string, ProjectConceptDto>;
+  getRelatedConceptId: (relationship: ProjectConceptRelationshipDto) => string;
 }) {
   const entries = Object.entries(groups).sort(([left], [right]) => left.localeCompare(right));
   if (entries.length === 0) {
@@ -363,7 +372,8 @@ function RelationshipGroups({
             <h4 className="text-xs font-medium text-slate-700">{relationshipType}</h4>
             <ul className="mt-2 grid gap-2">
               {relationships.map((relationship) => {
-                const relatedConcept = relatedConceptsById.get(relationship.toConceptId);
+                const relatedConceptId = getRelatedConceptId(relationship);
+                const relatedConcept = relatedConceptsById.get(relatedConceptId);
 
                 return (
                   <li
@@ -371,7 +381,7 @@ function RelationshipGroups({
                     className="rounded border border-slate-200 p-2 text-xs text-slate-700"
                   >
                     <span className="block truncate font-medium">
-                      {relatedConcept?.name ?? relationship.toConceptId}
+                      {relatedConcept?.name ?? relatedConceptId}
                     </span>
                     <span className="block truncate text-slate-500">
                       {relatedConcept?.conceptType ?? "unknown"}

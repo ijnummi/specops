@@ -747,7 +747,8 @@ CREATE TABLE IF NOT EXISTS "project_concept_versions" (
   "diagnostics_json" jsonb NOT NULL DEFAULT '[]'::jsonb,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT "project_concept_versions_id_project_id_unique" UNIQUE("id","project_id")
+  CONSTRAINT "project_concept_versions_id_project_id_unique" UNIQUE("id","project_id"),
+  CONSTRAINT "project_concept_versions_id_project_id_project_graph_version_id_unique" UNIQUE("id","project_id","project_graph_version_id")
 );
 
 CREATE TABLE IF NOT EXISTS "project_concepts" (
@@ -773,7 +774,8 @@ CREATE TABLE IF NOT EXISTS "project_concepts" (
 CREATE TABLE IF NOT EXISTS "project_concept_memberships" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
-  "concept_version_id" uuid NOT NULL REFERENCES "project_concept_versions"("id") ON DELETE cascade,
+  "concept_version_id" uuid NOT NULL,
+  "project_graph_version_id" uuid NOT NULL,
   "concept_id" uuid NOT NULL,
   "graph_node_id" uuid NOT NULL,
   "role" text NOT NULL,
@@ -794,14 +796,43 @@ CREATE TABLE IF NOT EXISTS "project_concept_relationships" (
   "created_at" timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE "project_concept_memberships"
+  ADD COLUMN IF NOT EXISTS "project_graph_version_id" uuid;
+
+UPDATE "project_concept_memberships" AS membership
+SET "project_graph_version_id" = version."project_graph_version_id"
+FROM "project_concept_versions" AS version
+WHERE membership."project_graph_version_id" IS NULL
+  AND membership."concept_version_id" = version."id"
+  AND membership."project_id" = version."project_id";
+
+ALTER TABLE "project_concept_memberships"
+  ALTER COLUMN "project_graph_version_id" SET NOT NULL;
+
 ALTER TABLE "project_concept_versions" DROP CONSTRAINT IF EXISTS "project_concept_versions_graph_version_project_fk";
 ALTER TABLE "project_concepts" DROP CONSTRAINT IF EXISTS "project_concepts_version_project_fk";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_concept_version_id_fkey";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_concept_version_id_project_concept_versions_id_fk";
 ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_version_project_fk";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_version_project_graph_version_fk";
 ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_concept_project_fk";
 ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_graph_node_project_fk";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_graph_node_project_graph_version_fk";
 ALTER TABLE "project_concept_relationships" DROP CONSTRAINT IF EXISTS "project_concept_relationships_version_project_fk";
 ALTER TABLE "project_concept_relationships" DROP CONSTRAINT IF EXISTS "project_concept_relationships_from_concept_project_fk";
 ALTER TABLE "project_concept_relationships" DROP CONSTRAINT IF EXISTS "project_concept_relationships_to_concept_project_fk";
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_versions_id_project_id_project_graph_version_id_unique'
+      AND conrelid = 'project_concept_versions'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_versions"
+      ADD CONSTRAINT "project_concept_versions_id_project_id_project_graph_version_id_unique" UNIQUE("id","project_id","project_graph_version_id");
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -833,12 +864,12 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-    WHERE conname = 'project_concept_memberships_version_project_fk'
+    WHERE conname = 'project_concept_memberships_version_project_graph_version_fk'
       AND conrelid = 'project_concept_memberships'::regclass
   ) THEN
     ALTER TABLE "project_concept_memberships"
-      ADD CONSTRAINT "project_concept_memberships_version_project_fk"
-      FOREIGN KEY ("concept_version_id","project_id") REFERENCES "project_concept_versions"("id","project_id") ON DELETE cascade;
+      ADD CONSTRAINT "project_concept_memberships_version_project_graph_version_fk"
+      FOREIGN KEY ("concept_version_id","project_id","project_graph_version_id") REFERENCES "project_concept_versions"("id","project_id","project_graph_version_id") ON DELETE cascade;
   END IF;
 END $$;
 
@@ -859,12 +890,12 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-    WHERE conname = 'project_concept_memberships_graph_node_project_fk'
+    WHERE conname = 'project_concept_memberships_graph_node_project_graph_version_fk'
       AND conrelid = 'project_concept_memberships'::regclass
   ) THEN
     ALTER TABLE "project_concept_memberships"
-      ADD CONSTRAINT "project_concept_memberships_graph_node_project_fk"
-      FOREIGN KEY ("graph_node_id","project_id") REFERENCES "project_graph_nodes"("id","project_id") ON DELETE cascade;
+      ADD CONSTRAINT "project_concept_memberships_graph_node_project_graph_version_fk"
+      FOREIGN KEY ("graph_node_id","project_id","project_graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade;
   END IF;
 END $$;
 
@@ -921,6 +952,8 @@ CREATE INDEX IF NOT EXISTS "project_concepts_project_status_idx"
   ON "project_concepts" ("project_id","status");
 CREATE INDEX IF NOT EXISTS "project_concept_memberships_concept_version_id_idx"
   ON "project_concept_memberships" ("concept_version_id");
+CREATE INDEX IF NOT EXISTS "project_concept_memberships_graph_version_id_idx"
+  ON "project_concept_memberships" ("project_graph_version_id");
 CREATE INDEX IF NOT EXISTS "project_concept_memberships_concept_id_idx"
   ON "project_concept_memberships" ("concept_id");
 CREATE INDEX IF NOT EXISTS "project_concept_memberships_graph_node_id_idx"
