@@ -242,13 +242,15 @@ export function createIndexerService(db: Db) {
       }
 
       const graphService = createProjectGraphService(db);
-      await graphService.buildProjectGraph({ projectId, indexRunId: finishedRun.id }).catch(async (error) => {
+      try {
+        await graphService.buildProjectGraph({ projectId, indexRunId: finishedRun.id });
+      } catch (error) {
         await graphService.recordFailedGraphVersion({
           projectId,
           indexRunId: finishedRun.id,
           error
-        });
-      });
+        }).catch(() => undefined);
+      }
 
       return mapIndexRun(finishedRun);
     }

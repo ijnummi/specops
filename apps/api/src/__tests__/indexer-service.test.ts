@@ -223,6 +223,58 @@ describeWithDb("indexProject", () => {
     );
   });
 
+  it("keeps indexing successful when graph failure recording also fails", async () => {
+    const actualGraphModule = await vi.importActual<typeof import("../services/project-graph-service.js")>(
+      "../services/project-graph-service.js"
+    );
+    const buildProjectGraph = vi.fn().mockRejectedValue(new Error("forced graph failure"));
+    const recordFailedGraphVersion = vi.fn().mockRejectedValue(new Error("forced record failure"));
+    vi.mocked(createProjectGraphService).mockImplementationOnce((serviceDb) => ({
+      ...actualGraphModule.createProjectGraphService(serviceDb),
+      buildProjectGraph,
+      recordFailedGraphVersion
+    }));
+    const { projectId, repoPath, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "requirements/REQ-1.md",
+      specMarkdown({
+        id: "REQ-1",
+        type: "requirement",
+        title: "Track project specs",
+        status: "draft",
+        body: "Workbench users can browse indexed project specs."
+      })
+    );
+    await writeSourceFile(
+      repoPath,
+      "src/project-service.ts",
+      "export function listProjects() { return [] as string[]; }\n"
+    );
+
+    const result = await createIndexerService(db).indexProject(projectId);
+
+    const [storedRun] = await db.select().from(indexRuns).where(eq(indexRuns.id, result.id));
+    const versions = await db
+      .select()
+      .from(projectGraphVersions)
+      .where(
+        and(
+          eq(projectGraphVersions.projectId, projectId),
+          eq(projectGraphVersions.indexRunId, result.id)
+        )
+      );
+    expect(buildProjectGraph).toHaveBeenCalledWith({ projectId, indexRunId: result.id });
+    expect(recordFailedGraphVersion).toHaveBeenCalledWith({
+      projectId,
+      indexRunId: result.id,
+      error: expect.any(Error)
+    });
+    expect(result.status).toBe("succeeded");
+    expect(storedRun?.status).toBe("succeeded");
+    expect(versions).toHaveLength(0);
+  });
+
   it("keeps unchanged indexes idempotent by count", async () => {
     const { projectId, specopsPath } = await createProjectFixture();
     await writeSpecFile(
