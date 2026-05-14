@@ -42,6 +42,9 @@ import type {
   ProposalListQuery,
   ProposalPatchRequest,
   ProposalSummaryDto,
+  ProjectGraphListResponse,
+  ProjectGraphNodeDetail,
+  ProjectGraphQuery,
   ProjectDto,
   ProjectHealthDto,
   ProjectOverviewDto,
@@ -117,6 +120,10 @@ export const queryKeys = {
     ["admin", "database", table, "rows", limit] as const,
   projects: ["projects"] as const,
   project: (projectId: string) => ["projects", projectId] as const,
+  projectGraph: (projectId: string, input: Partial<ProjectGraphQuery> = {}) =>
+    ["projects", projectId, "graph", input] as const,
+  projectGraphNode: (projectId: string, nodeId: string | null) =>
+    ["projects", projectId, "graph", "nodes", nodeId] as const,
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
   projectReadiness: (projectId: string) => ["projects", projectId, "readiness"] as const,
@@ -496,6 +503,44 @@ export function indexRunsQuery(projectId: string) {
     queryKey: queryKeys.indexRuns(projectId),
     queryFn: () =>
       apiGet<IndexRunDto[]>(`/api/projects/${encodeURIComponent(projectId)}/index-runs`)
+  });
+}
+
+export function projectGraphQuery(projectId: string, input: Partial<ProjectGraphQuery> = {}) {
+  const search = new URLSearchParams();
+  if (input.nodeType) {
+    search.set("nodeType", input.nodeType);
+  }
+  if (input.edgeType) {
+    search.set("edgeType", input.edgeType);
+  }
+  if (input.q) {
+    search.set("q", input.q);
+  }
+  if (input.limit !== undefined) {
+    search.set("limit", String(input.limit));
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+
+  return queryOptions({
+    queryKey: queryKeys.projectGraph(projectId, input),
+    queryFn: () =>
+      apiGet<ProjectGraphListResponse>(
+        `/api/projects/${encodeURIComponent(projectId)}/graph${suffix}`
+      )
+  });
+}
+
+export function projectGraphNodeQuery(projectId: string, nodeId: string | null) {
+  return queryOptions({
+    queryKey: queryKeys.projectGraphNode(projectId, nodeId),
+    enabled: nodeId !== null,
+    queryFn: () =>
+      apiGet<ProjectGraphNodeDetail>(
+        `/api/projects/${encodeURIComponent(projectId)}/graph/nodes/${encodeURIComponent(
+          nodeId ?? ""
+        )}`
+      )
   });
 }
 

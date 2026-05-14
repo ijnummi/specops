@@ -19,6 +19,7 @@ import { DiffReviewsPage } from "./routes/diff-reviews.js";
 import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
+import { ProjectGraphPage } from "./routes/project-graph.js";
 import { ProjectsPage } from "./routes/projects.js";
 import { ReadinessPage } from "./routes/readiness.js";
 import { RootRoute } from "./routes/root.js";
@@ -82,6 +83,15 @@ const projectRoute = createRoute({
     const { projectId } = projectRoute.useParams();
     const { q } = projectRoute.useSearch();
     return <ProjectDetailPage projectId={projectId} entityId={null} query={q ?? ""} />;
+  }
+});
+
+const projectGraphRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/graph",
+  component: () => {
+    const { projectId } = projectGraphRoute.useParams();
+    return <ProjectGraphPage projectId={projectId} />;
   }
 });
 
@@ -221,6 +231,7 @@ const routeTree = rootRoute.addChildren([
   projectsRoute,
   adminDatabaseRoute,
   projectRoute,
+  projectGraphRoute,
   entityRoute,
   readinessRoute,
   agentRunsRoute,

@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
   entitiesQuery,
@@ -265,6 +265,21 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
               <p className="text-sm text-slate-500">No index runs yet.</p>
             )}
           </section>
+          {latestRun ? (
+            <section className="panel-section border-t border-slate-200">
+              <h2 className="section-heading">Project Graph</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                Inspect scanner-derived graph nodes and edges from the latest index.
+              </p>
+              <Link
+                to="/projects/$projectId/graph"
+                params={{ projectId }}
+                className="button-secondary mt-3 w-full justify-center"
+              >
+                Open project graph
+              </Link>
+            </section>
+          ) : null}
           <ValidationPanel messages={selectedValidation} />
         </>
       }
