@@ -809,6 +809,40 @@ WHERE membership."project_graph_version_id" IS NULL
 ALTER TABLE "project_concept_memberships"
   ALTER COLUMN "project_graph_version_id" SET NOT NULL;
 
+DELETE FROM "project_concept_memberships" AS membership
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM "project_graph_nodes" AS node
+  WHERE node."id" = membership."graph_node_id"
+    AND node."project_id" = membership."project_id"
+    AND node."graph_version_id" = membership."project_graph_version_id"
+);
+
+DELETE FROM "project_concept_relationships" AS relationship
+WHERE EXISTS (
+  SELECT 1
+  FROM "project_concepts" AS concept
+  WHERE concept."id" IN (relationship."from_concept_id", relationship."to_concept_id")
+    AND concept."project_id" = relationship."project_id"
+    AND concept."concept_version_id" = relationship."concept_version_id"
+    AND NOT EXISTS (
+      SELECT 1
+      FROM "project_concept_memberships" AS membership
+      WHERE membership."concept_id" = concept."id"
+        AND membership."project_id" = concept."project_id"
+        AND membership."concept_version_id" = concept."concept_version_id"
+    )
+);
+
+DELETE FROM "project_concepts" AS concept
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM "project_concept_memberships" AS membership
+  WHERE membership."concept_id" = concept."id"
+    AND membership."project_id" = concept."project_id"
+    AND membership."concept_version_id" = concept."concept_version_id"
+);
+
 ALTER TABLE "project_concept_versions" DROP CONSTRAINT IF EXISTS "project_concept_versions_graph_version_project_fk";
 ALTER TABLE "project_concepts" DROP CONSTRAINT IF EXISTS "project_concepts_version_project_fk";
 ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_concept_version_id_fkey";

@@ -206,6 +206,42 @@ describe("initial migration", () => {
     );
   });
 
+  it("cleans invalid concept graph cache rows before enforcing graph-node version consistency", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    const backfillPosition = migration.indexOf(
+      'SET "project_graph_version_id" = version."project_graph_version_id"',
+    );
+    const cleanupPosition = migration.indexOf(
+      'DELETE FROM "project_concept_memberships" AS membership',
+    );
+    const graphNodeFkPosition = migration.indexOf(
+      'ADD CONSTRAINT "project_concept_memberships_graph_node_project_graph_version_fk"',
+    );
+
+    expect(backfillPosition).toBeGreaterThan(-1);
+    expect(cleanupPosition).toBeGreaterThan(-1);
+    expect(graphNodeFkPosition).toBeGreaterThan(-1);
+    expect(cleanupPosition).toBeGreaterThan(backfillPosition);
+    expect(cleanupPosition).toBeLessThan(graphNodeFkPosition);
+    expect(migration).toContain(
+      'DELETE FROM "project_concept_memberships" AS membership\nWHERE NOT EXISTS',
+    );
+    expect(migration).toContain('node."id" = membership."graph_node_id"');
+    expect(migration).toContain('node."project_id" = membership."project_id"');
+    expect(migration).toContain(
+      'node."graph_version_id" = membership."project_graph_version_id"',
+    );
+    expect(migration).toContain(
+      'DELETE FROM "project_concept_relationships" AS relationship',
+    );
+    expect(migration).toContain(
+      'concept."id" IN (relationship."from_concept_id", relationship."to_concept_id")',
+    );
+    expect(migration).toContain('DELETE FROM "project_concepts" AS concept\nWHERE NOT EXISTS');
+    expect(migration).toContain('membership."concept_id" = concept."id"');
+  });
+
   it("creates analyze review assembly storage", async () => {
     const migration = await readFile(migrationPath, "utf8");
 
