@@ -14,6 +14,7 @@ import { AiPrefillPage } from "./routes/ai-prefill.js";
 import { AnalyzeRunDetailPage } from "./routes/analyze-run-detail.js";
 import { AnalyzeRunReviewPage } from "./routes/analyze-run-review.js";
 import { ChangeImpactPage } from "./routes/change-impact.js";
+import { ConceptsPage } from "./routes/concepts.js";
 import { DiffReviewDetailPage } from "./routes/diff-review-detail.js";
 import { DiffReviewsPage } from "./routes/diff-reviews.js";
 import { ImpactPage } from "./routes/impact.js";
@@ -92,6 +93,15 @@ const projectGraphRoute = createRoute({
   component: () => {
     const { projectId } = projectGraphRoute.useParams();
     return <ProjectGraphPage projectId={projectId} />;
+  }
+});
+
+const conceptsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/concepts",
+  component: () => {
+    const { projectId } = conceptsRoute.useParams();
+    return <ConceptsPage projectId={projectId} />;
   }
 });
 
@@ -232,6 +242,7 @@ const routeTree = rootRoute.addChildren([
   adminDatabaseRoute,
   projectRoute,
   projectGraphRoute,
+  conceptsRoute,
   entityRoute,
   readinessRoute,
   agentRunsRoute,
