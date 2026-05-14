@@ -301,16 +301,17 @@ function buildAreas(
     const keySymbols = uniqueStrings(
       areaFiles.flatMap((file) => (symbolsByFile.get(file.id) ?? []).map((symbol) => symbol.name)),
     ).slice(0, 12);
+    const symbolCount = areaFiles.reduce((total, file) => total + (symbolsByFile.get(file.id)?.length ?? 0), 0);
     const importCount = areaFiles.reduce((total, file) => total + (importsByFile.get(file.id)?.length ?? 0), 0);
     const exportCount = areaFiles.reduce((total, file) => total + (exportsByFile.get(file.id)?.length ?? 0), 0);
     const fileWord = areaFiles.length === 1 ? "file" : "files";
-    const symbolWord = keySymbols.length === 1 ? "symbol" : "symbols";
+    const symbolWord = symbolCount === 1 ? "symbol" : "symbols";
 
     return [
       {
         areaType,
         name: areaLabels[areaType],
-        summary: `${areaLabels[areaType]} include ${areaFiles.length} source ${fileWord}, ${keySymbols.length} key ${symbolWord}, ${importCount} imports, and ${exportCount} exports.`,
+        summary: `${areaLabels[areaType]} include ${areaFiles.length} source ${fileWord}, ${symbolCount} ${symbolWord}, ${importCount} imports, and ${exportCount} exports.`,
         confidence: areaType === "unknown" ? 0.35 : 0.8,
         evidence,
         keyFiles: areaFiles.map((file) => file.path),

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { systemMapResponseSchema } from "@specops/contracts";
 import type { Db } from "@specops/db";
-import { aiProposals, analyzeRuns, createDb, projects } from "@specops/db";
+import { aiProposals, analyzeRuns, createDb, projects, sourceFiles, sourceSymbols } from "@specops/db";
 import { eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -106,6 +106,44 @@ describeWithDb("createSystemMapService", () => {
       message: "No indexed source files were available for the system map.",
     });
     expect(result.areas).toEqual([]);
+  });
+
+  it("reports actual symbol counts in area summaries while capping key symbols", async () => {
+    const project = await createProjectFixture();
+    const analyzeRun = await insertAnalyzeRun(project.id);
+    const [sourceFile] = await db
+      .insert(sourceFiles)
+      .values({
+        projectId: project.id,
+        path: "apps/api/src/services/many-symbols-service.ts",
+        language: "typescript",
+        kind: "source",
+        sizeBytes: 1024,
+        contentHash: "many-symbols-service",
+      })
+      .returning();
+    await db.insert(sourceSymbols).values(
+      Array.from({ length: 13 }, (_, index) => ({
+        projectId: project.id,
+        sourceFileId: sourceFile!.id,
+        filePath: sourceFile!.path,
+        name: `symbol${index.toString().padStart(2, "0")}`,
+        symbolKind: "function",
+        isExported: true,
+        line: index + 1,
+        metadataJson: {},
+      })),
+    );
+
+    const result = await createSystemMapService(db).buildSystemMap({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      indexRunId: null,
+    });
+
+    const area = result.areas.find((item) => item.areaType === "backend_services");
+    expect(area?.keySymbols).toHaveLength(12);
+    expect(area?.summary).toContain("13 symbols");
   });
 
   it("links proposals to map areas by source evidence path", async () => {
