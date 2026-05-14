@@ -16,6 +16,7 @@ import {
   assertRealPathInsideDirectory
 } from "../lib/path-safety.js";
 import { readGitHeadCommit } from "./git-service.js";
+import { createProjectGraphService } from "./project-graph-service.js";
 import { createProjectService } from "./project-service.js";
 import { createSourceScanService } from "./source-scan-service.js";
 
@@ -42,8 +43,9 @@ export function createIndexerService(db: Db) {
         throw new Error("Failed to create index run");
       }
 
+      let finishedRun: typeof indexRuns.$inferSelect;
       try {
-        const [finishedRun] = await db.transaction(async (tx) => {
+        const [transactionFinishedRun] = await db.transaction(async (tx) => {
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
 
           assertInsideDirectory(repoPath, persistedSpecopsPath);
@@ -226,11 +228,11 @@ export function createIndexerService(db: Db) {
             .returning();
         });
 
-        if (!finishedRun) {
+        if (!transactionFinishedRun) {
           throw new Error("Failed to finish index run");
         }
 
-        return mapIndexRun(finishedRun);
+        finishedRun = transactionFinishedRun;
       } catch (error) {
         await db
           .update(indexRuns)
@@ -238,6 +240,17 @@ export function createIndexerService(db: Db) {
           .where(eq(indexRuns.id, startedRun.id));
         throw error;
       }
+
+      const graphService = createProjectGraphService(db);
+      await graphService.buildProjectGraph({ projectId, indexRunId: finishedRun.id }).catch(async (error) => {
+        await graphService.recordFailedGraphVersion({
+          projectId,
+          indexRunId: finishedRun.id,
+          error
+        });
+      });
+
+      return mapIndexRun(finishedRun);
     }
   };
 }

@@ -5,16 +5,33 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type { Db } from "@specops/db";
-import { indexRuns, projects, specEntities, specFiles, specLinks, validationMessages } from "@specops/db";
+import {
+  indexRuns,
+  projectGraphVersions,
+  projects,
+  specEntities,
+  specFiles,
+  specLinks,
+  validationMessages
+} from "@specops/db";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createIndexerService } from "../services/indexer-service.js";
 import { readGitStatus } from "../services/git-service.js";
+import { createProjectGraphService } from "../services/project-graph-service.js";
 import { createProjectService } from "../services/project-service.js";
 import { createSpecopsInitializerService } from "../services/specops-initializer.js";
+
+vi.mock("../services/project-graph-service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/project-graph-service.js")>();
+  return {
+    ...actual,
+    createProjectGraphService: vi.fn(actual.createProjectGraphService)
+  };
+});
 
 const testDatabaseUrl = readTestDatabaseUrl();
 const describeWithDb = testDatabaseUrl ? describe : describe.skip;
@@ -37,6 +54,8 @@ describeWithDb("indexProject", () => {
   });
 
   afterEach(async () => {
+    vi.mocked(createProjectGraphService).mockClear();
+
     for (const projectId of fixtureProjectIds.splice(0)) {
       await db.delete(projects).where(eq(projects.id, projectId));
     }
@@ -107,6 +126,101 @@ describeWithDb("indexProject", () => {
       entityId: "NOTE-1",
       filePath: "notes/NOTE-1.md"
     });
+  });
+
+  it("builds a ready project graph version for a successful index run", async () => {
+    const { projectId, repoPath, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "requirements/REQ-1.md",
+      specMarkdown({
+        id: "REQ-1",
+        type: "requirement",
+        title: "Track project specs",
+        status: "draft",
+        body: "Workbench users can browse indexed project specs."
+      })
+    );
+    await writeSourceFile(
+      repoPath,
+      "src/project-service.ts",
+      "export function listProjects() { return [] as string[]; }\n"
+    );
+
+    const result = await createIndexerService(db).indexProject(projectId);
+
+    const [version] = await db
+      .select()
+      .from(projectGraphVersions)
+      .where(
+        and(
+          eq(projectGraphVersions.projectId, projectId),
+          eq(projectGraphVersions.indexRunId, result.id)
+        )
+      );
+    expect(result.status).toBe("succeeded");
+    expect(version).toMatchObject({
+      projectId,
+      indexRunId: result.id,
+      status: "ready"
+    });
+  });
+
+  it("records a failed graph version without failing a successful index run", async () => {
+    const actualGraphModule = await vi.importActual<typeof import("../services/project-graph-service.js")>(
+      "../services/project-graph-service.js"
+    );
+    const buildProjectGraph = vi.fn().mockRejectedValue(new Error("forced graph failure"));
+    vi.mocked(createProjectGraphService).mockImplementationOnce((serviceDb) => ({
+      ...actualGraphModule.createProjectGraphService(serviceDb),
+      buildProjectGraph
+    }));
+    const { projectId, repoPath, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "requirements/REQ-1.md",
+      specMarkdown({
+        id: "REQ-1",
+        type: "requirement",
+        title: "Track project specs",
+        status: "draft",
+        body: "Workbench users can browse indexed project specs."
+      })
+    );
+    await writeSourceFile(
+      repoPath,
+      "src/project-service.ts",
+      "export function listProjects() { return [] as string[]; }\n"
+    );
+
+    const result = await createIndexerService(db).indexProject(projectId);
+
+    const [storedRun] = await db.select().from(indexRuns).where(eq(indexRuns.id, result.id));
+    const [version] = await db
+      .select()
+      .from(projectGraphVersions)
+      .where(
+        and(
+          eq(projectGraphVersions.projectId, projectId),
+          eq(projectGraphVersions.indexRunId, result.id)
+        )
+      );
+    expect(buildProjectGraph).toHaveBeenCalledWith({ projectId, indexRunId: result.id });
+    expect(result.status).toBe("succeeded");
+    expect(storedRun?.status).toBe("succeeded");
+    expect(version).toMatchObject({
+      projectId,
+      indexRunId: result.id,
+      status: "failed"
+    });
+    expect(version?.diagnosticsJson).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "graph_build_failed",
+          message: "forced graph failure"
+        })
+      ])
+    );
   });
 
   it("keeps unchanged indexes idempotent by count", async () => {
@@ -657,6 +771,12 @@ async function git(cwd: string, args: string[]) {
 
 async function writeSpecFile(specopsPath: string, relativePath: string, content: string) {
   const absolutePath = path.join(specopsPath, relativePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, content, { flag: "w" });
+}
+
+async function writeSourceFile(repoPath: string, relativePath: string, content: string) {
+  const absolutePath = path.join(repoPath, relativePath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, content, { flag: "w" });
 }
