@@ -112,6 +112,8 @@ describe("initial migration", () => {
     expect(migration).toContain("system_map_areas_snapshot_type_idx");
     expect(migration).toContain("system_map_areas_project_id_idx");
     for (const constraintName of [
+      "system_map_snapshots_analyze_run_id_unique",
+      "system_map_snapshots_id_project_id_unique",
       "system_map_snapshots_project_id_projects_id_fk",
       "system_map_snapshots_analyze_run_id_analyze_runs_id_fk",
       "system_map_snapshots_analyze_run_project_fk",
@@ -123,6 +125,12 @@ describe("initial migration", () => {
     }
     expect(migration).toContain(
       'ADD CONSTRAINT "system_map_snapshots_analyze_run_project_fk"',
+    );
+    expect(migration).toContain(
+      'ADD CONSTRAINT "system_map_snapshots_analyze_run_id_unique" UNIQUE ("analyze_run_id")',
+    );
+    expect(migration).toContain(
+      'ADD CONSTRAINT "system_map_snapshots_id_project_id_unique" UNIQUE ("id","project_id")',
     );
     expect(migration).toContain(
       'FOREIGN KEY ("analyze_run_id","project_id") REFERENCES "analyze_runs"("id","project_id") ON DELETE cascade',

@@ -467,6 +467,32 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
+    WHERE conname = 'system_map_snapshots_analyze_run_id_unique'
+      AND conrelid = 'system_map_snapshots'::regclass
+  ) THEN
+    ALTER TABLE "system_map_snapshots"
+      ADD CONSTRAINT "system_map_snapshots_analyze_run_id_unique" UNIQUE ("analyze_run_id");
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_snapshots_id_project_id_unique'
+      AND conrelid = 'system_map_snapshots'::regclass
+  ) THEN
+    ALTER TABLE "system_map_snapshots"
+      ADD CONSTRAINT "system_map_snapshots_id_project_id_unique" UNIQUE ("id","project_id");
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
     WHERE conname = 'system_map_snapshots_project_id_projects_id_fk'
       AND conrelid = 'system_map_snapshots'::regclass
   ) THEN
