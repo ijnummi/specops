@@ -158,5 +158,15 @@ describe("concept graph contracts", () => {
 
     expect(latest.concepts).toHaveLength(1);
     expect(detail.concept.name).toBe("API");
+    expect(() =>
+      conceptDetailResponseSchema.parse({
+        concept,
+        memberships: [],
+        graphNodes: [{ id: nodeId }],
+        incomingRelationships: {},
+        outgoingRelationships: {},
+        relatedConcepts: []
+      })
+    ).toThrow();
   });
 });

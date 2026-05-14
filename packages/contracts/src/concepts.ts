@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { projectGraphNodeSchema } from "./project-graph.js";
+
 export const conceptGraphStatusSchema = z.enum(["building", "ready", "limited", "failed", "superseded"]);
 export const conceptTypeSchema = z.enum([
   "workflow",
@@ -108,7 +110,7 @@ export const conceptGraphLatestResponseSchema = z.object({
 export const conceptDetailResponseSchema = z.object({
   concept: projectConceptSchema,
   memberships: z.array(projectConceptMembershipSchema),
-  graphNodes: z.array(z.unknown()),
+  graphNodes: z.array(projectGraphNodeSchema),
   incomingRelationships: z.record(z.string(), z.array(projectConceptRelationshipSchema)),
   outgoingRelationships: z.record(z.string(), z.array(projectConceptRelationshipSchema)),
   relatedConcepts: z.array(projectConceptSchema)
