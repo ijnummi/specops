@@ -9,7 +9,10 @@ import type { Db } from "@specops/db";
 import {
   createDb,
   indexRuns,
+  projectConceptMemberships,
+  projectConceptRelationships,
   projectConceptVersions,
+  projectConcepts,
   projectGraphEdges,
   projectGraphNodes,
   projectGraphVersions,
@@ -481,6 +484,60 @@ describeWithDb("createConceptGraphService", () => {
     expect(onlyLatest.version.status).toBe("failed");
   });
 
+  it("persists invalid provider output as a failed concept graph with diagnostics", async () => {
+    const { project, graphVersion } = await createProjectGraphFixture();
+    const provider = invalidConceptProvider("{ invalid json");
+    const service = createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () => provider,
+    });
+
+    const built = await service.buildConceptGraph(project.id, buildInput());
+    const latest = await service.getLatestConceptGraph(project.id);
+
+    expect(conceptGraphLatestResponseSchema.parse(built)).toEqual(built);
+    expect(built.version.status).toBe("failed");
+    expect(built.version.projectGraphVersionId).toBe(graphVersion.id);
+    expect(built.version.summary).toBe("Concept graph generation failed.");
+    expect(built.concepts).toEqual([]);
+    expect(built.version.coverage).toEqual({
+      conceptCounts: {},
+      membershipCounts: {},
+      relationshipCounts: {},
+      rejectedConceptCount: 0,
+      rejectedMembershipCount: 0,
+      graphNodeCoverageCount: 0,
+      lowConfidenceConceptCount: 0,
+    });
+    expect(built.diagnostics).toEqual([
+      expect.objectContaining({
+        level: "error",
+        code: "invalid_provider_output",
+        message: expect.any(String),
+      }),
+    ]);
+    expect(latest.version.id).toBe(built.version.id);
+    expect(latest.diagnostics).toEqual(built.diagnostics);
+
+    const [conceptRows, membershipRows, relationshipRows] = await Promise.all([
+      db
+        .select()
+        .from(projectConcepts)
+        .where(eq(projectConcepts.conceptVersionId, built.version.id)),
+      db
+        .select()
+        .from(projectConceptMemberships)
+        .where(eq(projectConceptMemberships.conceptVersionId, built.version.id)),
+      db
+        .select()
+        .from(projectConceptRelationships)
+        .where(eq(projectConceptRelationships.conceptVersionId, built.version.id)),
+    ]);
+    expect(conceptRows).toEqual([]);
+    expect(membershipRows).toEqual([]);
+    expect(relationshipRows).toEqual([]);
+  });
+
   it("returns concept detail with graph node DTOs and grouped relationships", async () => {
     const { project, graphNode, supportGraphNode } = await createProjectGraphFixture();
     const service = createConceptGraphService(db, {
@@ -752,6 +809,19 @@ function conceptProvider(output: unknown): AiPrefillProvider {
       provider: "openai" as const,
       model: input.model,
       text: JSON.stringify(output),
+    })),
+  };
+}
+
+function invalidConceptProvider(text: string): AiPrefillProvider {
+  return {
+    generateSpecProposals: vi.fn(async () => {
+      throw new Error("generateSpecProposals should not be called");
+    }),
+    generateConceptGraph: vi.fn(async (input) => ({
+      provider: "openai" as const,
+      model: input.model,
+      text,
     })),
   };
 }

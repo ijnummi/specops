@@ -136,25 +136,42 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
       limits: { maxGraphNodes: input.maxGraphNodes, maxGraphEdges: input.maxGraphEdges },
     });
 
-    const normalized = await generateAndNormalizeConceptGraph(input, packet, graphNodes);
-    const status = normalized.concepts.length === 0 ? "limited" : "ready";
+    const generated = await generateAndNormalizeConceptGraph(input, packet, graphNodes);
+    if (generated.status === "failed") {
+      return persistConceptVersion(db, {
+        projectId,
+        projectGraphVersionId: graphVersion.id,
+        provider: generated.provider,
+        model: generated.model,
+        promptVersion: packet.promptVersion,
+        status: "failed",
+        summary: "Concept graph generation failed.",
+        concepts: [],
+        relationships: [],
+        diagnostics: generated.diagnostics,
+        rejectedConceptCount: 0,
+        rejectedMembershipCount: 0,
+      });
+    }
+
+    const status = generated.concepts.length === 0 ? "limited" : "ready";
 
     return persistConceptVersion(db, {
       projectId,
       projectGraphVersionId: graphVersion.id,
-      provider: normalized.provider,
-      model: normalized.model,
+      provider: generated.provider,
+      model: generated.model,
       promptVersion: packet.promptVersion,
       status,
       summary:
         status === "ready"
-          ? `Concept graph with ${normalized.concepts.length} concepts.`
+          ? `Concept graph with ${generated.concepts.length} concepts.`
           : "Limited concept graph: no supported concepts were produced.",
-      concepts: normalized.concepts,
-      relationships: normalized.relationships,
-      diagnostics: normalized.diagnostics,
-      rejectedConceptCount: normalized.rejectedConceptCount,
-      rejectedMembershipCount: normalized.rejectedMembershipCount,
+      concepts: generated.concepts,
+      relationships: generated.relationships,
+      diagnostics: generated.diagnostics,
+      rejectedConceptCount: generated.rejectedConceptCount,
+      rejectedMembershipCount: generated.rejectedMembershipCount,
     });
   }
 
@@ -324,17 +341,34 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
         model: input.model,
         temperature: input.temperature,
       });
-      const normalized = normalizeConceptGraphProviderResponse({
-        text: providerResult.text,
-        graphNodeIds: new Set(graphNodes.map((node) => node.id)),
-        graphNodeKeys: new Map(graphNodes.map((node) => [node.nodeKey, node.id])),
-      });
 
-      return {
-        provider: providerResult.provider,
-        model: providerResult.model,
-        ...normalized,
-      };
+      try {
+        const normalized = normalizeConceptGraphProviderResponse({
+          text: providerResult.text,
+          graphNodeIds: new Set(graphNodes.map((node) => node.id)),
+          graphNodeKeys: new Map(graphNodes.map((node) => [node.nodeKey, node.id])),
+        });
+
+        return {
+          status: "normalized" as const,
+          provider: providerResult.provider,
+          model: providerResult.model,
+          ...normalized,
+        };
+      } catch (error) {
+        return {
+          status: "failed" as const,
+          provider: providerResult.provider,
+          model: providerResult.model,
+          diagnostics: [
+            {
+              level: "error" as const,
+              code: error instanceof SyntaxError ? "invalid_provider_output" : "concept_normalization_failed",
+              message: errorMessage(error),
+            },
+          ],
+        };
+      }
     } catch (error) {
       throw new BadGatewayError("Concept graph provider request failed", {
         message: errorMessage(error),
