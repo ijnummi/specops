@@ -21,6 +21,7 @@ import { ImpactPage } from "./routes/impact.js";
 import type { ImpactSearchDepth } from "./routes/impact.js";
 import { ProjectDetailPage } from "./routes/project-detail.js";
 import { ProjectGraphPage } from "./routes/project-graph.js";
+import { ProjectHealthQueuePage } from "./routes/project-health-queue.js";
 import { ProjectsPage } from "./routes/projects.js";
 import { ReadinessPage } from "./routes/readiness.js";
 import { RootRoute } from "./routes/root.js";
@@ -124,6 +125,15 @@ const readinessRoute = createRoute({
   component: () => {
     const { projectId } = readinessRoute.useParams();
     return <ReadinessPage projectId={projectId} />;
+  }
+});
+
+const projectHealthQueueRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$projectId/health-queue",
+  component: () => {
+    const { projectId } = projectHealthQueueRoute.useParams();
+    return <ProjectHealthQueuePage projectId={projectId} />;
   }
 });
 
@@ -245,6 +255,7 @@ const routeTree = rootRoute.addChildren([
   conceptsRoute,
   entityRoute,
   readinessRoute,
+  projectHealthQueueRoute,
   agentRunsRoute,
   agentRunDetailRoute,
   analyzeRunDetailRoute,
