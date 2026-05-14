@@ -334,6 +334,13 @@ function ReadinessSummaryPanel({
       >
         Open readiness queue
       </Link>
+      <Link
+        to="/projects/$projectId/health-queue"
+        params={{ projectId }}
+        className="inline-flex w-fit items-center rounded border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-950"
+      >
+        Spec Health Queue
+      </Link>
     </div>
   );
 }

@@ -23,7 +23,9 @@ vi.mock("@tanstack/react-router", () => ({
   }) => (
     <a
       className={className}
-      href={`${to}:${params?.projectId ?? ""}:${params?.entityId ?? ""}:${search?.q ?? ""}`}
+      href={`${to
+        .replace("$projectId", params?.projectId ?? "")
+        .replace("$entityId", params?.entityId ?? "")}${search?.q ? `?q=${search.q}` : ""}`}
     >
       {children}
     </a>
@@ -67,12 +69,14 @@ describe("ProjectOverviewDashboard", () => {
     expect(html).toContain("1 blocked");
     expect(html).toContain("3 needs review");
     expect(html).toContain("4 needs context");
-    expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.customer:");
-    expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:domain.order:");
-    expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:task.customer:");
-    expect(html).toContain("/projects/$projectId/entities/$entityId:project-1:task.refresh-customer:");
-    expect(html).toContain("/projects/$projectId:project-1::domain_entity");
-    expect(html).toContain("/projects/$projectId/readiness:project-1::");
+    expect(html).toContain("Spec Health Queue");
+    expect(html).toContain("/projects/project-1/entities/domain.customer");
+    expect(html).toContain("/projects/project-1/entities/domain.order");
+    expect(html).toContain("/projects/project-1/entities/task.customer");
+    expect(html).toContain("/projects/project-1/entities/task.refresh-customer");
+    expect(html).toContain("/projects/project-1?q=domain_entity");
+    expect(html).toContain("/projects/project-1/readiness");
+    expect(html).toContain("/projects/project-1/health-queue");
   });
 
   it("renders health errors without replacing the overview dashboard", () => {
