@@ -171,6 +171,81 @@ describeWithDb("createProjectGraphService", () => {
     }
   });
 
+  it("bounds incoming and outgoing edges in node detail", async () => {
+    const { project, indexRun, files } = await createIndexedGraphFixture();
+    const routeFile = files.find((file) => file.path === "apps/api/src/routes/projects.ts")!;
+    const extraFiles = await db
+      .insert(sourceFiles)
+      .values(
+        Array.from({ length: 120 }, (_, index) => ({
+          projectId: project.id,
+          path: `apps/api/src/routes/project-importer-${index}.ts`,
+          language: "typescript",
+          kind: "source",
+          sizeBytes: 24,
+          contentHash: `project-importer-${index}`,
+        })),
+      )
+      .returning();
+    await db.insert(sourceImports).values([
+      ...Array.from({ length: 120 }, (_, index) => ({
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        specifier: `dependency-${index}`,
+        importKind: "named",
+        importedNames: [`dependency${index}`],
+        isRelative: false,
+        resolvedPath: null,
+      })),
+      ...extraFiles.map((file) => ({
+        projectId: project.id,
+        sourceFileId: file.id,
+        filePath: file.path,
+        specifier: "./projects.js",
+        importKind: "named",
+        importedNames: ["registerProjectRoutes"],
+        isRelative: true,
+        resolvedPath: routeFile.path,
+      })),
+    ]);
+
+    const service = createProjectGraphService(db);
+    const built = await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+    const routeGraph = await service.getProjectGraph(
+      project.id,
+      { q: "file:apps/api/src/routes/projects.ts", limit: 10 },
+      built.version.id,
+    );
+    const routeNode = routeGraph.nodes.find(
+      (node) => node.nodeKey === "file:apps/api/src/routes/projects.ts",
+    )!;
+
+    const detail = await service.getGraphNode(project.id, routeNode.id);
+    const incomingCount = Object.values(detail.incomingEdges).reduce(
+      (total, edges) => total + edges.length,
+      0,
+    );
+    const outgoingCount = Object.values(detail.outgoingEdges).reduce(
+      (total, edges) => total + edges.length,
+      0,
+    );
+    const neighborIds = new Set(detail.neighboringNodes.map((node) => node.id));
+
+    expect(incomingCount).toBe(100);
+    expect(outgoingCount).toBe(100);
+    for (const edge of [
+      ...Object.values(detail.incomingEdges).flat(),
+      ...Object.values(detail.outgoingEdges).flat(),
+    ]) {
+      const neighborId = edge.fromNodeId === routeNode.id ? edge.toNodeId : edge.fromNodeId;
+      expect(neighborIds.has(neighborId)).toBe(true);
+    }
+  });
+
   it("bounds incident edge retrieval for high-degree filtered graph queries", async () => {
     const { project, indexRun, files } = await createIndexedGraphFixture();
     const routeFile = files.find((file) => file.path === "apps/api/src/routes/projects.ts")!;

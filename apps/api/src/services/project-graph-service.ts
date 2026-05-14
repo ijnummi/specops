@@ -84,6 +84,7 @@ type IndexedFacts = {
 };
 
 const insertChunkSize = 500;
+const nodeDetailEdgeLimit = 100;
 
 export function createProjectGraphService(db: Db) {
   async function buildProjectGraph(input: BuildProjectGraphInput): Promise<ProjectGraphListResponse> {
@@ -324,17 +325,31 @@ export function createProjectGraphService(db: Db) {
       throw new NotFoundError("Project graph node not found", { projectId, nodeId });
     }
 
-    const edges = await db
+    const incomingEdges = await db
       .select()
       .from(projectGraphEdges)
       .where(
         and(
           eq(projectGraphEdges.projectId, projectId),
           eq(projectGraphEdges.graphVersionId, node.graphVersionId),
-          or(eq(projectGraphEdges.fromNodeId, nodeId), eq(projectGraphEdges.toNodeId, nodeId)),
+          eq(projectGraphEdges.toNodeId, nodeId),
         ),
       )
-      .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id));
+      .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id))
+      .limit(nodeDetailEdgeLimit);
+    const outgoingEdges = await db
+      .select()
+      .from(projectGraphEdges)
+      .where(
+        and(
+          eq(projectGraphEdges.projectId, projectId),
+          eq(projectGraphEdges.graphVersionId, node.graphVersionId),
+          eq(projectGraphEdges.fromNodeId, nodeId),
+        ),
+      )
+      .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id))
+      .limit(nodeDetailEdgeLimit);
+    const edges = [...incomingEdges, ...outgoingEdges];
     const neighborIds = uniqueStrings(
       edges.map((edge) => (edge.fromNodeId === nodeId ? edge.toNodeId : edge.fromNodeId)),
     );
@@ -355,8 +370,8 @@ export function createProjectGraphService(db: Db) {
 
     return projectGraphNodeDetailSchema.parse({
       node: mapNode(node),
-      incomingEdges: groupEdges(edges.filter((edge) => edge.toNodeId === nodeId)),
-      outgoingEdges: groupEdges(edges.filter((edge) => edge.fromNodeId === nodeId)),
+      incomingEdges: groupEdges(incomingEdges),
+      outgoingEdges: groupEdges(outgoingEdges),
       neighboringNodes: neighboringNodes.map(mapNode),
     });
   }
