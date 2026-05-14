@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  HealthQueueActionDto,
+  HealthQueueDiagnosticDto,
+  HealthQueueEvidenceDto,
+  HealthQueueItemDto,
+  HealthQueuePrimaryTargetDto,
+  HealthQueueSourceStateDto,
+  HealthQueueSummaryDto
+} from "./health-queue.js";
 import {
   healthQueueActionSchema,
   healthQueueEvidenceSchema,
   healthQueuePrimaryTargetSchema,
   healthQueueResponseSchema
 } from "./health-queue.js";
+
+const _typecheckDtoAliases: [
+  HealthQueueDiagnosticDto?,
+  HealthQueueSourceStateDto?,
+  HealthQueuePrimaryTargetDto?,
+  HealthQueueEvidenceDto?,
+  HealthQueueActionDto?,
+  HealthQueueItemDto?,
+  HealthQueueSummaryDto?
+] = [];
 
 const timestamp = "2026-05-14T12:00:00.000Z";
 

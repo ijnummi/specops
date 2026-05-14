@@ -159,14 +159,29 @@ export const healthQueueResponseSchema = z.object({
 });
 
 export type HealthQueueFamily = z.infer<typeof healthQueueFamilySchema>;
+export type HealthQueueFamilyDto = z.infer<typeof healthQueueFamilySchema>;
 export type HealthQueueSeverity = z.infer<typeof healthQueueSeveritySchema>;
+export type HealthQueueSeverityDto = z.infer<typeof healthQueueSeveritySchema>;
 export type HealthQueueDiagnosticLevel = z.infer<typeof healthQueueDiagnosticLevelSchema>;
+export type HealthQueueDiagnosticLevelDto = z.infer<
+  typeof healthQueueDiagnosticLevelSchema
+>;
 export type HealthQueueKind = z.infer<typeof healthQueueKindSchema>;
+export type HealthQueueKindDto = z.infer<typeof healthQueueKindSchema>;
 export type HealthQueueDiagnostic = z.infer<typeof healthQueueDiagnosticSchema>;
+export type HealthQueueDiagnosticDto = z.infer<typeof healthQueueDiagnosticSchema>;
 export type HealthQueueSourceState = z.infer<typeof healthQueueSourceStateSchema>;
+export type HealthQueueSourceStateDto = z.infer<typeof healthQueueSourceStateSchema>;
 export type HealthQueuePrimaryTarget = z.infer<typeof healthQueuePrimaryTargetSchema>;
+export type HealthQueuePrimaryTargetDto = z.infer<
+  typeof healthQueuePrimaryTargetSchema
+>;
 export type HealthQueueEvidence = z.infer<typeof healthQueueEvidenceSchema>;
+export type HealthQueueEvidenceDto = z.infer<typeof healthQueueEvidenceSchema>;
 export type HealthQueueAction = z.infer<typeof healthQueueActionSchema>;
+export type HealthQueueActionDto = z.infer<typeof healthQueueActionSchema>;
 export type HealthQueueItem = z.infer<typeof healthQueueItemSchema>;
+export type HealthQueueItemDto = z.infer<typeof healthQueueItemSchema>;
 export type HealthQueueSummary = z.infer<typeof healthQueueSummarySchema>;
+export type HealthQueueSummaryDto = z.infer<typeof healthQueueSummarySchema>;
 export type ProjectHealthQueueResponseDto = z.infer<typeof healthQueueResponseSchema>;
