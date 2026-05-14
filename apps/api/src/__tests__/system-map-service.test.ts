@@ -158,6 +158,27 @@ describeWithDb("createSystemMapService", () => {
     expect(area?.summary).toContain("13 symbols");
   });
 
+  it("persists rebuilt system maps inside a transaction", async () => {
+    const project = await createProjectFixture();
+    await writeSystemMapFixture(project.repoPath);
+    const indexRun = await createIndexerService(db).indexProject(project.id);
+    const analyzeRun = await insertAnalyzeRun(project.id);
+    let transactionCount = 0;
+    const observedDb = Object.create(db) as typeof db;
+    observedDb.transaction = (async (...args: Parameters<typeof db.transaction>) => {
+      transactionCount += 1;
+      return db.transaction(...args);
+    }) as typeof db.transaction;
+
+    await createSystemMapService(observedDb).buildSystemMap({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      indexRunId: indexRun.id,
+    });
+
+    expect(transactionCount).toBe(1);
+  });
+
   it("links proposals to map areas by source evidence path", async () => {
     const project = await createProjectFixture();
     await writeSystemMapFixture(project.repoPath);
@@ -182,12 +203,19 @@ describeWithDb("createSystemMapService", () => {
           summary: "Project routes expose project APIs.",
         },
         evidenceJson: {
-          sourceFiles: [
+          selectedSourceFiles: [
             {
-              path: "apps/api/src/routes/projects.ts",
-              symbols: ["registerProjectRoutes"],
+              file: "apps/api/src/routes/projects.ts",
+              contentHash: "hash-1",
+              excerptStartLine: 1,
+              excerptEndLine: 20,
             },
           ],
+          provider: "ollama",
+          model: "gemma4",
+          promptVersion: "ai-prefill-v1",
+          claims: [],
+          warnings: [],
         },
         confidence: 0.8,
         status: "pending",
@@ -208,6 +236,93 @@ describeWithDb("createSystemMapService", () => {
     expect(linked.areas.find((area) => area.areaType === "backend_services")?.relatedProposalIds).toEqual(
       [],
     );
+  });
+
+  it("recomputes proposal links from the supplied proposal ids", async () => {
+    const project = await createProjectFixture();
+    await writeSystemMapFixture(project.repoPath);
+    const indexRun = await createIndexerService(db).indexProject(project.id);
+    const analyzeRun = await insertAnalyzeRun(project.id);
+    const service = createSystemMapService(db);
+    await service.buildSystemMap({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      indexRunId: indexRun.id,
+    });
+    const [proposalA, proposalB] = await db
+      .insert(aiProposals)
+      .values([
+        {
+          projectId: project.id,
+          proposalType: "source_spec_entity",
+          title: "Project routes",
+          payloadJson: {},
+          evidenceJson: {
+            scanner: "typescript",
+            sourceFiles: [
+              {
+                file: "apps/api/src/routes/projects.ts",
+                symbolName: "registerProjectRoutes",
+                symbolKind: "function",
+                exported: true,
+                line: 1,
+              },
+            ],
+          },
+          confidence: 0.9,
+          status: "pending",
+        },
+        {
+          projectId: project.id,
+          proposalType: "ai_spec_entity",
+          title: "Project service",
+          payloadJson: {},
+          evidenceJson: {
+            provider: "ollama",
+            model: "gemma4",
+            promptVersion: "ai-prefill-v1",
+            selectedSourceFiles: [
+              {
+                file: "apps/api/src/services/project-service.ts",
+                contentHash: "hash-2",
+                excerptStartLine: 1,
+                excerptEndLine: 20,
+              },
+            ],
+            claims: [],
+            warnings: [],
+          },
+          confidence: 0.8,
+          status: "pending",
+        },
+      ])
+      .returning();
+
+    const first = await service.linkMapToDrafts({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      proposalIds: [proposalA!.id],
+    });
+    expect(first.areas.find((area) => area.areaType === "backend_routes")?.relatedProposalIds).toEqual([
+      proposalA!.id,
+    ]);
+
+    const second = await service.linkMapToDrafts({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      proposalIds: [proposalB!.id],
+    });
+    expect(second.areas.find((area) => area.areaType === "backend_routes")?.relatedProposalIds).toEqual([]);
+    expect(second.areas.find((area) => area.areaType === "backend_services")?.relatedProposalIds).toEqual([
+      proposalB!.id,
+    ]);
+
+    const third = await service.linkMapToDrafts({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      proposalIds: [],
+    });
+    expect(third.areas.flatMap((area) => area.relatedProposalIds)).toEqual([]);
   });
 
   async function createProjectFixture() {

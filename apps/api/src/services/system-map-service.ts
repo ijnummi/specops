@@ -65,14 +65,8 @@ const areaLabels: Record<SystemMapAreaType, string> = {
 
 export function createSystemMapService(db: Db) {
   async function buildSystemMap(input: BuildSystemMapInput): Promise<SystemMapResponseDto> {
-    await db
-      .delete(systemMapSnapshots)
-      .where(
-        and(
-          eq(systemMapSnapshots.projectId, input.projectId),
-          eq(systemMapSnapshots.analyzeRunId, input.analyzeRunId),
-        ),
-      );
+    // Source inventory is current after indexing; indexRunId is reserved for later snapshot metadata.
+    void input.indexRunId;
 
     const files = await db
       .select()
@@ -95,40 +89,52 @@ export function createSystemMapService(db: Db) {
           ]
         : [];
     const coverage = buildCoverage(files, areas);
-    const [snapshot] = await db
-      .insert(systemMapSnapshots)
-      .values({
-        projectId: input.projectId,
-        analyzeRunId: input.analyzeRunId,
-        status: files.length === 0 ? "limited" : "ready",
-        summary: summarizeMap(files.length, areas),
-        coverageJson: coverage,
-        diagnosticsJson: diagnostics,
-      })
-      .returning();
 
-    if (!snapshot) {
-      throw new Error("Failed to create system map snapshot");
-    }
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(systemMapSnapshots)
+        .where(
+          and(
+            eq(systemMapSnapshots.projectId, input.projectId),
+            eq(systemMapSnapshots.analyzeRunId, input.analyzeRunId),
+          ),
+        );
 
-    if (areas.length > 0) {
-      await db.insert(systemMapAreas).values(
-        areas.map((area) => ({
-          snapshotId: snapshot.id,
+      const [snapshot] = await tx
+        .insert(systemMapSnapshots)
+        .values({
           projectId: input.projectId,
-          areaType: area.areaType,
-          name: area.name,
-          summary: area.summary,
-          confidence: area.confidence,
-          evidenceJson: area.evidence,
-          keyFilesJson: area.keyFiles,
-          keySymbolsJson: area.keySymbols,
-          relatedProposalIdsJson: [],
-          diagnosticsJson: area.diagnostics,
-          sortOrder: area.sortOrder,
-        })),
-      );
-    }
+          analyzeRunId: input.analyzeRunId,
+          status: files.length === 0 ? "limited" : "ready",
+          summary: summarizeMap(files.length, areas),
+          coverageJson: coverage,
+          diagnosticsJson: diagnostics,
+        })
+        .returning();
+
+      if (!snapshot) {
+        throw new Error("Failed to create system map snapshot");
+      }
+
+      if (areas.length > 0) {
+        await tx.insert(systemMapAreas).values(
+          areas.map((area) => ({
+            snapshotId: snapshot.id,
+            projectId: input.projectId,
+            areaType: area.areaType,
+            name: area.name,
+            summary: area.summary,
+            confidence: area.confidence,
+            evidenceJson: area.evidence,
+            keyFilesJson: area.keyFiles,
+            keySymbolsJson: area.keySymbols,
+            relatedProposalIdsJson: [],
+            diagnosticsJson: area.diagnostics,
+            sortOrder: area.sortOrder,
+          })),
+        );
+      }
+    });
 
     return getSystemMap(input.projectId, input.analyzeRunId);
   }
@@ -141,31 +147,25 @@ export function createSystemMapService(db: Db) {
       .where(eq(systemMapAreas.snapshotId, snapshot.id))
       .orderBy(asc(systemMapAreas.sortOrder), asc(systemMapAreas.id));
 
-    if (areas.length === 0 || input.proposalIds.length === 0) {
+    if (areas.length === 0) {
       return getSystemMap(input.projectId, input.analyzeRunId);
     }
 
-    const proposals = await db
-      .select()
-      .from(aiProposals)
-      .where(and(eq(aiProposals.projectId, input.projectId), inArray(aiProposals.id, input.proposalIds)));
+    const proposals =
+      input.proposalIds.length === 0
+        ? []
+        : await db
+            .select()
+            .from(aiProposals)
+            .where(and(eq(aiProposals.projectId, input.projectId), inArray(aiProposals.id, input.proposalIds)));
 
     for (const area of areas) {
       const evidencePaths = new Set(readEvidence(area.evidenceJson).map((item) => item.sourceFilePath));
-      const matchedProposalIds = proposals
+      const relatedProposalIds = uniqueStrings(proposals
         .filter((proposal) =>
           proposalEvidencePaths(proposal.evidenceJson).some((filePath) => evidencePaths.has(filePath)),
         )
-        .map((proposal) => proposal.id);
-
-      if (matchedProposalIds.length === 0) {
-        continue;
-      }
-
-      const relatedProposalIds = uniqueStrings([
-        ...readStringArray(area.relatedProposalIdsJson),
-        ...matchedProposalIds,
-      ]);
+        .map((proposal) => proposal.id));
       await db
         .update(systemMapAreas)
         .set({ relatedProposalIdsJson: relatedProposalIds, updatedAt: new Date() })
@@ -436,18 +436,33 @@ function proposalEvidencePaths(value: unknown): string[] {
     return [];
   }
 
-  const sourceFilesValue = (value as Record<string, unknown>).sourceFiles;
-  if (!Array.isArray(sourceFilesValue)) {
+  const evidence = value as Record<string, unknown>;
+
+  return uniqueStrings([
+    ...proposalFileValues(evidence.sourceFiles, ["file", "path"]),
+    ...proposalFileValues(evidence.selectedSourceFiles, ["file"]),
+  ]);
+}
+
+function proposalFileValues(value: unknown, keys: string[]): string[] {
+  if (!Array.isArray(value)) {
     return [];
   }
 
-  return sourceFilesValue.flatMap((item) => {
+  return value.flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
     }
 
-    const pathValue = (item as Record<string, unknown>).path;
-    return typeof pathValue === "string" && pathValue.length > 0 ? [pathValue] : [];
+    const record = item as Record<string, unknown>;
+    for (const key of keys) {
+      const fileValue = record[key];
+      if (typeof fileValue === "string" && fileValue.length > 0) {
+        return [fileValue];
+      }
+    }
+
+    return [];
   });
 }
 
