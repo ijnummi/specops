@@ -95,6 +95,42 @@ describe("initial migration", () => {
     );
   });
 
+  it("creates system map storage and lookup indexes", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "system_map_snapshots"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "system_map_areas"');
+    expect(migration).toContain(
+      'CONSTRAINT "system_map_snapshots_analyze_run_id_unique" UNIQUE("analyze_run_id")',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "system_map_snapshots_id_project_id_unique" UNIQUE("id","project_id")',
+    );
+    expect(migration).toContain("system_map_snapshots_project_run_idx");
+    expect(migration).toContain("system_map_areas_snapshot_type_idx");
+    for (const constraintName of [
+      "system_map_snapshots_project_id_projects_id_fk",
+      "system_map_snapshots_analyze_run_id_analyze_runs_id_fk",
+      "system_map_snapshots_analyze_run_project_fk",
+      "system_map_areas_snapshot_id_system_map_snapshots_id_fk",
+      "system_map_areas_project_id_projects_id_fk",
+      "system_map_areas_snapshot_project_fk",
+    ]) {
+      expect(migration).toContain(`conname = '${constraintName}'`);
+    }
+    expect(migration).toContain(
+      'ADD CONSTRAINT "system_map_snapshots_analyze_run_project_fk"',
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("analyze_run_id","project_id") REFERENCES "analyze_runs"("id","project_id") ON DELETE cascade',
+    );
+    expect(migration).toContain("conname = 'system_map_areas_snapshot_project_fk'");
+    expect(migration).toContain('ADD CONSTRAINT "system_map_areas_snapshot_project_fk"');
+    expect(migration).toContain(
+      'FOREIGN KEY ("snapshot_id","project_id") REFERENCES "system_map_snapshots"("id","project_id") ON DELETE cascade',
+    );
+  });
+
   it("creates analyze review assembly storage", async () => {
     const migration = await readFile(migrationPath, "utf8");
 

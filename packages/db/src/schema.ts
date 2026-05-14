@@ -355,6 +355,80 @@ export const analyzeRuns = pgTable(
   }),
 );
 
+export const systemMapSnapshots = pgTable(
+  "system_map_snapshots",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    analyzeRunId: uuid("analyze_run_id")
+      .notNull()
+      .references(() => analyzeRuns.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    summary: text("summary").notNull().default(""),
+    coverageJson: jsonb("coverage_json").notNull().default(sql`'{}'::jsonb`),
+    diagnosticsJson: jsonb("diagnostics_json").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    projectIdx: index("system_map_snapshots_project_id_idx").on(table.projectId),
+    projectRunIdx: index("system_map_snapshots_project_run_idx").on(
+      table.projectId,
+      table.analyzeRunId,
+    ),
+    analyzeRunProjectFk: foreignKey({
+      name: "system_map_snapshots_analyze_run_project_fk",
+      columns: [table.analyzeRunId, table.projectId],
+      foreignColumns: [analyzeRuns.id, analyzeRuns.projectId],
+    }).onDelete("cascade"),
+    runUnique: unique("system_map_snapshots_analyze_run_id_unique").on(table.analyzeRunId),
+    idProjectUnique: unique("system_map_snapshots_id_project_id_unique").on(
+      table.id,
+      table.projectId,
+    ),
+  }),
+);
+
+export const systemMapAreas = pgTable(
+  "system_map_areas",
+  {
+    id: primaryId(),
+    snapshotId: uuid("snapshot_id")
+      .notNull()
+      .references(() => systemMapSnapshots.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    areaType: text("area_type").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    confidence: doublePrecision("confidence"),
+    evidenceJson: jsonb("evidence_json").notNull().default(sql`'[]'::jsonb`),
+    keyFilesJson: jsonb("key_files_json").notNull().default(sql`'[]'::jsonb`),
+    keySymbolsJson: jsonb("key_symbols_json").notNull().default(sql`'[]'::jsonb`),
+    relatedProposalIdsJson: jsonb("related_proposal_ids_json").notNull().default(sql`'[]'::jsonb`),
+    diagnosticsJson: jsonb("diagnostics_json").notNull().default(sql`'[]'::jsonb`),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    snapshotIdx: index("system_map_areas_snapshot_id_idx").on(table.snapshotId),
+    snapshotTypeIdx: index("system_map_areas_snapshot_type_idx").on(
+      table.snapshotId,
+      table.areaType,
+    ),
+    projectIdx: index("system_map_areas_project_id_idx").on(table.projectId),
+    snapshotProjectFk: foreignKey({
+      name: "system_map_areas_snapshot_project_fk",
+      columns: [table.snapshotId, table.projectId],
+      foreignColumns: [systemMapSnapshots.id, systemMapSnapshots.projectId],
+    }).onDelete("cascade"),
+  }),
+);
+
 export const analyzeReviewAssemblies = pgTable(
   "analyze_review_assemblies",
   {

@@ -430,6 +430,137 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS "system_map_snapshots" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "project_id" uuid NOT NULL,
+  "analyze_run_id" uuid NOT NULL,
+  "status" text NOT NULL,
+  "summary" text DEFAULT '' NOT NULL,
+  "coverage_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+  "diagnostics_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "system_map_snapshots_analyze_run_id_unique" UNIQUE("analyze_run_id"),
+  CONSTRAINT "system_map_snapshots_id_project_id_unique" UNIQUE("id","project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "system_map_areas" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "snapshot_id" uuid NOT NULL,
+  "project_id" uuid NOT NULL,
+  "area_type" text NOT NULL,
+  "name" text NOT NULL,
+  "summary" text DEFAULT '' NOT NULL,
+  "confidence" double precision,
+  "evidence_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "key_files_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "key_symbols_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "related_proposal_ids_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "diagnostics_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "sort_order" integer DEFAULT 0 NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_snapshots_project_id_projects_id_fk'
+      AND conrelid = 'system_map_snapshots'::regclass
+  ) THEN
+    ALTER TABLE "system_map_snapshots"
+      ADD CONSTRAINT "system_map_snapshots_project_id_projects_id_fk"
+      FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_snapshots_analyze_run_id_analyze_runs_id_fk'
+      AND conrelid = 'system_map_snapshots'::regclass
+  ) THEN
+    ALTER TABLE "system_map_snapshots"
+      ADD CONSTRAINT "system_map_snapshots_analyze_run_id_analyze_runs_id_fk"
+      FOREIGN KEY ("analyze_run_id") REFERENCES "analyze_runs"("id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_snapshots_analyze_run_project_fk'
+      AND conrelid = 'system_map_snapshots'::regclass
+  ) THEN
+    ALTER TABLE "system_map_snapshots"
+      ADD CONSTRAINT "system_map_snapshots_analyze_run_project_fk"
+      FOREIGN KEY ("analyze_run_id","project_id") REFERENCES "analyze_runs"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_areas_snapshot_id_system_map_snapshots_id_fk'
+      AND conrelid = 'system_map_areas'::regclass
+  ) THEN
+    ALTER TABLE "system_map_areas"
+      ADD CONSTRAINT "system_map_areas_snapshot_id_system_map_snapshots_id_fk"
+      FOREIGN KEY ("snapshot_id") REFERENCES "system_map_snapshots"("id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_areas_project_id_projects_id_fk'
+      AND conrelid = 'system_map_areas'::regclass
+  ) THEN
+    ALTER TABLE "system_map_areas"
+      ADD CONSTRAINT "system_map_areas_project_id_projects_id_fk"
+      FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'system_map_areas_snapshot_project_fk'
+      AND conrelid = 'system_map_areas'::regclass
+  ) THEN
+    ALTER TABLE "system_map_areas"
+      ADD CONSTRAINT "system_map_areas_snapshot_project_fk"
+      FOREIGN KEY ("snapshot_id","project_id") REFERENCES "system_map_snapshots"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "system_map_snapshots_project_id_idx"
+  ON "system_map_snapshots" ("project_id");
+
+CREATE INDEX IF NOT EXISTS "system_map_snapshots_project_run_idx"
+  ON "system_map_snapshots" ("project_id","analyze_run_id");
+
+CREATE INDEX IF NOT EXISTS "system_map_areas_snapshot_id_idx"
+  ON "system_map_areas" ("snapshot_id");
+
+CREATE INDEX IF NOT EXISTS "system_map_areas_snapshot_type_idx"
+  ON "system_map_areas" ("snapshot_id","area_type");
+
+CREATE INDEX IF NOT EXISTS "system_map_areas_project_id_idx"
+  ON "system_map_areas" ("project_id");
+
 CREATE TABLE IF NOT EXISTS analyze_review_assemblies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

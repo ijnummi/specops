@@ -12,6 +12,8 @@ import type {
   sourceSpecLinks,
   sourceSymbols,
   specLinks,
+  systemMapAreas,
+  systemMapSnapshots,
 } from "./schema.js";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -30,6 +32,10 @@ type AnalyzeReviewClaim = InferSelectModel<typeof analyzeReviewClaims>;
 type AnalyzeReviewClaimEvidence = InferSelectModel<typeof analyzeReviewClaimEvidence>;
 type SourceSpecAnnotation = InferSelectModel<typeof sourceSpecAnnotations>;
 type NewSourceSpecAnnotation = InferInsertModel<typeof sourceSpecAnnotations>;
+type SystemMapSnapshotSelect = typeof systemMapSnapshots.$inferSelect;
+type SystemMapSnapshotInsert = typeof systemMapSnapshots.$inferInsert;
+type SystemMapAreaSelect = typeof systemMapAreas.$inferSelect;
+type SystemMapAreaInsert = typeof systemMapAreas.$inferInsert;
 
 type _SpecLinkConfidenceIsNumberOrNull = Expect<Equal<SpecLink["confidence"], number | null>>;
 type _AiProposalConfidenceIsNumberOrNull = Expect<Equal<AiProposal["confidence"], number | null>>;
@@ -66,3 +72,12 @@ void _sourceSpecAnnotation;
 
 const analyzeRun = null as unknown as AnalyzeRun;
 analyzeRun.status satisfies string;
+
+const systemMapSnapshotSelect = null as unknown as SystemMapSnapshotSelect;
+const systemMapSnapshotInsert = null as unknown as SystemMapSnapshotInsert;
+const systemMapAreaSelect = null as unknown as SystemMapAreaSelect;
+const systemMapAreaInsert = null as unknown as SystemMapAreaInsert;
+void systemMapSnapshotSelect;
+void systemMapSnapshotInsert;
+void systemMapAreaSelect;
+void systemMapAreaInsert;

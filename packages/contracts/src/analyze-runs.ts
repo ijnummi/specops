@@ -5,9 +5,11 @@ export const analyzeRunStatusSchema = z.enum(["queued", "running", "succeeded", 
 export const analyzeRunStepNameSchema = z.enum([
   "initialize",
   "index",
+  "build_system_map",
   "source_proposals",
   "select_ai_sources",
   "ai_prefill",
+  "link_map_to_drafts",
 ]);
 
 export const analyzeRunStepStatusSchema = z.enum([
