@@ -2639,9 +2639,11 @@ describeWithDb("database-backed routes", () => {
     expect(started.steps.map((step) => step.name)).toEqual([
       "initialize",
       "index",
+      "build_system_map",
       "source_proposals",
       "select_ai_sources",
-      "ai_prefill"
+      "ai_prefill",
+      "link_map_to_drafts"
     ]);
 
     const fetched = await waitForAnalyzeRun(project.id, started.id);
@@ -2653,6 +2655,72 @@ describeWithDb("database-backed routes", () => {
     expect(fetched.status).toBe("succeeded");
     expect(fetched.aiProposalCount).toBeGreaterThan(0);
     expect(fetched.steps.map((step) => step.name)).toEqual(started.steps.map((step) => step.name));
+  });
+
+  it("returns the system map for an analyze run", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        async generateSpecProposals(input) {
+          return {
+            provider: "ollama",
+            model: input.model,
+            text: JSON.stringify({
+              proposals: [
+                {
+                  entityId: "uc.manage-project-routes",
+                  type: "use_case",
+                  title: "Manage project routes",
+                  summary: "Users can create and inspect local projects.",
+                  sourceFiles: ["src/routes.ts"],
+                  claims: [
+                    {
+                      text: "Project routes create and inspect local projects.",
+                      sourceFiles: ["src/routes.ts"]
+                    }
+                  ],
+                  proposedLinks: [],
+                  confidence: 0.82
+                }
+              ]
+            })
+          };
+        }
+      })
+    });
+    const project = await createProjectViaApi();
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeFile(
+      path.join(project.repoPath, "src", "routes.ts"),
+      [
+        "export class ProjectRoutes {",
+        "  list() { return []; }",
+        "  create(name: string) { return { name }; }",
+        "}",
+        ""
+      ].join("\n")
+    );
+
+    const startResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/analyze-runs`
+    });
+    expect(startResponse.statusCode).toBe(201);
+    const started = analyzeRunDetailSchema.parse(startResponse.json());
+    const finished = await waitForAnalyzeRun(project.id, started.id);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/analyze-runs/${finished.id}/system-map`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      snapshot: {
+        projectId: project.id,
+        analyzeRunId: finished.id
+      },
+      areas: expect.any(Array)
+    });
   });
 
   it("returns conflict details when starting an analyze run while one is active", async () => {

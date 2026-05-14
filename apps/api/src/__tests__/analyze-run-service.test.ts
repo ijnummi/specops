@@ -62,9 +62,11 @@ describeWithDb("createAnalyzeRunService", () => {
     expect(run.steps.map((step) => step.name)).toEqual([
       "initialize",
       "index",
+      "build_system_map",
       "source_proposals",
       "select_ai_sources",
-      "ai_prefill"
+      "ai_prefill",
+      "link_map_to_drafts"
     ]);
     expect(run.steps.every((step) => step.status === "pending")).toBe(true);
 
@@ -109,12 +111,20 @@ describeWithDb("createAnalyzeRunService", () => {
       "succeeded",
       "succeeded",
       "succeeded",
+      "succeeded",
+      "succeeded",
       "succeeded"
     ]);
     expect(finished.steps.find((step) => step.name === "index")?.counts).toMatchObject({
       sourceFileCount: expect.any(Number),
       sourceExportCount: expect.any(Number),
       sourceSymbolCount: expect.any(Number)
+    });
+    expect(finished.steps.find((step) => step.name === "build_system_map")?.counts).toMatchObject({
+      systemMapAreaCount: expect.any(Number)
+    });
+    expect(finished.steps.find((step) => step.name === "link_map_to_drafts")?.counts).toMatchObject({
+      linkedProposalCount: expect.any(Number)
     });
   });
 

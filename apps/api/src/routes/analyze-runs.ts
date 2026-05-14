@@ -7,6 +7,7 @@ import {
   createAnalyzeRunService,
   type AiPrefillProviderFactory
 } from "../services/analyze-run-service.js";
+import { createSystemMapService } from "../services/system-map-service.js";
 
 type RouteOptions = {
   db: Db;
@@ -38,5 +39,10 @@ export const registerAnalyzeRunRoutes: FastifyPluginAsync<RouteOptions> = async 
   app.get("/projects/:projectId/analyze-runs/:runId", async (request) => {
     const { projectId, runId } = analyzeRunParamsSchema.parse(request.params);
     return service.getAnalyzeRun(projectId, runId);
+  });
+
+  app.get("/projects/:projectId/analyze-runs/:runId/system-map", async (request) => {
+    const { projectId, runId } = analyzeRunParamsSchema.parse(request.params);
+    return createSystemMapService(db).getSystemMap(projectId, runId);
   });
 };

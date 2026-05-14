@@ -32,6 +32,7 @@ import { createIndexerService } from "./indexer-service.js";
 import { createProjectService } from "./project-service.js";
 import { createProposalService } from "./proposal-service.js";
 import { createSpecopsInitializerService } from "./specops-initializer.js";
+import { createSystemMapService } from "./system-map-service.js";
 
 export type { AiPrefillProviderFactory };
 
@@ -50,9 +51,11 @@ type StepPatch = {
 const stepNames: AnalyzeRunStepName[] = [
   "initialize",
   "index",
+  "build_system_map",
   "source_proposals",
   "select_ai_sources",
-  "ai_prefill"
+  "ai_prefill",
+  "link_map_to_drafts"
 ];
 const aiPrefillDefaults = {
   provider: "ollama" as const,
@@ -137,6 +140,7 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
   async function executeAnalyzeRun(projectId: string, runId: string): Promise<void> {
     let steps = await loadRunSteps(projectId, runId);
     let currentStep: AnalyzeRunStepName | null = null;
+    let indexRunId = (await getAnalyzeRunRow(projectId, runId)).indexRunId;
     let proposalIds = readProposalIds((await getAnalyzeRunRow(projectId, runId)).proposalIdsJson);
 
     try {
@@ -155,6 +159,7 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
 
       await runStep("index", async () => {
         const indexRun = await createIndexerService(db).indexProject(projectId);
+        indexRunId = indexRun.id;
         const counts = indexCounts(indexRun);
         await updateRun({
           indexRunId: indexRun.id
@@ -162,6 +167,22 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
         return {
           status: "succeeded",
           counts
+        };
+      });
+
+      await runStep("build_system_map", async () => {
+        const systemMap = await createSystemMapService(db).buildSystemMap({
+          projectId,
+          analyzeRunId: runId,
+          indexRunId
+        });
+        return {
+          status: "succeeded",
+          counts: {
+            systemMapAreaCount: systemMap.areas.length,
+            mappedSourceFileCount: systemMap.snapshot.coverage.mappedSourceFileCount,
+            unmappedSourceFileCount: systemMap.snapshot.coverage.unmappedSourceFileCount
+          }
         };
       });
 
@@ -246,6 +267,24 @@ export function createAnalyzeRunService(db: Db, options: AnalyzeRunServiceOption
           };
         });
       }
+
+      await runStep("link_map_to_drafts", async () => {
+        const systemMap = await createSystemMapService(db).linkMapToDrafts({
+          projectId,
+          analyzeRunId: runId,
+          proposalIds
+        });
+        const linkedProposalIds = new Set(
+          systemMap.areas.flatMap((area) => area.relatedProposalIds)
+        );
+        return {
+          status: "succeeded",
+          counts: {
+            linkedProposalCount: linkedProposalIds.size,
+            unmappedProposalCount: Math.max(proposalIds.length - linkedProposalIds.size, 0)
+          }
+        };
+      });
 
       await updateRun({
         status: "succeeded",
