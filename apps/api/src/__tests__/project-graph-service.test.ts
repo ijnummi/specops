@@ -1,0 +1,451 @@
+import {
+  projectGraphListResponseSchema,
+  projectGraphNodeDetailSchema,
+} from "@specops/contracts";
+import type { Db } from "@specops/db";
+import {
+  createDb,
+  indexRuns,
+  projectGraphVersions,
+  projects,
+  sourceExports,
+  sourceFiles,
+  sourceImports,
+  sourceSpecAnnotations,
+  sourceSymbols,
+  specEntities,
+} from "@specops/db";
+import { and, eq } from "drizzle-orm";
+import pg from "pg";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import { createProjectGraphService } from "../services/project-graph-service.js";
+
+const testDatabaseUrl = readTestDatabaseUrl();
+const describeWithDb = testDatabaseUrl ? describe : describe.skip;
+const { Pool } = pg;
+
+describeWithDb("createProjectGraphService", () => {
+  const projectIds: string[] = [];
+  let db: Db;
+
+  beforeAll(async () => {
+    if (!testDatabaseUrl) {
+      return;
+    }
+
+    await migrateTestDatabase(testDatabaseUrl);
+    db = createDb(testDatabaseUrl);
+  });
+
+  afterEach(async () => {
+    for (const projectId of projectIds.splice(0)) {
+      await db.delete(projects).where(eq(projects.id, projectId));
+    }
+  });
+
+  afterAll(async () => {
+    await closeDb(db);
+  });
+
+  it("builds graph nodes and deterministic edges from indexed facts", async () => {
+    const { project, indexRun, files } = await createIndexedGraphFixture();
+
+    const built = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    expect(projectGraphListResponseSchema.parse(built)).toEqual(built);
+    expect(built.version.status).toBe("ready");
+    expect(built.version.coverage.sourceFileCount).toBe(4);
+    expect(built.version.coverage.unresolvedImportCount).toBe(1);
+    expect(built.nodeCounts).toMatchObject({
+      package: 1,
+      module: expect.any(Number),
+      file: 4,
+      symbol: 3,
+      spec_entity: 1,
+      external_dependency: 1,
+    });
+
+    const nodeByKey = new Map(built.nodes.map((node) => [node.nodeKey, node]));
+    const routeFile = nodeByKey.get("file:apps/api/src/routes/projects.ts");
+    const serviceFile = nodeByKey.get("file:apps/api/src/services/project-service.ts");
+    const testFile = nodeByKey.get("file:apps/api/src/services/project-service.test.ts");
+    const schemaFile = nodeByKey.get("file:apps/api/src/db/schema.ts");
+    const fastify = nodeByKey.get("external:fastify");
+    const registerSymbol = nodeByKey.get("symbol:apps/api/src/routes/projects.ts:registerProjectRoutes");
+    const listProjectsSymbol = nodeByKey.get("symbol:apps/api/src/services/project-service.ts:listProjects");
+
+    expect(routeFile).toMatchObject({
+      nodeType: "file",
+      path: "apps/api/src/routes/projects.ts",
+      metadata: expect.objectContaining({ classification: "route" }),
+    });
+    expect(serviceFile).toMatchObject({
+      metadata: expect.objectContaining({ classification: "source" }),
+    });
+    expect(testFile).toMatchObject({
+      metadata: expect.objectContaining({ classification: "test" }),
+    });
+    expect(schemaFile).toMatchObject({
+      metadata: expect.objectContaining({ classification: "data_model" }),
+    });
+    expect(fastify).toMatchObject({ nodeType: "external_dependency", label: "fastify" });
+
+    expect(edgeTypes(built, routeFile!.id, registerSymbol!.id)).toContain("defines");
+    expect(edgeTypes(built, routeFile!.id, registerSymbol!.id)).toContain("exports");
+    expect(edgeTypes(built, routeFile!.id, serviceFile!.id)).toContain("imports");
+    expect(edgeTypes(built, routeFile!.id, fastify!.id)).toContain("imports");
+    expect(edgeTypes(built, serviceFile!.id, listProjectsSymbol!.id)).toEqual(
+      expect.arrayContaining(["defines", "exports"]),
+    );
+    expect(edgeTypes(built, testFile!.id, serviceFile!.id)).toContain("tests");
+
+    const detail = await createProjectGraphService(db).getGraphNode(project.id, routeFile!.id);
+    expect(projectGraphNodeDetailSchema.parse(detail)).toEqual(detail);
+    expect(detail.outgoingEdges.imports.map((edge) => edge.toNodeId)).toEqual(
+      expect.arrayContaining([serviceFile!.id, fastify!.id]),
+    );
+    expect(detail.neighboringNodes.map((node) => node.id)).toEqual(
+      expect.arrayContaining([serviceFile!.id, fastify!.id, registerSymbol!.id]),
+    );
+
+    const rebuilt = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+    expect(rebuilt.version.id).not.toBe(built.version.id);
+    const [priorVersion] = await db
+      .select()
+      .from(projectGraphVersions)
+      .where(
+        and(
+          eq(projectGraphVersions.projectId, project.id),
+          eq(projectGraphVersions.id, built.version.id),
+        ),
+      );
+    expect(priorVersion?.status).toBe("superseded");
+    expect(files).toHaveLength(4);
+  });
+
+  it("projects active source spec annotations into supports_spec edges", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    await insertSourceSpecAnnotation(project.id, indexRun.id, {
+      sourceFilePath: "apps/api/src/routes/projects.ts",
+      symbolName: "registerProjectRoutes",
+      confidence: 0.91,
+      status: "active",
+    });
+    await insertSourceSpecAnnotation(project.id, indexRun.id, {
+      sourceFilePath: "apps/api/src/services/project-service.ts",
+      symbolName: "listProjects",
+      confidence: 0.51,
+      status: "stale",
+    });
+
+    const built = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const nodeByKey = new Map(built.nodes.map((node) => [node.nodeKey, node]));
+    const registerSymbol = nodeByKey.get("symbol:apps/api/src/routes/projects.ts:registerProjectRoutes");
+    const serviceSymbol = nodeByKey.get("symbol:apps/api/src/services/project-service.ts:listProjects");
+    const specNode = nodeByKey.get("spec:interface.project-routes");
+
+    expect(edgeTypes(built, registerSymbol!.id, specNode!.id)).toContain("supports_spec");
+    expect(edgeTypes(built, serviceSymbol!.id, specNode!.id)).not.toContain("supports_spec");
+    expect(
+      built.edges.find(
+        (edge) =>
+          edge.fromNodeId === registerSymbol!.id &&
+          edge.toNodeId === specNode!.id &&
+          edge.edgeType === "supports_spec",
+      ),
+    ).toMatchObject({ provenance: "annotation", confidence: 0.91 });
+  });
+
+  it("creates a limited graph when only specs exist", async () => {
+    const { project, indexRun } = await createProjectWithIndexRun();
+    await insertSpecEntity(project.id);
+
+    const built = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    expect(projectGraphListResponseSchema.parse(built)).toEqual(built);
+    expect(built.version.status).toBe("limited");
+    expect(built.version.coverage.sourceFileCount).toBe(0);
+    expect(built.version.coverage.specEntityCount).toBe(1);
+    expect(built.version.diagnostics).toContainEqual({
+      level: "warning",
+      code: "no_source_files",
+      message: "No indexed source files were available for the project graph.",
+    });
+    expect(built.nodes).toMatchObject([
+      expect.objectContaining({
+        nodeType: "spec_entity",
+        nodeKey: "spec:interface.project-routes",
+      }),
+    ]);
+    expect(built.edges).toEqual([]);
+  });
+
+  async function createIndexedGraphFixture() {
+    const { project, indexRun } = await createProjectWithIndexRun();
+    await insertSpecEntity(project.id);
+
+    const files = await db
+      .insert(sourceFiles)
+      .values([
+        {
+          projectId: project.id,
+          path: "apps/api/src/routes/projects.ts",
+          language: "typescript",
+          kind: "source",
+          sizeBytes: 128,
+          contentHash: "routes-hash",
+        },
+        {
+          projectId: project.id,
+          path: "apps/api/src/services/project-service.ts",
+          language: "typescript",
+          kind: "source",
+          sizeBytes: 96,
+          contentHash: "service-hash",
+        },
+        {
+          projectId: project.id,
+          path: "apps/api/src/services/project-service.test.ts",
+          language: "typescript",
+          kind: "test",
+          sizeBytes: 64,
+          contentHash: "test-hash",
+        },
+        {
+          projectId: project.id,
+          path: "apps/api/src/db/schema.ts",
+          language: "typescript",
+          kind: "source",
+          sizeBytes: 32,
+          contentHash: "schema-hash",
+        },
+      ])
+      .returning();
+
+    const routeFile = files.find((file) => file.path.endsWith("routes/projects.ts"))!;
+    const serviceFile = files.find((file) => file.path.endsWith("project-service.ts"))!;
+    const testFile = files.find((file) => file.path.endsWith("project-service.test.ts"))!;
+    const schemaFile = files.find((file) => file.path.endsWith("schema.ts"))!;
+
+    await db.insert(sourceImports).values([
+      {
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        specifier: "fastify",
+        importKind: "named",
+        importedNames: ["FastifyInstance"],
+        isRelative: false,
+        resolvedPath: null,
+      },
+      {
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        specifier: "../services/project-service.js",
+        importKind: "named",
+        importedNames: ["listProjects"],
+        isRelative: true,
+        resolvedPath: serviceFile.path,
+      },
+      {
+        projectId: project.id,
+        sourceFileId: testFile.id,
+        filePath: testFile.path,
+        specifier: "./project-service.js",
+        importKind: "named",
+        importedNames: ["listProjects"],
+        isRelative: true,
+        resolvedPath: serviceFile.path,
+      },
+    ]);
+
+    await db.insert(sourceSymbols).values([
+      {
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        name: "registerProjectRoutes",
+        symbolKind: "function",
+        isExported: true,
+        line: 3,
+        metadataJson: {},
+      },
+      {
+        projectId: project.id,
+        sourceFileId: serviceFile.id,
+        filePath: serviceFile.path,
+        name: "listProjects",
+        symbolKind: "function",
+        isExported: true,
+        line: 1,
+        metadataJson: {},
+      },
+      {
+        projectId: project.id,
+        sourceFileId: schemaFile.id,
+        filePath: schemaFile.path,
+        name: "ProjectRow",
+        symbolKind: "type",
+        isExported: true,
+        line: 1,
+        metadataJson: {},
+      },
+    ]);
+
+    await db.insert(sourceExports).values([
+      {
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        exportedName: "registerProjectRoutes",
+        exportKind: "function",
+        sourceSpecifier: null,
+      },
+      {
+        projectId: project.id,
+        sourceFileId: serviceFile.id,
+        filePath: serviceFile.path,
+        exportedName: "listProjects",
+        exportKind: "function",
+        sourceSpecifier: null,
+      },
+    ]);
+
+    return { project, indexRun, files };
+  }
+
+  async function createProjectWithIndexRun() {
+    const [project] = await db
+      .insert(projects)
+      .values({
+        name: `Project Graph ${Date.now()} ${Math.random()}`,
+        slug: `project-graph-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        repoPath: "/tmp/specops-project-graph",
+        specopsPath: "/tmp/specops-project-graph/.specops",
+      })
+      .returning();
+    projectIds.push(project!.id);
+
+    const [indexRun] = await db
+      .insert(indexRuns)
+      .values({
+        projectId: project!.id,
+        status: "completed",
+        entityCount: 1,
+        sourceFileCount: 4,
+        sourceImportCount: 3,
+        sourceExportCount: 2,
+        sourceSymbolCount: 3,
+      })
+      .returning();
+
+    return { project: project!, indexRun: indexRun! };
+  }
+
+  async function insertSpecEntity(projectId: string) {
+    await db.insert(specEntities).values({
+      projectId,
+      entityId: "interface.project-routes",
+      type: "interface",
+      title: "Project routes",
+      status: "active",
+      filePath: ".specops/interfaces/project-routes.md",
+      frontmatterJson: { id: "interface.project-routes" },
+      bodyMarkdown: "# Project routes\n",
+      bodyText: "Project routes",
+      contentHash: "spec-hash",
+    });
+  }
+
+  async function insertSourceSpecAnnotation(
+    projectId: string,
+    indexRunId: string,
+    input: {
+      sourceFilePath: string;
+      symbolName: string;
+      confidence: number;
+      status: "active" | "stale";
+    },
+  ) {
+    await db.insert(sourceSpecAnnotations).values({
+      projectId,
+      sourceFilePath: input.sourceFilePath,
+      symbolName: input.symbolName,
+      symbolKind: "function",
+      startLine: 1,
+      endLine: 10,
+      sourceContentHash: `${input.sourceFilePath}-hash`,
+      entityId: "interface.project-routes",
+      specFilePath: ".specops/interfaces/project-routes.md",
+      relationshipType: "supports",
+      confidence: input.confidence,
+      provenance: "manual",
+      status: input.status,
+      indexRunId,
+    });
+  }
+});
+
+function edgeTypes(
+  graph: ReturnType<typeof projectGraphListResponseSchema.parse>,
+  fromNodeId: string,
+  toNodeId: string,
+) {
+  return graph.edges
+    .filter((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId)
+    .map((edge) => edge.edgeType);
+}
+
+async function migrateTestDatabase(connectionString: string) {
+  const client = new Pool({ connectionString });
+  try {
+    const sql = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(new URL("../../../../packages/db/migrations/0000_initial.sql", import.meta.url), "utf8"),
+    );
+    await client.query(sql);
+  } finally {
+    await client.end();
+  }
+}
+
+async function closeDb(db: Db | undefined): Promise<void> {
+  const client = (db as unknown as { $client?: { end: () => Promise<void> } } | undefined)?.$client;
+  await client?.end();
+}
+
+function readTestDatabaseUrl(): string | undefined {
+  const url = process.env.TEST_DATABASE_URL;
+  if (!url && process.env.CI) {
+    throw new Error("TEST_DATABASE_URL is required for DB-backed API tests in CI");
+  }
+
+  if (url) {
+    assertSafeTestDatabaseUrl(url);
+  }
+
+  return url;
+}
+
+function assertSafeTestDatabaseUrl(connectionString: string) {
+  const parsed = new URL(connectionString);
+  const databaseName = parsed.pathname.replace(/^\//, "");
+
+  if (!databaseName.includes("test") && !databaseName.includes("specops_test")) {
+    throw new Error(`Refusing to run DB-backed API tests against non-test database "${databaseName}"`);
+  }
+}
