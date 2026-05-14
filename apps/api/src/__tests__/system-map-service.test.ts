@@ -238,6 +238,55 @@ describeWithDb("createSystemMapService", () => {
     );
   });
 
+  it("links proposals to map areas inside a transaction", async () => {
+    const project = await createProjectFixture();
+    await writeSystemMapFixture(project.repoPath);
+    const indexRun = await createIndexerService(db).indexProject(project.id);
+    const analyzeRun = await insertAnalyzeRun(project.id);
+    const service = createSystemMapService(db);
+    await service.buildSystemMap({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      indexRunId: indexRun.id,
+    });
+    const [proposal] = await db
+      .insert(aiProposals)
+      .values({
+        projectId: project.id,
+        proposalType: "source_spec_entity",
+        title: "Project routes",
+        payloadJson: {},
+        evidenceJson: {
+          sourceFiles: [
+            {
+              file: "apps/api/src/routes/projects.ts",
+              symbolName: "registerProjectRoutes",
+              symbolKind: "function",
+              exported: true,
+              line: 1,
+            },
+          ],
+        },
+        confidence: 0.9,
+        status: "pending",
+      })
+      .returning();
+    let transactionCount = 0;
+    const observedDb = Object.create(db) as typeof db;
+    observedDb.transaction = (async (...args: Parameters<typeof db.transaction>) => {
+      transactionCount += 1;
+      return db.transaction(...args);
+    }) as typeof db.transaction;
+
+    await createSystemMapService(observedDb).linkMapToDrafts({
+      projectId: project.id,
+      analyzeRunId: analyzeRun.id,
+      proposalIds: [proposal!.id],
+    });
+
+    expect(transactionCount).toBe(1);
+  });
+
   it("recomputes proposal links from the supplied proposal ids", async () => {
     const project = await createProjectFixture();
     await writeSystemMapFixture(project.repoPath);

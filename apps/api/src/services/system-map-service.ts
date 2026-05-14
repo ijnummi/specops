@@ -140,39 +140,65 @@ export function createSystemMapService(db: Db) {
   }
 
   async function linkMapToDrafts(input: LinkMapToDraftsInput): Promise<SystemMapResponseDto> {
-    const snapshot = await getSnapshotRow(input.projectId, input.analyzeRunId);
-    const areas = await db
-      .select()
-      .from(systemMapAreas)
-      .where(eq(systemMapAreas.snapshotId, snapshot.id))
-      .orderBy(asc(systemMapAreas.sortOrder), asc(systemMapAreas.id));
+    return db.transaction(async (tx) => {
+      const [snapshot] = await tx
+        .select()
+        .from(systemMapSnapshots)
+        .where(
+          and(
+            eq(systemMapSnapshots.projectId, input.projectId),
+            eq(systemMapSnapshots.analyzeRunId, input.analyzeRunId),
+          ),
+        )
+        .limit(1);
 
-    if (areas.length === 0) {
-      return getSystemMap(input.projectId, input.analyzeRunId);
-    }
+      if (!snapshot) {
+        throw new NotFoundError("System map not found", {
+          projectId: input.projectId,
+          analyzeRunId: input.analyzeRunId,
+        });
+      }
 
-    const proposals =
-      input.proposalIds.length === 0
-        ? []
-        : await db
+      const areas = await tx
+        .select()
+        .from(systemMapAreas)
+        .where(eq(systemMapAreas.snapshotId, snapshot.id))
+        .orderBy(asc(systemMapAreas.sortOrder), asc(systemMapAreas.id));
+
+      const proposals =
+        input.proposalIds.length === 0
+          ? []
+          : await tx
             .select()
             .from(aiProposals)
             .where(and(eq(aiProposals.projectId, input.projectId), inArray(aiProposals.id, input.proposalIds)));
 
-    for (const area of areas) {
-      const evidencePaths = new Set(readEvidence(area.evidenceJson).map((item) => item.sourceFilePath));
-      const relatedProposalIds = uniqueStrings(proposals
-        .filter((proposal) =>
-          proposalEvidencePaths(proposal.evidenceJson).some((filePath) => evidencePaths.has(filePath)),
-        )
-        .map((proposal) => proposal.id));
-      await db
-        .update(systemMapAreas)
-        .set({ relatedProposalIdsJson: relatedProposalIds, updatedAt: new Date() })
-        .where(eq(systemMapAreas.id, area.id));
-    }
+      for (const area of areas) {
+        const evidencePaths = new Set(readEvidence(area.evidenceJson).map((item) => item.sourceFilePath));
+        const relatedProposalIds = uniqueStrings(
+          proposals
+            .filter((proposal) =>
+              proposalEvidencePaths(proposal.evidenceJson).some((filePath) => evidencePaths.has(filePath)),
+            )
+            .map((proposal) => proposal.id),
+        );
+        await tx
+          .update(systemMapAreas)
+          .set({ relatedProposalIdsJson: relatedProposalIds, updatedAt: new Date() })
+          .where(eq(systemMapAreas.id, area.id));
+      }
 
-    return getSystemMap(input.projectId, input.analyzeRunId);
+      const updatedAreas = await tx
+        .select()
+        .from(systemMapAreas)
+        .where(eq(systemMapAreas.snapshotId, snapshot.id))
+        .orderBy(asc(systemMapAreas.sortOrder), asc(systemMapAreas.id));
+
+      return systemMapResponseSchema.parse({
+        snapshot: mapSnapshot(snapshot),
+        areas: updatedAreas.map(mapArea),
+      });
+    });
   }
 
   async function getSystemMap(projectId: string, analyzeRunId: string): Promise<SystemMapResponseDto> {
