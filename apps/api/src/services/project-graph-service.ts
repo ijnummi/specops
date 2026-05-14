@@ -401,29 +401,22 @@ export function createProjectGraphService(db: Db) {
       .from(sourceFiles)
       .where(eq(sourceFiles.projectId, projectId))
       .orderBy(asc(sourceFiles.path), asc(sourceFiles.id));
-    const fileIds = files.map((file) => file.id);
     const [imports, exports, symbols, specs, annotations] = await Promise.all([
-      fileIds.length === 0
-        ? []
-        : db
-          .select()
-          .from(sourceImports)
-          .where(and(eq(sourceImports.projectId, projectId), inArray(sourceImports.sourceFileId, fileIds)))
-          .orderBy(asc(sourceImports.filePath), asc(sourceImports.specifier), asc(sourceImports.id)),
-      fileIds.length === 0
-        ? []
-        : db
-          .select()
-          .from(sourceExports)
-          .where(and(eq(sourceExports.projectId, projectId), inArray(sourceExports.sourceFileId, fileIds)))
-          .orderBy(asc(sourceExports.filePath), asc(sourceExports.exportedName), asc(sourceExports.id)),
-      fileIds.length === 0
-        ? []
-        : db
-          .select()
-          .from(sourceSymbols)
-          .where(and(eq(sourceSymbols.projectId, projectId), inArray(sourceSymbols.sourceFileId, fileIds)))
-          .orderBy(asc(sourceSymbols.filePath), asc(sourceSymbols.line), asc(sourceSymbols.name)),
+      db
+        .select()
+        .from(sourceImports)
+        .where(eq(sourceImports.projectId, projectId))
+        .orderBy(asc(sourceImports.filePath), asc(sourceImports.specifier), asc(sourceImports.id)),
+      db
+        .select()
+        .from(sourceExports)
+        .where(eq(sourceExports.projectId, projectId))
+        .orderBy(asc(sourceExports.filePath), asc(sourceExports.exportedName), asc(sourceExports.id)),
+      db
+        .select()
+        .from(sourceSymbols)
+        .where(eq(sourceSymbols.projectId, projectId))
+        .orderBy(asc(sourceSymbols.filePath), asc(sourceSymbols.line), asc(sourceSymbols.name)),
       db
         .select()
         .from(specEntities)
