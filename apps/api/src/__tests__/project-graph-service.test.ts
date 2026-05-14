@@ -102,6 +102,20 @@ describeWithDb("createProjectGraphService", () => {
       expect.arrayContaining(["defines", "exports"]),
     );
     expect(edgeTypes(built, testFile!.id, serviceFile!.id)).toContain("tests");
+    expect(
+      edgeTypes(
+        built,
+        nodeByKey.get("package:apps/api")!.id,
+        nodeByKey.get("module:apps/api/src")!.id,
+      ),
+    ).toContain("contains");
+    expect(
+      edgeTypes(
+        built,
+        nodeByKey.get("module:apps/api/src")!.id,
+        nodeByKey.get("module:apps/api/src/routes")!.id,
+      ),
+    ).toContain("contains");
 
     const detail = await createProjectGraphService(db).getGraphNode(project.id, routeFile!.id);
     expect(projectGraphNodeDetailSchema.parse(detail)).toEqual(detail);
@@ -128,6 +142,32 @@ describeWithDb("createProjectGraphService", () => {
       );
     expect(priorVersion?.status).toBe("superseded");
     expect(files).toHaveLength(4);
+  });
+
+  it("includes missing endpoint nodes when graph queries return matching edges", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const service = createProjectGraphService(db);
+    await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const filtered = await service.getProjectGraph(project.id, { q: "fastify", limit: 50 });
+    const nodeIds = new Set(filtered.nodes.map((node) => node.id));
+
+    expect(filtered.nodes.map((node) => node.nodeKey)).toEqual(
+      expect.arrayContaining(["external:fastify", "file:apps/api/src/routes/projects.ts"]),
+    );
+    expect(filtered.edges).toEqual([
+      expect.objectContaining({
+        edgeType: "imports",
+        provenance: "scanner_import",
+      }),
+    ]);
+    for (const edge of filtered.edges) {
+      expect(nodeIds.has(edge.fromNodeId)).toBe(true);
+      expect(nodeIds.has(edge.toNodeId)).toBe(true);
+    }
   });
 
   it("projects active source spec annotations into supports_spec edges", async () => {
@@ -165,6 +205,33 @@ describeWithDb("createProjectGraphService", () => {
           edge.edgeType === "supports_spec",
       ),
     ).toMatchObject({ provenance: "annotation", confidence: 0.91 });
+  });
+
+  it("diagnoses active symbol annotations that do not match an indexed symbol", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    await insertSourceSpecAnnotation(project.id, indexRun.id, {
+      sourceFilePath: "apps/api/src/routes/projects.ts",
+      symbolName: "missingSymbol",
+      confidence: 0.67,
+      status: "active",
+    });
+
+    const built = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const nodeByKey = new Map(built.nodes.map((node) => [node.nodeKey, node]));
+    const routeFile = nodeByKey.get("file:apps/api/src/routes/projects.ts");
+    const specNode = nodeByKey.get("spec:interface.project-routes");
+
+    expect(edgeTypes(built, routeFile!.id, specNode!.id)).not.toContain("supports_spec");
+    expect(built.version.diagnostics).toContainEqual({
+      level: "warning",
+      code: "missing_annotation_symbol",
+      message:
+        "Active source/spec annotation references missing symbol missingSymbol in apps/api/src/routes/projects.ts.",
+    });
   });
 
   it("creates a limited graph when only specs exist", async () => {

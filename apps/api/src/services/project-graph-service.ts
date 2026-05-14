@@ -83,11 +83,13 @@ type IndexedFacts = {
   annotations: SourceSpecAnnotationRow[];
 };
 
+const insertChunkSize = 500;
+
 export function createProjectGraphService(db: Db) {
   async function buildProjectGraph(input: BuildProjectGraphInput): Promise<ProjectGraphListResponse> {
     const facts = await loadIndexedFacts(input.projectId);
     const drafts = buildGraphDrafts(facts);
-    const diagnostics = buildDiagnostics(facts);
+    const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
     const coverage = buildCoverage(drafts.nodes, drafts.edges, facts);
     const status = facts.files.length === 0 ? "limited" : "ready";
     const summary =
@@ -126,10 +128,12 @@ export function createProjectGraphService(db: Db) {
         return version.id;
       }
 
-      const insertedNodes = await tx
-        .insert(projectGraphNodes)
-        .values(
-          drafts.nodes.map((node) => ({
+      const insertedNodes: Array<{ id: string; nodeKey: string }> = [];
+      for (const nodeChunk of chunk(drafts.nodes, insertChunkSize)) {
+        const insertedChunk = await tx
+          .insert(projectGraphNodes)
+          .values(
+            nodeChunk.map((node) => ({
             projectId: input.projectId,
             graphVersionId: version.id,
             nodeKey: node.nodeKey,
@@ -141,9 +145,11 @@ export function createProjectGraphService(db: Db) {
             sourceRefJson: node.sourceRef,
             metadataJson: node.metadata,
             confidence: node.confidence,
-          })),
-        )
-        .returning({ id: projectGraphNodes.id, nodeKey: projectGraphNodes.nodeKey });
+            })),
+          )
+          .returning({ id: projectGraphNodes.id, nodeKey: projectGraphNodes.nodeKey });
+        insertedNodes.push(...insertedChunk);
+      }
       const nodeIdsByKey = new Map(insertedNodes.map((node) => [node.nodeKey, node.id]));
       const edgeRows = drafts.edges
         .map((edge) => {
@@ -168,7 +174,9 @@ export function createProjectGraphService(db: Db) {
         .filter((edge): edge is NonNullable<typeof edge> => edge !== null);
 
       if (edgeRows.length > 0) {
-        await tx.insert(projectGraphEdges).values(edgeRows);
+        for (const edgeChunk of chunk(edgeRows, insertChunkSize)) {
+          await tx.insert(projectGraphEdges).values(edgeChunk);
+        }
       }
 
       return version.id;
@@ -248,7 +256,8 @@ export function createProjectGraphService(db: Db) {
       .where(and(...nodeFilters))
       .orderBy(asc(projectGraphNodes.nodeType), asc(projectGraphNodes.label), asc(projectGraphNodes.id))
       .limit(limit);
-    const nodeIds = nodes.map((node) => node.id);
+    let responseNodes = nodes;
+    let nodeIds = responseNodes.map((node) => node.id);
 
     const edgeFilters = [eq(projectGraphEdges.graphVersionId, version.id)];
     if (query?.edgeType) {
@@ -263,7 +272,7 @@ export function createProjectGraphService(db: Db) {
       );
     }
 
-    const edges =
+    let edges =
       nodes.length === 0
         ? []
         : await db
@@ -271,12 +280,34 @@ export function createProjectGraphService(db: Db) {
           .from(projectGraphEdges)
           .where(and(...edgeFilters))
           .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id));
+    const missingEndpointIds = uniqueStrings(
+      edges.flatMap((edge) => [edge.fromNodeId, edge.toNodeId]).filter((nodeId) => !nodeIds.includes(nodeId)),
+    );
+    const remainingNodeBudget = Math.max(0, limit - responseNodes.length);
+    if (missingEndpointIds.length > 0 && remainingNodeBudget > 0) {
+      const endpointNodes = await db
+        .select()
+        .from(projectGraphNodes)
+        .where(
+          and(
+            eq(projectGraphNodes.graphVersionId, version.id),
+            inArray(projectGraphNodes.id, missingEndpointIds.slice(0, remainingNodeBudget)),
+          ),
+        )
+        .orderBy(asc(projectGraphNodes.nodeType), asc(projectGraphNodes.label), asc(projectGraphNodes.id));
+      responseNodes = [...responseNodes, ...endpointNodes];
+      nodeIds = responseNodes.map((node) => node.id);
+    }
+    const responseNodeIds = new Set(nodeIds);
+    edges = edges.filter(
+      (edge) => responseNodeIds.has(edge.fromNodeId) && responseNodeIds.has(edge.toNodeId),
+    );
 
     return projectGraphListResponseSchema.parse({
       version: mapVersion(version),
       nodeCounts: readCoverage(version.coverageJson).nodeCounts,
       edgeCounts: readCoverage(version.coverageJson).edgeCounts,
-      nodes: nodes.map(mapNode),
+      nodes: responseNodes.map(mapNode),
       edges: edges.map(mapEdge),
     });
   }
@@ -415,9 +446,14 @@ export function createProjectGraphService(db: Db) {
   };
 }
 
-function buildGraphDrafts(facts: IndexedFacts): { nodes: NodeDraft[]; edges: EdgeDraft[] } {
+function buildGraphDrafts(facts: IndexedFacts): {
+  nodes: NodeDraft[];
+  edges: EdgeDraft[];
+  diagnostics: ProjectGraphDiagnostic[];
+} {
   const nodes = new Map<string, NodeDraft>();
   const edges = new Map<string, EdgeDraft>();
+  const diagnostics: ProjectGraphDiagnostic[] = [];
   const fileByPath = new Map(facts.files.map((file) => [file.path, file]));
   const symbolsByFileAndName = new Map(facts.symbols.map((symbol) => [symbolKey(symbol.filePath, symbol.name), symbol]));
   const specByEntityId = new Map(facts.specs.map((spec) => [spec.entityId, spec]));
@@ -442,6 +478,9 @@ function buildGraphDrafts(facts: IndexedFacts): { nodes: NodeDraft[]; edges: Edg
 
   for (const file of facts.files) {
     addPathBoundaryNodes(file, addNode);
+    for (const edge of pathBoundaryEdges(file)) {
+      addEdge(edge);
+    }
     addNode(fileNode(file));
     const parentKey = nearestBoundaryNodeKey(file.path);
     if (parentKey) {
@@ -527,15 +566,21 @@ function buildGraphDrafts(facts: IndexedFacts): { nodes: NodeDraft[]; edges: Edg
       continue;
     }
 
-    const symbol =
-      annotation.symbolName === null
-        ? undefined
-        : symbolsByFileAndName.get(symbolKey(annotation.sourceFilePath, annotation.symbolName));
-    const sourceNodeKey = symbol
-      ? symbolNodeKey(symbol.filePath, symbol.name)
-      : fileByPath.has(annotation.sourceFilePath)
-        ? fileKey(annotation.sourceFilePath)
-        : null;
+    let sourceNodeKey: string | null = null;
+    if (annotation.symbolName) {
+      const symbol = symbolsByFileAndName.get(symbolKey(annotation.sourceFilePath, annotation.symbolName));
+      if (!symbol) {
+        diagnostics.push({
+          level: "warning",
+          code: "missing_annotation_symbol",
+          message: `Active source/spec annotation references missing symbol ${annotation.symbolName} in ${annotation.sourceFilePath}.`,
+        });
+        continue;
+      }
+      sourceNodeKey = symbolNodeKey(symbol.filePath, symbol.name);
+    } else if (fileByPath.has(annotation.sourceFilePath)) {
+      sourceNodeKey = fileKey(annotation.sourceFilePath);
+    }
     if (!sourceNodeKey) {
       continue;
     }
@@ -562,6 +607,7 @@ function buildGraphDrafts(facts: IndexedFacts): { nodes: NodeDraft[]; edges: Edg
   return {
     nodes: [...nodes.values()].sort(compareNodes),
     edges: [...edges.values()].sort(compareEdges),
+    diagnostics,
   };
 }
 
@@ -594,6 +640,40 @@ function addPathBoundaryNodes(file: SourceFileRow, addNode: (node: NodeDraft) =>
       confidence: 0.85,
     });
   }
+}
+
+function pathBoundaryEdges(file: SourceFileRow): EdgeDraft[] {
+  const packagePath = packagePathFor(file.path);
+  const modules = modulePathsFor(file.path);
+  const edges: EdgeDraft[] = [];
+
+  if (!packagePath || modules.length === 0) {
+    return edges;
+  }
+
+  edges.push({
+    fromNodeKey: packageKey(packagePath),
+    toNodeKey: moduleKey(modules[0]!),
+    edgeType: "contains",
+    provenance: "scanner_path",
+    sourceRef: { path: modules[0] },
+    metadata: { boundary: "package_module" },
+    confidence: 0.9,
+  });
+
+  for (let index = 1; index < modules.length; index += 1) {
+    edges.push({
+      fromNodeKey: moduleKey(modules[index - 1]!),
+      toNodeKey: moduleKey(modules[index]!),
+      edgeType: "contains",
+      provenance: "scanner_path",
+      sourceRef: { path: modules[index] },
+      metadata: { boundary: "module_module" },
+      confidence: 0.9,
+    });
+  }
+
+  return edges;
 }
 
 function fileNode(file: SourceFileRow): NodeDraft {
@@ -961,6 +1041,14 @@ function readNumber(value: unknown) {
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values)];
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function errorMessage(error: unknown) {
