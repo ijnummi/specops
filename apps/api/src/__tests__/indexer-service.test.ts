@@ -54,7 +54,11 @@ describeWithDb("indexProject", () => {
   });
 
   afterEach(async () => {
-    vi.mocked(createProjectGraphService).mockClear();
+    const actualGraphModule = await vi.importActual<typeof import("../services/project-graph-service.js")>(
+      "../services/project-graph-service.js"
+    );
+    vi.mocked(createProjectGraphService).mockReset();
+    vi.mocked(createProjectGraphService).mockImplementation(actualGraphModule.createProjectGraphService);
 
     for (const projectId of fixtureProjectIds.splice(0)) {
       await db.delete(projects).where(eq(projects.id, projectId));

@@ -27,7 +27,7 @@ import {
   sourceSymbols,
   specEntities,
 } from "@specops/db";
-import { and, asc, desc, eq, ilike, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { NotFoundError } from "../lib/http-errors.js";
 
@@ -40,6 +40,7 @@ type SourceSpecAnnotationRow = typeof sourceSpecAnnotations.$inferSelect;
 type ProjectGraphVersionRow = typeof projectGraphVersions.$inferSelect;
 type ProjectGraphNodeRow = typeof projectGraphNodes.$inferSelect;
 type ProjectGraphEdgeRow = typeof projectGraphEdges.$inferSelect;
+type ProjectGraphReadDb = Pick<Db, "select">;
 
 type BuildProjectGraphInput = {
   projectId: string;
@@ -88,17 +89,18 @@ const nodeDetailEdgeLimit = 100;
 
 export function createProjectGraphService(db: Db) {
   async function buildProjectGraph(input: BuildProjectGraphInput): Promise<ProjectGraphListResponse> {
-    const facts = await loadIndexedFacts(input.projectId);
-    const drafts = buildGraphDrafts(facts);
-    const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
-    const coverage = buildCoverage(drafts.nodes, drafts.edges, facts);
-    const status = facts.files.length === 0 ? "limited" : "ready";
-    const summary =
-      status === "limited"
-        ? "Limited project graph: no indexed source files were available."
-        : `Project graph with ${facts.files.length} source files and ${facts.specs.length} spec entities.`;
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
 
-    const graphVersionId = await db.transaction(async (tx) => {
+      const facts = await loadIndexedFacts(tx, input.projectId);
+      const drafts = buildGraphDrafts(facts);
+      const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
+      const coverage = buildCoverage(drafts.nodes, drafts.edges, facts);
+      const status = facts.files.length === 0 ? "limited" : "ready";
+      const summary =
+        status === "limited"
+          ? "Limited project graph: no indexed source files were available."
+          : `Project graph with ${facts.files.length} source files and ${facts.specs.length} spec entities.`;
       const indexRunFilter =
         input.indexRunId === null
           ? isNull(projectGraphVersions.indexRunId)
@@ -126,7 +128,7 @@ export function createProjectGraphService(db: Db) {
       }
 
       if (drafts.nodes.length === 0) {
-        return version.id;
+        return getProjectGraphFromDb(tx, input.projectId, undefined, version.id);
       }
 
       const insertedNodes: Array<{ id: string; nodeKey: string }> = [];
@@ -180,10 +182,8 @@ export function createProjectGraphService(db: Db) {
         }
       }
 
-      return version.id;
+      return getProjectGraphFromDb(tx, input.projectId, undefined, version.id);
     });
-
-    return getProjectGraph(input.projectId, undefined, graphVersionId);
   }
 
   async function recordFailedGraphVersion(
@@ -228,9 +228,18 @@ export function createProjectGraphService(db: Db) {
     query?: ProjectGraphQuery,
     versionId?: string,
   ): Promise<ProjectGraphListResponse> {
+    return getProjectGraphFromDb(db, projectId, query, versionId);
+  }
+
+  async function getProjectGraphFromDb(
+    readDb: ProjectGraphReadDb,
+    projectId: string,
+    query?: ProjectGraphQuery,
+    versionId?: string,
+  ): Promise<ProjectGraphListResponse> {
     const version = versionId
-      ? await getVersionRow(projectId, versionId)
-      : await getLatestVersionRow(projectId);
+      ? await getVersionRow(readDb, projectId, versionId)
+      : await getLatestVersionRow(readDb, projectId);
     const limit = query?.limit ?? 50;
     const nodeFilters = [eq(projectGraphNodes.graphVersionId, version.id)];
 
@@ -251,7 +260,7 @@ export function createProjectGraphService(db: Db) {
       );
     }
 
-    const nodes = await db
+    const nodes = await readDb
       .select()
       .from(projectGraphNodes)
       .where(and(...nodeFilters))
@@ -276,7 +285,7 @@ export function createProjectGraphService(db: Db) {
     let edges =
       nodes.length === 0
         ? []
-        : await db
+        : await readDb
           .select()
           .from(projectGraphEdges)
           .where(and(...edgeFilters))
@@ -287,7 +296,7 @@ export function createProjectGraphService(db: Db) {
     );
     const remainingNodeBudget = Math.max(0, limit - responseNodes.length);
     if (missingEndpointIds.length > 0 && remainingNodeBudget > 0) {
-      const endpointNodes = await db
+      const endpointNodes = await readDb
         .select()
         .from(projectGraphNodes)
         .where(
@@ -376,8 +385,11 @@ export function createProjectGraphService(db: Db) {
     });
   }
 
-  async function getLatestVersionRow(projectId: string): Promise<ProjectGraphVersionRow> {
-    const [version] = await db
+  async function getLatestVersionRow(
+    readDb: ProjectGraphReadDb,
+    projectId: string,
+  ): Promise<ProjectGraphVersionRow> {
+    const [version] = await readDb
       .select()
       .from(projectGraphVersions)
       .where(
@@ -396,8 +408,12 @@ export function createProjectGraphService(db: Db) {
     return version;
   }
 
-  async function getVersionRow(projectId: string, versionId: string): Promise<ProjectGraphVersionRow> {
-    const [version] = await db
+  async function getVersionRow(
+    readDb: ProjectGraphReadDb,
+    projectId: string,
+    versionId: string,
+  ): Promise<ProjectGraphVersionRow> {
+    const [version] = await readDb
       .select()
       .from(projectGraphVersions)
       .where(and(eq(projectGraphVersions.projectId, projectId), eq(projectGraphVersions.id, versionId)))
@@ -410,39 +426,37 @@ export function createProjectGraphService(db: Db) {
     return version;
   }
 
-  async function loadIndexedFacts(projectId: string): Promise<IndexedFacts> {
-    const files = await db
+  async function loadIndexedFacts(readDb: ProjectGraphReadDb, projectId: string): Promise<IndexedFacts> {
+    const files = await readDb
       .select()
       .from(sourceFiles)
       .where(eq(sourceFiles.projectId, projectId))
       .orderBy(asc(sourceFiles.path), asc(sourceFiles.id));
-    const [imports, exports, symbols, specs, annotations] = await Promise.all([
-      db
-        .select()
-        .from(sourceImports)
-        .where(eq(sourceImports.projectId, projectId))
-        .orderBy(asc(sourceImports.filePath), asc(sourceImports.specifier), asc(sourceImports.id)),
-      db
-        .select()
-        .from(sourceExports)
-        .where(eq(sourceExports.projectId, projectId))
-        .orderBy(asc(sourceExports.filePath), asc(sourceExports.exportedName), asc(sourceExports.id)),
-      db
-        .select()
-        .from(sourceSymbols)
-        .where(eq(sourceSymbols.projectId, projectId))
-        .orderBy(asc(sourceSymbols.filePath), asc(sourceSymbols.line), asc(sourceSymbols.name)),
-      db
-        .select()
-        .from(specEntities)
-        .where(eq(specEntities.projectId, projectId))
-        .orderBy(asc(specEntities.entityId), asc(specEntities.id)),
-      db
-        .select()
-        .from(sourceSpecAnnotations)
-        .where(and(eq(sourceSpecAnnotations.projectId, projectId), eq(sourceSpecAnnotations.status, "active")))
-        .orderBy(asc(sourceSpecAnnotations.sourceFilePath), asc(sourceSpecAnnotations.entityId), asc(sourceSpecAnnotations.id)),
-    ]);
+    const imports = await readDb
+      .select()
+      .from(sourceImports)
+      .where(eq(sourceImports.projectId, projectId))
+      .orderBy(asc(sourceImports.filePath), asc(sourceImports.specifier), asc(sourceImports.id));
+    const exports = await readDb
+      .select()
+      .from(sourceExports)
+      .where(eq(sourceExports.projectId, projectId))
+      .orderBy(asc(sourceExports.filePath), asc(sourceExports.exportedName), asc(sourceExports.id));
+    const symbols = await readDb
+      .select()
+      .from(sourceSymbols)
+      .where(eq(sourceSymbols.projectId, projectId))
+      .orderBy(asc(sourceSymbols.filePath), asc(sourceSymbols.line), asc(sourceSymbols.name));
+    const specs = await readDb
+      .select()
+      .from(specEntities)
+      .where(eq(specEntities.projectId, projectId))
+      .orderBy(asc(specEntities.entityId), asc(specEntities.id));
+    const annotations = await readDb
+      .select()
+      .from(sourceSpecAnnotations)
+      .where(and(eq(sourceSpecAnnotations.projectId, projectId), eq(sourceSpecAnnotations.status, "active")))
+      .orderBy(asc(sourceSpecAnnotations.sourceFilePath), asc(sourceSpecAnnotations.entityId), asc(sourceSpecAnnotations.id));
 
     return { files, imports, exports, symbols, specs, annotations };
   }

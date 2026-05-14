@@ -145,6 +145,36 @@ describeWithDb("createProjectGraphService", () => {
     expect(files).toHaveLength(4);
   });
 
+  it("waits on the project advisory lock while building a graph", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const lockPool = new Pool({ connectionString: testDatabaseUrl });
+    const lockClient = await lockPool.connect();
+
+    try {
+      await lockClient.query("begin");
+      await lockClient.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        project.id,
+      ]);
+
+      const buildPromise = createProjectGraphService(db).buildProjectGraph({
+        projectId: project.id,
+        indexRunId: indexRun.id,
+      });
+      const pending = Symbol("pending");
+      const earlyResult = await Promise.race([buildPromise, delay(100).then(() => pending)]);
+      expect(earlyResult).toBe(pending);
+
+      await lockClient.query("commit");
+      await expect(buildPromise).resolves.toMatchObject({
+        version: expect.objectContaining({ status: "ready" }),
+      });
+    } finally {
+      await lockClient.query("rollback").catch(() => undefined);
+      lockClient.release();
+      await lockPool.end();
+    }
+  });
+
   it("includes missing endpoint nodes when graph queries return matching edges", async () => {
     const { project, indexRun } = await createIndexedGraphFixture();
     const service = createProjectGraphService(db);
@@ -611,6 +641,10 @@ function edgeTypes(
   return graph.edges
     .filter((edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId)
     .map((edge) => edge.edgeType);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function migrateTestDatabase(connectionString: string) {
