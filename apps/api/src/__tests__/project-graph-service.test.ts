@@ -76,8 +76,8 @@ describeWithDb("createProjectGraphService", () => {
     const testFile = nodeByKey.get("file:apps/api/src/services/project-service.test.ts");
     const schemaFile = nodeByKey.get("file:apps/api/src/db/schema.ts");
     const fastify = nodeByKey.get("external:fastify");
-    const registerSymbol = nodeByKey.get("symbol:apps/api/src/routes/projects.ts:registerProjectRoutes");
-    const listProjectsSymbol = nodeByKey.get("symbol:apps/api/src/services/project-service.ts:listProjects");
+    const registerSymbol = nodeByKey.get("symbol:apps/api/src/routes/projects.ts:registerProjectRoutes:function:3");
+    const listProjectsSymbol = nodeByKey.get("symbol:apps/api/src/services/project-service.ts:listProjects:function:1");
 
     expect(routeFile).toMatchObject({
       nodeType: "file",
@@ -250,6 +250,82 @@ describeWithDb("createProjectGraphService", () => {
     }
   });
 
+  it("returns matching edges for edge type filters before sampling endpoint nodes", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const service = createProjectGraphService(db);
+    await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const filtered = await service.getProjectGraph(project.id, { edgeType: "imports", limit: 2 });
+    const nodeIds = new Set(filtered.nodes.map((node) => node.id));
+
+    expect(filtered.edges.length).toBeGreaterThan(0);
+    expect(filtered.edges.every((edge) => edge.edgeType === "imports")).toBe(true);
+    for (const edge of filtered.edges) {
+      expect(nodeIds.has(edge.fromNodeId)).toBe(true);
+      expect(nodeIds.has(edge.toNodeId)).toBe(true);
+    }
+  });
+
+  it("models unresolved relative imports as distinct local unresolved nodes", async () => {
+    const { project, indexRun, files } = await createIndexedGraphFixture();
+    const routeFile = files.find((file) => file.path === "apps/api/src/routes/projects.ts")!;
+    await db.insert(sourceImports).values([
+      {
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        specifier: "./missing-a.js",
+        importKind: "named",
+        importedNames: ["missingA"],
+        isRelative: true,
+        resolvedPath: null,
+      },
+      {
+        projectId: project.id,
+        sourceFileId: routeFile.id,
+        filePath: routeFile.path,
+        specifier: "./missing-b.js",
+        importKind: "named",
+        importedNames: ["missingB"],
+        isRelative: true,
+        resolvedPath: null,
+      },
+    ]);
+
+    const built = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const unresolvedNodes = built.nodes.filter((node) => node.nodeType === "unresolved_import");
+
+    expect(unresolvedNodes).toHaveLength(2);
+    expect(unresolvedNodes.map((node) => node.nodeKey).sort()).toEqual([
+      "unresolved_import:apps/api/src/routes/projects.ts:./missing-a.js",
+      "unresolved_import:apps/api/src/routes/projects.ts:./missing-b.js",
+    ]);
+    expect(built.nodes.map((node) => node.nodeKey)).not.toContain("external:.");
+    expect(built.version.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          level: "warning",
+          code: "unresolved_relative_import",
+          message:
+            "Unresolved relative import ./missing-a.js from apps/api/src/routes/projects.ts.",
+        },
+        {
+          level: "warning",
+          code: "unresolved_relative_import",
+          message:
+            "Unresolved relative import ./missing-b.js from apps/api/src/routes/projects.ts.",
+        },
+      ]),
+    );
+  });
+
   it("bounds incoming and outgoing edges in node detail", async () => {
     const { project, indexRun, files } = await createIndexedGraphFixture();
     const routeFile = files.find((file) => file.path === "apps/api/src/routes/projects.ts")!;
@@ -323,6 +399,27 @@ describeWithDb("createProjectGraphService", () => {
       const neighborId = edge.fromNodeId === routeNode.id ? edge.toNodeId : edge.fromNodeId;
       expect(neighborIds.has(neighborId)).toBe(true);
     }
+  });
+
+  it("does not return node detail from superseded graph versions", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const service = createProjectGraphService(db);
+    const firstGraph = await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+    const firstRouteNode = firstGraph.nodes.find(
+      (node) => node.nodeKey === "file:apps/api/src/routes/projects.ts",
+    )!;
+
+    await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    await expect(service.getGraphNode(project.id, firstRouteNode.id)).rejects.toMatchObject({
+      name: "NotFoundError",
+    });
   });
 
   it("bounds incident edge retrieval for high-degree filtered graph queries", async () => {
@@ -405,8 +502,8 @@ describeWithDb("createProjectGraphService", () => {
     });
 
     const nodeByKey = new Map(built.nodes.map((node) => [node.nodeKey, node]));
-    const registerSymbol = nodeByKey.get("symbol:apps/api/src/routes/projects.ts:registerProjectRoutes");
-    const serviceSymbol = nodeByKey.get("symbol:apps/api/src/services/project-service.ts:listProjects");
+    const registerSymbol = nodeByKey.get("symbol:apps/api/src/routes/projects.ts:registerProjectRoutes:function:3");
+    const serviceSymbol = nodeByKey.get("symbol:apps/api/src/services/project-service.ts:listProjects:function:1");
     const specNode = nodeByKey.get("spec:interface.project-routes");
 
     expect(edgeTypes(built, registerSymbol!.id, specNode!.id)).toContain("supports_spec");
@@ -419,6 +516,41 @@ describeWithDb("createProjectGraphService", () => {
           edge.edgeType === "supports_spec",
       ),
     ).toMatchObject({ provenance: "annotation", confidence: 0.91 });
+  });
+
+  it("keeps duplicate same-name symbols in one file as distinct graph nodes", async () => {
+    const { project, indexRun, files } = await createIndexedGraphFixture();
+    const routeFile = files.find((file) => file.path === "apps/api/src/routes/projects.ts")!;
+    await db.insert(sourceSymbols).values({
+      projectId: project.id,
+      sourceFileId: routeFile.id,
+      filePath: routeFile.path,
+      name: "registerProjectRoutes",
+      symbolKind: "function",
+      isExported: true,
+      line: 20,
+      metadataJson: {},
+    });
+
+    const built = await createProjectGraphService(db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+    const nodeByKey = new Map(built.nodes.map((node) => [node.nodeKey, node]));
+    const routeFileNode = nodeByKey.get("file:apps/api/src/routes/projects.ts")!;
+    const duplicateSymbols = built.nodes.filter(
+      (node) =>
+        node.nodeType === "symbol" &&
+        node.path === routeFile.path &&
+        node.symbolName === "registerProjectRoutes",
+    );
+
+    expect(duplicateSymbols).toHaveLength(2);
+    expect(new Set(duplicateSymbols.map((node) => node.nodeKey)).size).toBe(2);
+    expect(duplicateSymbols.map((node) => Number(node.metadata.line)).sort((a, b) => a - b)).toEqual([3, 20]);
+    for (const symbol of duplicateSymbols) {
+      expect(edgeTypes(built, routeFileNode.id, symbol.id)).toContain("defines");
+    }
   });
 
   it("diagnoses active symbol annotations that do not match an indexed symbol", async () => {

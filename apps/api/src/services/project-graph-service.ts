@@ -261,6 +261,10 @@ export function createProjectGraphService(db: Db) {
       ? await getVersionRow(readDb, projectId, versionId)
       : await getLatestVersionRow(readDb, projectId);
     const limit = query?.limit ?? 50;
+    if (query?.edgeType && !query.nodeType && !query.q) {
+      return getProjectGraphEdgesFirst(readDb, version, query.edgeType, limit);
+    }
+
     const nodeFilters = [eq(projectGraphNodes.graphVersionId, version.id)];
 
     if (query?.nodeType) {
@@ -343,11 +347,53 @@ export function createProjectGraphService(db: Db) {
     });
   }
 
+  async function getProjectGraphEdgesFirst(
+    readDb: ProjectGraphReadDb,
+    version: ProjectGraphVersionRow,
+    edgeType: ProjectGraphEdgeType,
+    limit: number,
+  ): Promise<ProjectGraphListResponse> {
+    const edges = await readDb
+      .select()
+      .from(projectGraphEdges)
+      .where(and(eq(projectGraphEdges.graphVersionId, version.id), eq(projectGraphEdges.edgeType, edgeType)))
+      .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id))
+      .limit(limit * 2);
+    const endpointIds = uniqueStrings(edges.flatMap((edge) => [edge.fromNodeId, edge.toNodeId])).slice(0, limit);
+    const nodes =
+      endpointIds.length === 0
+        ? []
+        : await readDb
+          .select()
+          .from(projectGraphNodes)
+          .where(and(eq(projectGraphNodes.graphVersionId, version.id), inArray(projectGraphNodes.id, endpointIds)))
+          .orderBy(asc(projectGraphNodes.nodeType), asc(projectGraphNodes.label), asc(projectGraphNodes.id));
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const responseEdges = edges.filter(
+      (edge) => nodeIds.has(edge.fromNodeId) && nodeIds.has(edge.toNodeId),
+    );
+
+    return projectGraphListResponseSchema.parse({
+      version: mapVersion(version),
+      nodeCounts: readCoverage(version.coverageJson).nodeCounts,
+      edgeCounts: readCoverage(version.coverageJson).edgeCounts,
+      nodes: nodes.map(mapNode),
+      edges: responseEdges.map(mapEdge),
+    });
+  }
+
   async function getGraphNode(projectId: string, nodeId: string): Promise<ProjectGraphNodeDetail> {
+    const version = await getLatestVersionRow(db, projectId);
     const [node] = await db
       .select()
       .from(projectGraphNodes)
-      .where(and(eq(projectGraphNodes.projectId, projectId), eq(projectGraphNodes.id, nodeId)))
+      .where(
+        and(
+          eq(projectGraphNodes.projectId, projectId),
+          eq(projectGraphNodes.graphVersionId, version.id),
+          eq(projectGraphNodes.id, nodeId),
+        ),
+      )
       .limit(1);
 
     if (!node) {
@@ -510,7 +556,7 @@ function buildGraphDrafts(facts: ProjectGraphFacts): {
   const edges = new Map<string, EdgeDraft>();
   const diagnostics: ProjectGraphDiagnostic[] = [];
   const fileByPath = new Map(facts.files.map((file) => [file.path, file]));
-  const symbolsByFileAndName = new Map(facts.symbols.map((symbol) => [symbolKey(symbol.filePath, symbol.name), symbol]));
+  const symbolsByFileAndName = groupSymbolsByFileAndName(facts.symbols);
   const specByEntityId = new Map(facts.specs.map((spec) => [spec.entityId, spec]));
 
   const addNode = (node: NodeDraft) => {
@@ -555,7 +601,7 @@ function buildGraphDrafts(facts: ProjectGraphFacts): {
     addNode(symbolNode(symbol));
     addEdge({
       fromNodeKey: fileKey(symbol.filePath),
-      toNodeKey: symbolNodeKey(symbol.filePath, symbol.name),
+      toNodeKey: symbolNodeKey(symbol),
       edgeType: "defines",
       provenance: "scanner_symbol",
       sourceRef: { sourceSymbolId: symbol.id, sourceFileId: symbol.sourceFileId, path: symbol.filePath },
@@ -569,26 +615,44 @@ function buildGraphDrafts(facts: ProjectGraphFacts): {
   }
 
   for (const sourceExport of facts.exports) {
-    const symbol = symbolsByFileAndName.get(symbolKey(sourceExport.filePath, sourceExport.exportedName));
-    if (!symbol) {
+    const symbols = symbolsByFileAndName.get(symbolKey(sourceExport.filePath, sourceExport.exportedName)) ?? [];
+    if (symbols.length === 0) {
       continue;
     }
 
-    addEdge({
-      fromNodeKey: fileKey(sourceExport.filePath),
-      toNodeKey: symbolNodeKey(symbol.filePath, symbol.name),
-      edgeType: "exports",
-      provenance: "scanner_export",
-      sourceRef: { sourceExportId: sourceExport.id, sourceFileId: sourceExport.sourceFileId },
-      metadata: { exportKind: sourceExport.exportKind, exportedName: sourceExport.exportedName },
-      confidence: 1,
-    });
+    for (const symbol of symbols) {
+      addEdge({
+        fromNodeKey: fileKey(sourceExport.filePath),
+        toNodeKey: symbolNodeKey(symbol),
+        edgeType: "exports",
+        provenance: "scanner_export",
+        sourceRef: {
+          sourceExportId: sourceExport.id,
+          sourceFileId: sourceExport.sourceFileId,
+          sourceSymbolId: symbol.id,
+        },
+        metadata: { exportKind: sourceExport.exportKind, exportedName: sourceExport.exportedName },
+        confidence: 1,
+      });
+    }
   }
 
   for (const sourceImport of facts.imports) {
     const targetFile = sourceImport.resolvedPath ? fileByPath.get(sourceImport.resolvedPath) : undefined;
-    const toNodeKey = targetFile ? fileKey(targetFile.path) : externalDependencyKey(sourceImport.specifier);
-    if (!targetFile) {
+    const unresolvedRelative = !targetFile && sourceImport.isRelative;
+    const toNodeKey = targetFile
+      ? fileKey(targetFile.path)
+      : unresolvedRelative
+        ? unresolvedImportKey(sourceImport.filePath, sourceImport.specifier)
+        : externalDependencyKey(sourceImport.specifier);
+    if (unresolvedRelative) {
+      addNode(unresolvedImportNode(sourceImport));
+      diagnostics.push({
+        level: "warning",
+        code: "unresolved_relative_import",
+        message: `Unresolved relative import ${sourceImport.specifier} from ${sourceImport.filePath}.`,
+      });
+    } else if (!targetFile) {
       addNode(externalDependencyNode(sourceImport.specifier));
     }
 
@@ -606,8 +670,11 @@ function buildGraphDrafts(facts: ProjectGraphFacts): {
         importKind: sourceImport.importKind,
         importedNames: sourceImport.importedNames,
         resolvedPath: sourceImport.resolvedPath,
+        unresolvedPath: unresolvedRelative
+          ? unresolvedRelativeImportPath(sourceImport.filePath, sourceImport.specifier)
+          : undefined,
       },
-      confidence: targetFile ? 1 : 0.8,
+      confidence: targetFile ? 1 : unresolvedRelative ? 0.45 : 0.8,
     });
   }
 
@@ -623,7 +690,10 @@ function buildGraphDrafts(facts: ProjectGraphFacts): {
 
     let sourceNodeKey: string | null = null;
     if (annotation.symbolName) {
-      const symbol = symbolsByFileAndName.get(symbolKey(annotation.sourceFilePath, annotation.symbolName));
+      const symbol = selectAnnotatedSymbol(
+        symbolsByFileAndName.get(symbolKey(annotation.sourceFilePath, annotation.symbolName)) ?? [],
+        annotation,
+      );
       if (!symbol) {
         diagnostics.push({
           level: "warning",
@@ -632,7 +702,7 @@ function buildGraphDrafts(facts: ProjectGraphFacts): {
         });
         continue;
       }
-      sourceNodeKey = symbolNodeKey(symbol.filePath, symbol.name);
+      sourceNodeKey = symbolNodeKey(symbol);
     } else if (fileByPath.has(annotation.sourceFilePath)) {
       sourceNodeKey = fileKey(annotation.sourceFilePath);
     }
@@ -752,14 +822,19 @@ function fileNode(file: SourceFileRow): NodeDraft {
 
 function symbolNode(symbol: SourceSymbolRow): NodeDraft {
   return {
-    nodeKey: symbolNodeKey(symbol.filePath, symbol.name),
+    nodeKey: symbolNodeKey(symbol),
     nodeType: "symbol",
     label: symbol.name,
     path: symbol.filePath,
     symbolName: symbol.name,
     entityId: null,
     sourceRef: { sourceSymbolId: symbol.id, sourceFileId: symbol.sourceFileId, line: symbol.line },
-    metadata: { symbolKind: symbol.symbolKind, isExported: symbol.isExported, ...readRecord(symbol.metadataJson) },
+    metadata: {
+      symbolKind: symbol.symbolKind,
+      isExported: symbol.isExported,
+      line: symbol.line,
+      ...readRecord(symbol.metadataJson),
+    },
     confidence: 1,
   };
 }
@@ -791,6 +866,65 @@ function externalDependencyNode(specifier: string): NodeDraft {
     metadata: {},
     confidence: 0.8,
   };
+}
+
+function unresolvedImportNode(sourceImport: SourceImportRow): NodeDraft {
+  const unresolvedPath = unresolvedRelativeImportPath(sourceImport.filePath, sourceImport.specifier);
+  return {
+    nodeKey: unresolvedImportKey(sourceImport.filePath, sourceImport.specifier),
+    nodeType: "unresolved_import",
+    label: sourceImport.specifier,
+    path: unresolvedPath,
+    symbolName: null,
+    entityId: null,
+    sourceRef: {
+      sourceImportId: sourceImport.id,
+      sourceFileId: sourceImport.sourceFileId,
+      filePath: sourceImport.filePath,
+      specifier: sourceImport.specifier,
+    },
+    metadata: {
+      importKind: sourceImport.importKind,
+      importedNames: sourceImport.importedNames,
+      unresolvedPath,
+    },
+    confidence: 0.45,
+  };
+}
+
+function groupSymbolsByFileAndName(symbols: SourceSymbolRow[]) {
+  return symbols.reduce<Map<string, SourceSymbolRow[]>>((groups, symbol) => {
+    const key = symbolKey(symbol.filePath, symbol.name);
+    groups.set(key, [...(groups.get(key) ?? []), symbol].sort(compareSourceSymbols));
+    return groups;
+  }, new Map());
+}
+
+function selectAnnotatedSymbol(
+  symbols: SourceSymbolRow[],
+  annotation: SourceSpecAnnotationRow,
+): SourceSymbolRow | null {
+  if (symbols.length === 0) {
+    return null;
+  }
+
+  const symbolsByKind = annotation.symbolKind
+    ? symbols.filter((symbol) => symbol.symbolKind === annotation.symbolKind)
+    : symbols;
+  const candidates = symbolsByKind.length > 0 ? symbolsByKind : symbols;
+  if (annotation.startLine !== null && annotation.endLine !== null) {
+    const inRange = candidates.find(
+      (symbol) =>
+        symbol.line !== null &&
+        symbol.line >= annotation.startLine! &&
+        symbol.line <= annotation.endLine!,
+    );
+    if (inRange) {
+      return inRange;
+    }
+  }
+
+  return candidates[0] ?? null;
 }
 
 function buildTestEdges(files: SourceFileRow[]): EdgeDraft[] {
@@ -938,8 +1072,8 @@ function fileKey(filePath: string) {
   return `file:${filePath}`;
 }
 
-function symbolNodeKey(filePath: string, symbolName: string) {
-  return `symbol:${filePath}:${symbolName}`;
+function symbolNodeKey(symbol: SourceSymbolRow) {
+  return `symbol:${symbol.filePath}:${symbol.name}:${symbol.symbolKind}:${symbol.line ?? "unknown"}`;
 }
 
 function symbolKey(filePath: string, symbolName: string) {
@@ -952,6 +1086,10 @@ function specNodeKey(entityId: string) {
 
 function externalDependencyKey(specifier: string) {
   return `external:${externalDependencyName(specifier)}`;
+}
+
+function unresolvedImportKey(filePath: string, specifier: string) {
+  return `unresolved_import:${filePath}:${specifier}`;
 }
 
 function packageKey(packagePath: string) {
@@ -974,6 +1112,34 @@ function dirname(filePath: string) {
   const parts = filePath.split("/");
   parts.pop();
   return parts.join("/");
+}
+
+function unresolvedRelativeImportPath(filePath: string, specifier: string) {
+  return normalizePath(`${dirname(filePath)}/${specifier}`);
+}
+
+function normalizePath(filePath: string) {
+  const parts: string[] = [];
+  for (const part of filePath.split("/")) {
+    if (!part || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+
+  return parts.join("/");
+}
+
+function compareSourceSymbols(left: SourceSymbolRow, right: SourceSymbolRow) {
+  return (
+    (left.line ?? Number.MAX_SAFE_INTEGER) - (right.line ?? Number.MAX_SAFE_INTEGER) ||
+    left.symbolKind.localeCompare(right.symbolKind) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function compareNodes(left: NodeDraft, right: NodeDraft) {

@@ -11,6 +11,7 @@ export const projectGraphNodeTypeSchema = z.enum([
   "data_model",
   "test",
   "spec_entity",
+  "unresolved_import",
   "external_dependency"
 ]);
 
