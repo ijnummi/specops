@@ -15,11 +15,13 @@ import {
   projects,
   sourceSpecAnnotations,
   specEntities,
+  specLinks,
 } from "@specops/db";
 import { eq } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { NotFoundError } from "../lib/http-errors.js";
 import {
   buildHealthQueueSummary,
   compareHealthQueueItems,
@@ -108,6 +110,24 @@ describe("project health queue helpers", () => {
     ).toBe(false);
     expect(isUsefulSourceNode(sourceNode({ path: null, classification: "source" }))).toBe(false);
   });
+
+  it("filters out generated source nodes", () => {
+    expect(
+      isUsefulSourceNode(sourceNode({ path: "apps/web/src/generated/client.ts", classification: "source" })),
+    ).toBe(false);
+    expect(
+      isUsefulSourceNode(sourceNode({ path: "apps/web/src/client.generated.ts", classification: "source" })),
+    ).toBe(false);
+    expect(
+      isUsefulSourceNode(sourceNode({ path: "apps/web/src/__generated__/client.ts", classification: "source" })),
+    ).toBe(false);
+    expect(
+      isUsefulSourceNode(sourceNode({ path: "apps/web/src/client.ts", classification: "generated" })),
+    ).toBe(false);
+    expect(
+      isUsefulSourceNode(sourceNode({ path: "apps/web/src/client.ts", classification: "source", generated: true })),
+    ).toBe(false);
+  });
 });
 
 describeWithDb("createProjectHealthQueueService", () => {
@@ -133,6 +153,15 @@ describeWithDb("createProjectHealthQueueService", () => {
     await closeDb(db);
   });
 
+  it("throws NotFoundError for an unknown project", async () => {
+    await expect(
+      createProjectHealthQueueService(db).getProjectHealthQueue("00000000-0000-4000-8000-000000000999"),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      createProjectHealthQueueService(db).getProjectHealthQueue("00000000-0000-4000-8000-000000000999"),
+    ).rejects.toMatchObject({ message: "Project not found" });
+  });
+
   it("reports specs missing source evidence", async () => {
     const project = await createProjectFixture(db, projectIds);
     await createSpecFixture(db, project.id, {
@@ -153,6 +182,48 @@ describeWithDb("createProjectHealthQueueService", () => {
       }),
     );
     expect(healthQueueResponseSchema.parse(response)).toEqual(response);
+  });
+
+  it("reports orphaned specs", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    await createSpecFixture(db, project.id, {
+      entityId: "domain.orphaned",
+      type: "domain_entity",
+      title: "Orphaned domain",
+      status: "draft",
+    });
+    await createSpecFixture(db, project.id, {
+      entityId: "domain.linked",
+      type: "domain_entity",
+      title: "Linked domain",
+      status: "draft",
+    });
+    await createSpecFixture(db, project.id, {
+      entityId: "domain.target",
+      type: "domain_entity",
+      title: "Target domain",
+      status: "draft",
+    });
+    await db.insert(specLinks).values({
+      projectId: project.id,
+      fromEntityId: "domain.linked",
+      toEntityId: "domain.target",
+      linkType: "relates_to",
+      source: "test",
+    });
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        id: "spec_orphaned:domain.orphaned",
+        kind: "spec_orphaned",
+        primaryTarget: expect.objectContaining({ kind: "spec", entityId: "domain.orphaned" }),
+      }),
+    );
+    expect(response.items).not.toContainEqual(
+      expect.objectContaining({ id: "spec_orphaned:domain.linked" }),
+    );
   });
 
   it("does not report missing source evidence when active annotation exists", async () => {
@@ -249,6 +320,60 @@ describeWithDb("createProjectHealthQueueService", () => {
     );
   });
 
+  it("reports source areas instead of individual source nodes when 3 uncovered useful nodes share a directory", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    const { graphVersion } = await createGraphFixture(db, project.id, "ready");
+    await db
+      .insert(projectGraphNodes)
+      .values([
+        graphNode(project.id, graphVersion.id, {
+          nodeKey: "file:apps/web/src/routes/checkout.ts",
+          label: "checkout.ts",
+          path: "apps/web/src/routes/checkout.ts",
+          metadataJson: { classification: "route" },
+        }),
+        graphNode(project.id, graphVersion.id, {
+          nodeKey: "file:apps/web/src/routes/cart.ts",
+          label: "cart.ts",
+          path: "apps/web/src/routes/cart.ts",
+          metadataJson: { classification: "route" },
+        }),
+        graphNode(project.id, graphVersion.id, {
+          nodeKey: "file:apps/web/src/routes/profile.ts",
+          label: "profile.ts",
+          path: "apps/web/src/routes/profile.ts",
+          metadataJson: { classification: "route" },
+        }),
+      ])
+      .returning();
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        id: "source_area_without_spec:apps/web/src/routes",
+        kind: "source_area_without_spec",
+        family: "source",
+        primaryTarget: {
+          kind: "source",
+          graphNodeId: null,
+          nodeKey: "apps/web/src/routes",
+          nodeType: "module",
+          path: "apps/web/src/routes",
+          symbolName: null,
+        },
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ filePath: "apps/web/src/routes/checkout.ts" }),
+          expect.objectContaining({ filePath: "apps/web/src/routes/cart.ts" }),
+          expect.objectContaining({ filePath: "apps/web/src/routes/profile.ts" }),
+        ]),
+      }),
+    );
+    expect(response.items).not.toContainEqual(
+      expect.objectContaining({ id: "source_without_spec:apps/web/src/routes/checkout.ts" }),
+    );
+  });
+
   it("reports concepts without spec coverage and low confidence concepts and memberships", async () => {
     const project = await createProjectFixture(db, projectIds);
     const { graphVersion } = await createGraphFixture(db, project.id, "ready");
@@ -311,7 +436,7 @@ describeWithDb("createProjectHealthQueueService", () => {
 
     expect(response.items).toContainEqual(
       expect.objectContaining({
-        id: `concept_without_spec:${checkoutConcept!.id}`,
+        id: "concept_without_spec:workflow:checkout",
         kind: "concept_without_spec",
         primaryTarget: expect.objectContaining({
           kind: "concept",
@@ -322,18 +447,55 @@ describeWithDb("createProjectHealthQueueService", () => {
     );
     expect(response.items).toContainEqual(
       expect.objectContaining({
-        id: `concept_low_confidence:${checkoutConcept!.id}`,
+        id: "concept_low_confidence:workflow:checkout",
         kind: "concept_low_confidence",
       }),
     );
     expect(response.items).toContainEqual(
       expect.objectContaining({
-        id: `concept_membership_low_confidence:${billingConcept!.id}`,
+        id: "concept_membership_low_confidence:workflow:billing",
         kind: "concept_membership_low_confidence",
       }),
     );
     expect(response.items).not.toContainEqual(
-      expect.objectContaining({ id: `concept_without_spec:${billingConcept!.id}` }),
+      expect.objectContaining({ id: "concept_without_spec:workflow:billing" }),
+    );
+  });
+
+  it("reports no_index_run when no index run exists", async () => {
+    const project = await createProjectFixture(db, projectIds);
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.sourceState.latestIndexRunId).toBeNull();
+    expect(response.sourceState.latestIndexRunStatus).toBeNull();
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "warning", code: "no_index_run" }),
+      ]),
+    );
+  });
+
+  it("reports limited graph and concept diagnostics", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    const { graphVersion } = await createGraphFixture(db, project.id, "limited");
+    const { conceptVersion } = await createConceptGraphFixture(db, project.id, graphVersion.id, "limited");
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.sourceState).toMatchObject({
+      latestProjectGraphVersionId: graphVersion.id,
+      latestProjectGraphStatus: "limited",
+      latestConceptGraphVersionId: conceptVersion.id,
+      latestConceptGraphStatus: "limited",
+      hasProjectGraph: true,
+      hasConceptGraph: true,
+    });
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "warning", code: "limited_project_graph" }),
+        expect.objectContaining({ level: "warning", code: "limited_concept_graph" }),
+      ]),
     );
   });
 
@@ -396,6 +558,7 @@ function sourceNode(overrides: {
   nodeType?: string;
   path?: string | null;
   classification?: string;
+  generated?: boolean;
 }) {
   return {
     id: "00000000-0000-4000-8000-000000000001",
@@ -404,7 +567,7 @@ function sourceNode(overrides: {
     label: "checkout.ts",
     path: overrides.path === undefined ? "apps/web/src/routes/checkout.ts" : overrides.path,
     symbolName: null,
-    metadataJson: { classification: overrides.classification },
+    metadataJson: { classification: overrides.classification, generated: overrides.generated },
   };
 }
 

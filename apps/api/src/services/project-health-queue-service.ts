@@ -207,7 +207,15 @@ export function isUsefulSourceNode(input: UsefulSourceNodeInput): boolean {
   const metadata = readRecord(input.metadataJson);
   const classification = typeof metadata.classification === "string" ? metadata.classification : null;
 
-  if (classification === "test" || classification === "config" || classification === "unknown") {
+  if (
+    classification === "test" ||
+    classification === "config" ||
+    classification === "unknown" ||
+    classification === "generated"
+  ) {
+    return false;
+  }
+  if (metadata.generated === true || isGeneratedPath(normalizedPath)) {
     return false;
   }
   if (/(^|[/.])(test|spec)\.[cm]?[jt]sx?$/.test(baseName) || normalizedPath.includes("/__tests__/")) {
@@ -487,7 +495,7 @@ function buildConceptItems(
 
     if (conceptMemberships.length > 0 && conceptMemberships.every((membership) => !supportedNodeIds.has(membership.graphNodeId))) {
       items.push({
-        id: healthQueueItemId("concept_without_spec", concept.id),
+        id: healthQueueItemId("concept_without_spec", concept.conceptKey),
         family: "concept",
         kind: "concept_without_spec",
         severity: "review",
@@ -502,7 +510,7 @@ function buildConceptItems(
 
     if (concept.confidence < lowConfidenceThreshold) {
       items.push({
-        id: healthQueueItemId("concept_low_confidence", concept.id),
+        id: healthQueueItemId("concept_low_confidence", concept.conceptKey),
         family: "concept",
         kind: "concept_low_confidence",
         severity: "context",
@@ -517,7 +525,7 @@ function buildConceptItems(
 
     if (lowConfidenceMemberships.length > 0) {
       items.push({
-        id: healthQueueItemId("concept_membership_low_confidence", concept.id),
+        id: healthQueueItemId("concept_membership_low_confidence", concept.conceptKey),
         family: "concept",
         kind: "concept_membership_low_confidence",
         severity: "context",
@@ -655,6 +663,15 @@ function isConfigPath(input: string): boolean {
     /^(vite|vitest|playwright|postcss|tailwind|eslint|prettier|drizzle)\.config\.[cm]?[jt]s$/.test(fileName) ||
     input.endsWith("package.json") ||
     input.endsWith("tsconfig.json")
+  );
+}
+
+function isGeneratedPath(input: string): boolean {
+  const normalized = `/${input.toLowerCase()}`;
+  return (
+    normalized.includes("/generated/") ||
+    normalized.includes("/__generated__/") ||
+    normalized.includes(".generated.")
   );
 }
 
