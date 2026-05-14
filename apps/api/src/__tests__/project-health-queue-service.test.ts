@@ -299,7 +299,7 @@ describeWithDb("createProjectHealthQueueService", () => {
 
     expect(response.items).toContainEqual(
       expect.objectContaining({
-        id: "source_without_spec:apps/web/src/routes/checkout.ts",
+        id: "source_without_spec:file:apps/web/src/routes/checkout.ts",
         kind: "source_without_spec",
         family: "source",
         primaryTarget: {
@@ -313,10 +313,10 @@ describeWithDb("createProjectHealthQueueService", () => {
       }),
     );
     expect(response.items).not.toContainEqual(
-      expect.objectContaining({ id: "source_without_spec:apps/web/src/routes/cart.ts" }),
+      expect.objectContaining({ id: "source_without_spec:file:apps/web/src/routes/cart.ts" }),
     );
     expect(response.items).not.toContainEqual(
-      expect.objectContaining({ id: "source_without_spec:apps/web/src/routes/cart.test.ts" }),
+      expect.objectContaining({ id: "source_without_spec:file:apps/web/src/routes/cart.test.ts" }),
     );
   });
 
@@ -370,8 +370,50 @@ describeWithDb("createProjectHealthQueueService", () => {
       }),
     );
     expect(response.items).not.toContainEqual(
-      expect.objectContaining({ id: "source_without_spec:apps/web/src/routes/checkout.ts" }),
+      expect.objectContaining({ id: "source_without_spec:file:apps/web/src/routes/checkout.ts" }),
     );
+  });
+
+  it("uses unique source item ids for distinct symbol graph nodes with the same path and symbol", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    const { graphVersion } = await createGraphFixture(db, project.id, "ready");
+    const [firstSymbol, secondSymbol] = await db
+      .insert(projectGraphNodes)
+      .values([
+        graphNode(project.id, graphVersion.id, {
+          nodeKey: "symbol:apps/web/src/checkout.ts#CheckoutController:class",
+          nodeType: "symbol",
+          label: "CheckoutController",
+          path: "apps/web/src/checkout.ts",
+          symbolName: "CheckoutController",
+          metadataJson: { symbolKind: "class" },
+        }),
+        graphNode(project.id, graphVersion.id, {
+          nodeKey: "symbol:apps/web/src/checkout.ts#CheckoutController:function",
+          nodeType: "symbol",
+          label: "CheckoutController",
+          path: "apps/web/src/checkout.ts",
+          symbolName: "CheckoutController",
+          metadataJson: { symbolKind: "function" },
+        }),
+      ])
+      .returning();
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+    const sourceItems = response.items.filter(
+      (item) =>
+        item.kind === "source_without_spec" &&
+        item.primaryTarget.kind === "source" &&
+        (item.primaryTarget.graphNodeId === firstSymbol!.id ||
+          item.primaryTarget.graphNodeId === secondSymbol!.id),
+    );
+
+    expect(sourceItems).toHaveLength(2);
+    expect(new Set(sourceItems.map((item) => item.id)).size).toBe(2);
+    expect(sourceItems.map((item) => item.id).sort()).toEqual([
+      "source_without_spec:symbol:apps/web/src/checkout.ts#CheckoutController:class",
+      "source_without_spec:symbol:apps/web/src/checkout.ts#CheckoutController:function",
+    ]);
   });
 
   it("reports concepts without spec coverage and low confidence concepts and memberships", async () => {
@@ -459,6 +501,78 @@ describeWithDb("createProjectHealthQueueService", () => {
     );
     expect(response.items).not.toContainEqual(
       expect.objectContaining({ id: "concept_without_spec:workflow:billing" }),
+    );
+  });
+
+  it("evaluates concept coverage against the graph version used by the concept graph", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    const { graphVersion: olderGraph } = await createGraphFixture(db, project.id, "ready", {
+      startedAt: new Date("2026-01-01T10:00:00.000Z"),
+      finishedAt: new Date("2026-01-01T10:05:00.000Z"),
+    });
+    const [olderSourceNode, olderSpecNode] = await db
+      .insert(projectGraphNodes)
+      .values([
+        graphNode(project.id, olderGraph.id, {
+          nodeKey: "file:apps/web/src/checkout.ts",
+          label: "checkout.ts",
+          path: "apps/web/src/checkout.ts",
+          metadataJson: { classification: "source" },
+        }),
+        graphNode(project.id, olderGraph.id, {
+          nodeKey: "spec_entity:uc.checkout",
+          nodeType: "spec_entity",
+          label: "Checkout",
+          path: "spec/use-cases/checkout.md",
+          entityId: "uc.checkout",
+        }),
+      ])
+      .returning();
+    await db.insert(projectGraphEdges).values({
+      projectId: project.id,
+      graphVersionId: olderGraph.id,
+      fromNodeId: olderSourceNode!.id,
+      toNodeId: olderSpecNode!.id,
+      edgeType: "supports_spec",
+      provenance: "annotation",
+    });
+    const { conceptVersion } = await createConceptGraphFixture(db, project.id, olderGraph.id, "ready");
+    const [conceptRow] = await db
+      .insert(projectConcepts)
+      .values(
+        concept(project.id, conceptVersion.id, {
+          conceptKey: "workflow:checkout",
+          conceptType: "workflow",
+          name: "Checkout",
+          confidence: 0.91,
+        }),
+      )
+      .returning();
+    await db.insert(projectConceptMemberships).values(
+      membership(project.id, conceptVersion.id, olderGraph.id, conceptRow!.id, olderSourceNode!.id, 0.91),
+    );
+    const { graphVersion: newerGraph } = await createGraphFixture(db, project.id, "ready", {
+      startedAt: new Date("2026-01-02T10:00:00.000Z"),
+      finishedAt: new Date("2026-01-02T10:05:00.000Z"),
+    });
+    await db.insert(projectGraphNodes).values(
+      graphNode(project.id, newerGraph.id, {
+        nodeKey: "file:apps/web/src/checkout.ts",
+        label: "checkout.ts",
+        path: "apps/web/src/checkout.ts",
+        metadataJson: { classification: "source" },
+      }),
+    );
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.sourceState.latestProjectGraphVersionId).toBe(newerGraph.id);
+    expect(response.sourceState.latestConceptGraphVersionId).toBe(conceptVersion.id);
+    expect(response.items).not.toContainEqual(
+      expect.objectContaining({
+        id: "concept_without_spec:workflow:checkout",
+        kind: "concept_without_spec",
+      }),
     );
   });
 
@@ -612,14 +726,19 @@ async function createSpecFixture(
   return spec!;
 }
 
-async function createGraphFixture(db: Db, projectId: string, status: "ready" | "limited") {
+async function createGraphFixture(
+  db: Db,
+  projectId: string,
+  status: "ready" | "limited",
+  options: { startedAt?: Date; finishedAt?: Date } = {},
+) {
   const [indexRun] = await db
     .insert(indexRuns)
     .values({
       projectId,
       status: "completed",
-      startedAt: new Date("2026-01-01T10:00:00.000Z"),
-      finishedAt: new Date("2026-01-01T10:05:00.000Z"),
+      startedAt: options.startedAt ?? new Date("2026-01-01T10:00:00.000Z"),
+      finishedAt: options.finishedAt ?? new Date("2026-01-01T10:05:00.000Z"),
     })
     .returning();
   const [graphVersion] = await db

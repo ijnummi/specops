@@ -109,6 +109,20 @@ export function createProjectHealthQueueService(db: Db) {
           )
           .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id))
         : [];
+      const conceptGraphEdges = latestConceptVersion
+        ? latestGraphVersion?.id === latestConceptVersion.projectGraphVersionId
+          ? graphEdges
+          : await db
+            .select()
+            .from(projectGraphEdges)
+            .where(
+              and(
+                eq(projectGraphEdges.projectId, projectId),
+                eq(projectGraphEdges.graphVersionId, latestConceptVersion.projectGraphVersionId),
+              ),
+            )
+            .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id))
+        : [];
       const concepts = latestConceptVersion
         ? await db
           .select()
@@ -140,7 +154,7 @@ export function createProjectHealthQueueService(db: Db) {
         ...buildMissingSourceSpecItems(specs, annotations),
         ...buildOrphanedSpecItems(specs, links, annotations),
         ...buildSourceItems(graphNodes, graphEdges),
-        ...buildConceptItems(concepts, memberships, graphEdges),
+        ...buildConceptItems(concepts, memberships, conceptGraphEdges),
       ].sort(compareHealthQueueItems);
 
       return healthQueueResponseSchema.parse({
@@ -612,7 +626,7 @@ function sourceNodeEvidence(node: ProjectGraphNodeRow): HealthQueueEvidenceDto {
 }
 
 function sourceTargetId(node: ProjectGraphNodeRow): string {
-  return node.nodeType === "symbol" && node.symbolName ? `${node.path}#${node.symbolName}` : node.path!;
+  return node.nodeKey;
 }
 
 function sourceLabel(node: ProjectGraphNodeRow): string {
