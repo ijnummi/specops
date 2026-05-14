@@ -175,6 +175,29 @@ describeWithDb("createProjectGraphService", () => {
     }
   });
 
+  it("takes the project advisory lock before persisting graph versions from facts", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const service = createProjectGraphService(db);
+    const facts = await service.loadProjectGraphFacts(project.id);
+    const observed = observeProjectGraphPersistenceOperations(db);
+
+    await createProjectGraphService(observed.db).buildProjectGraphFromFacts({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+      facts,
+    });
+
+    const lockIndex = observed.operations.indexOf("execute:advisory_lock");
+    const updateIndex = observed.operations.indexOf("update:project_graph_versions");
+    const insertIndex = observed.operations.indexOf("insert:project_graph_versions");
+
+    expect(updateIndex).toBeGreaterThanOrEqual(0);
+    expect(insertIndex).toBeGreaterThanOrEqual(0);
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(lockIndex).toBeLessThan(updateIndex);
+    expect(lockIndex).toBeLessThan(insertIndex);
+  });
+
   it("returns the latest graph by index run recency instead of graph creation time", async () => {
     const { project, indexRun: olderRun } = await createIndexedGraphFixture({
       startedAt: new Date("2026-05-10T10:00:00.000Z"),
@@ -891,6 +914,75 @@ function observeProjectGraphEdgeSelectLimits(db: Db): {
     })) as typeof db.select;
 
   return { db: observedDb, edgeSelectLimits };
+}
+
+function observeProjectGraphPersistenceOperations(db: Db): {
+  db: Db;
+  operations: string[];
+} {
+  const operations: string[] = [];
+  const observedDb = Object.create(db) as Db;
+  observedDb.transaction = ((callback: (tx: unknown) => Promise<unknown>) =>
+    db.transaction((tx) => callback(observeProjectGraphWriteTx(tx, operations)))) as typeof db.transaction;
+
+  return { db: observedDb, operations };
+}
+
+function observeProjectGraphWriteTx<T extends object>(tx: T, operations: string[]): T {
+  const txMethods = tx as Record<"execute" | "update" | "insert", (...args: unknown[]) => unknown>;
+  const observedTx = Object.create(tx) as Record<
+    "execute" | "update" | "insert",
+    (...args: unknown[]) => unknown
+  >;
+
+  observedTx.execute = (...args: unknown[]) => {
+    if (isProjectAdvisoryLockQuery(args[0])) {
+      operations.push("execute:advisory_lock");
+    }
+    return txMethods.execute(...args);
+  };
+  observedTx.update = (...args: unknown[]) => {
+    if (args[0] === projectGraphVersions) {
+      operations.push("update:project_graph_versions");
+    }
+    return txMethods.update(...args);
+  };
+  observedTx.insert = (...args: unknown[]) => {
+    if (args[0] === projectGraphVersions) {
+      operations.push("insert:project_graph_versions");
+    }
+    return txMethods.insert(...args);
+  };
+
+  return observedTx as T;
+}
+
+function isProjectAdvisoryLockQuery(query: unknown): boolean {
+  if (!query || typeof query !== "object" || !("queryChunks" in query)) {
+    return false;
+  }
+
+  const chunks = (query as { queryChunks?: unknown }).queryChunks;
+  if (!Array.isArray(chunks)) {
+    return false;
+  }
+
+  return chunks.some((chunk) => {
+    if (!chunk || typeof chunk !== "object" || !("value" in chunk)) {
+      return false;
+    }
+
+    const value = (chunk as { value?: unknown }).value;
+    return (
+      Array.isArray(value) &&
+      value.some(
+        (part) =>
+          typeof part === "string" &&
+          part.includes("pg_advisory_xact_lock") &&
+          part.includes("hashtextextended"),
+      )
+    );
+  });
 }
 
 function observeSelectBuilder<T>(
