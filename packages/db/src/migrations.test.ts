@@ -153,8 +153,11 @@ describe("initial migration", () => {
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key")');
     expect(migration).toContain("project_graph_versions_project_id_idx");
     expect(migration).toContain("project_graph_versions_project_status_created_idx");
+    expect(migration).toContain("project_graph_versions_index_run_id_idx");
+    expect(migration).toContain("project_graph_nodes_graph_version_id_idx");
     expect(migration).toContain("project_graph_nodes_version_type_idx");
     expect(migration).toContain("project_graph_nodes_project_type_idx");
+    expect(migration).toContain("project_graph_edges_graph_version_id_idx");
     expect(migration).toContain("project_graph_edges_version_type_idx");
     expect(migration).toContain("project_graph_edges_from_node_idx");
     expect(migration).toContain("project_graph_edges_to_node_idx");
