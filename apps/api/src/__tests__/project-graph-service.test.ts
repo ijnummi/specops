@@ -6,6 +6,7 @@ import type { Db } from "@specops/db";
 import {
   createDb,
   indexRuns,
+  projectGraphEdges,
   projectGraphVersions,
   projects,
   sourceExports,
@@ -164,6 +165,65 @@ describeWithDb("createProjectGraphService", () => {
         provenance: "scanner_import",
       }),
     ]);
+    for (const edge of filtered.edges) {
+      expect(nodeIds.has(edge.fromNodeId)).toBe(true);
+      expect(nodeIds.has(edge.toNodeId)).toBe(true);
+    }
+  });
+
+  it("bounds incident edge retrieval for high-degree filtered graph queries", async () => {
+    const { project, indexRun, files } = await createIndexedGraphFixture();
+    const routeFile = files.find((file) => file.path === "apps/api/src/routes/projects.ts")!;
+    const extraFiles = await db
+      .insert(sourceFiles)
+      .values(
+        Array.from({ length: 20 }, (_, index) => ({
+          projectId: project.id,
+          path: `apps/api/src/routes/fastify-consumer-${index}.ts`,
+          language: "typescript",
+          kind: "source",
+          sizeBytes: 24,
+          contentHash: `fastify-consumer-${index}`,
+        })),
+      )
+      .returning();
+    await db.insert(sourceImports).values(
+      extraFiles.map((file) => ({
+        projectId: project.id,
+        sourceFileId: file.id,
+        filePath: file.path,
+        specifier: "fastify",
+        importKind: "named",
+        importedNames: ["FastifyInstance"],
+        isRelative: false,
+        resolvedPath: null,
+      })),
+    );
+    await db.insert(sourceImports).values({
+      projectId: project.id,
+      sourceFileId: routeFile.id,
+      filePath: routeFile.path,
+      specifier: "@fastify/cors",
+      importKind: "default",
+      importedNames: [],
+      isRelative: false,
+      resolvedPath: null,
+    });
+
+    const service = createProjectGraphService(db);
+    await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+    const observed = observeProjectGraphEdgeSelectLimits(db);
+    const filtered = await createProjectGraphService(observed.db).getProjectGraph(project.id, {
+      q: "fastify",
+      limit: 6,
+    });
+    const nodeIds = new Set(filtered.nodes.map((node) => node.id));
+
+    expect(observed.edgeSelectLimits).toContain(12);
+    expect(filtered.edges.length).toBeLessThanOrEqual(5);
     for (const edge of filtered.edges) {
       expect(nodeIds.has(edge.fromNodeId)).toBe(true);
       expect(nodeIds.has(edge.toNodeId)).toBe(true);
@@ -515,4 +575,51 @@ function assertSafeTestDatabaseUrl(connectionString: string) {
   if (!databaseName.includes("test") && !databaseName.includes("specops_test")) {
     throw new Error(`Refusing to run DB-backed API tests against non-test database "${databaseName}"`);
   }
+}
+
+function observeProjectGraphEdgeSelectLimits(db: Db): {
+  db: Db;
+  edgeSelectLimits: number[];
+} {
+  const edgeSelectLimits: number[] = [];
+  const observedDb = Object.create(db) as Db;
+  observedDb.select = ((...args: Parameters<typeof db.select>) =>
+    observeSelectBuilder(db.select(...args), {
+      isProjectGraphEdgeSelect: false,
+      edgeSelectLimits,
+    })) as typeof db.select;
+
+  return { db: observedDb, edgeSelectLimits };
+}
+
+function observeSelectBuilder<T>(
+  builder: T,
+  state: { isProjectGraphEdgeSelect: boolean; edgeSelectLimits: number[] },
+): T {
+  return new Proxy(builder as object, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      return (...args: unknown[]) => {
+        if (property === "limit" && state.isProjectGraphEdgeSelect && typeof args[0] === "number") {
+          state.edgeSelectLimits.push(args[0]);
+        }
+        const result = value.apply(target, args);
+        const isProjectGraphEdgeSelect =
+          state.isProjectGraphEdgeSelect || (property === "from" && args[0] === projectGraphEdges);
+
+        if (result && typeof result === "object") {
+          return observeSelectBuilder(result, {
+            isProjectGraphEdgeSelect,
+            edgeSelectLimits: state.edgeSelectLimits,
+          });
+        }
+
+        return result;
+      };
+    },
+  }) as T;
 }

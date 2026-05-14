@@ -279,7 +279,8 @@ export function createProjectGraphService(db: Db) {
           .select()
           .from(projectGraphEdges)
           .where(and(...edgeFilters))
-          .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id));
+          .orderBy(asc(projectGraphEdges.edgeType), asc(projectGraphEdges.id))
+          .limit(limit * 2);
     const missingEndpointIds = uniqueStrings(
       edges.flatMap((edge) => [edge.fromNodeId, edge.toNodeId]).filter((nodeId) => !nodeIds.includes(nodeId)),
     );
