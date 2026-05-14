@@ -8,6 +8,7 @@ import {
 import type { Db } from "@specops/db";
 import {
   createDb,
+  indexRuns,
   projectConceptVersions,
   projectGraphEdges,
   projectGraphNodes,
@@ -95,6 +96,153 @@ describeWithDb("createConceptGraphService", () => {
     ]);
     expect(built.membershipCounts.primary).toBe(1);
     expect(built.version.coverage.graphNodeCoverageCount).toBe(1);
+  });
+
+  it("builds from the latest project graph by index run recency", async () => {
+    const project = await createProjectFixture();
+    const [olderIndexRun, newerIndexRun] = await db
+      .insert(indexRuns)
+      .values([
+        {
+          projectId: project.id,
+          status: "completed",
+          startedAt: new Date("2026-01-01T10:00:00.000Z"),
+          finishedAt: new Date("2026-01-01T10:05:00.000Z"),
+        },
+        {
+          projectId: project.id,
+          status: "completed",
+          startedAt: new Date("2026-01-02T10:00:00.000Z"),
+          finishedAt: new Date("2026-01-02T10:05:00.000Z"),
+        },
+      ])
+      .returning();
+    const [createdLaterGraph, indexedLaterGraph] = await db
+      .insert(projectGraphVersions)
+      .values([
+        {
+          projectId: project.id,
+          indexRunId: olderIndexRun!.id,
+          status: "ready",
+          summary: "Created later but indexed earlier.",
+          coverageJson: {
+            nodeCounts: { file: 1 },
+            edgeCounts: {},
+            sourceFileCount: 1,
+            specEntityCount: 0,
+            unresolvedImportCount: 0,
+            heuristicEdgeCount: 0,
+          },
+          diagnosticsJson: [],
+          createdAt: new Date("2026-01-03T10:00:00.000Z"),
+          updatedAt: new Date("2026-01-03T10:00:00.000Z"),
+        },
+        {
+          projectId: project.id,
+          indexRunId: newerIndexRun!.id,
+          status: "ready",
+          summary: "Indexed later but created earlier.",
+          coverageJson: {
+            nodeCounts: { file: 1 },
+            edgeCounts: {},
+            sourceFileCount: 1,
+            specEntityCount: 0,
+            unresolvedImportCount: 0,
+            heuristicEdgeCount: 0,
+          },
+          diagnosticsJson: [],
+          createdAt: new Date("2026-01-02T10:10:00.000Z"),
+          updatedAt: new Date("2026-01-02T10:10:00.000Z"),
+        },
+      ])
+      .returning();
+    const [createdLaterNode, indexedLaterNode] = await db
+      .insert(projectGraphNodes)
+      .values([
+        {
+          projectId: project.id,
+          graphVersionId: createdLaterGraph!.id,
+          nodeKey: "file:apps/web/src/older-run.ts",
+          nodeType: "file",
+          label: "older-run.ts",
+          path: "apps/web/src/older-run.ts",
+          symbolName: null,
+          entityId: null,
+          sourceRefJson: { path: "apps/web/src/older-run.ts" },
+          metadataJson: {},
+          confidence: 1,
+        },
+        {
+          projectId: project.id,
+          graphVersionId: indexedLaterGraph!.id,
+          nodeKey: "file:apps/web/src/newer-run.ts",
+          nodeType: "file",
+          label: "newer-run.ts",
+          path: "apps/web/src/newer-run.ts",
+          symbolName: null,
+          entityId: null,
+          sourceRefJson: { path: "apps/web/src/newer-run.ts" },
+          metadataJson: {},
+          confidence: 1,
+        },
+      ])
+      .returning();
+    const provider = conceptProvider({
+      concepts: [
+        {
+          key: "workflow:newer-run",
+          type: "workflow",
+          name: "Newer Run",
+          summary: "Concept from the latest indexed graph.",
+          confidence: 0.87,
+          evidenceSummary: "The latest index run node is present.",
+          memberships: [
+            {
+              graphNodeId: indexedLaterNode!.id,
+              role: "primary",
+              confidence: 0.92,
+              rationale: "The newer index run should be selected.",
+            },
+          ],
+        },
+      ],
+      relationships: [],
+    });
+
+    const built = await createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () => provider,
+    }).buildConceptGraph(project.id, buildInput());
+
+    expect(built.version.projectGraphVersionId).toBe(indexedLaterGraph!.id);
+    expect(built.version.projectGraphVersionId).not.toBe(createdLaterGraph!.id);
+    expect(built.version.status).toBe("ready");
+    expect(built.version.coverage.graphNodeCoverageCount).toBe(1);
+    expect(provider.generateConceptGraph).toHaveBeenCalledOnce();
+    expect(provider.generateConceptGraph).toHaveBeenCalledWith(
+      expect.objectContaining({
+        packet: expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "user",
+              content: expect.stringContaining(indexedLaterNode!.id),
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(provider.generateConceptGraph).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        packet: expect.objectContaining({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "user",
+              content: expect.stringContaining(createdLaterNode!.id),
+            }),
+          ]),
+        }),
+      }),
+    );
   });
 
   it("persists unsupported no-membership concepts as limited with diagnostics", async () => {

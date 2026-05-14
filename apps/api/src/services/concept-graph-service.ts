@@ -18,6 +18,7 @@ import type {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import {
+  indexRuns,
   projectConceptMemberships,
   projectConceptRelationships,
   projectConceptVersions,
@@ -263,17 +264,24 @@ export function createConceptGraphService(db: Db, options: ConceptGraphServiceOp
   }
 
   async function getLatestProjectGraphVersion(projectId: string): Promise<ProjectGraphVersionRow> {
-    const [version] = await db
-      .select()
+    const [row] = await db
+      .select({ version: projectGraphVersions })
       .from(projectGraphVersions)
+      .leftJoin(indexRuns, eq(projectGraphVersions.indexRunId, indexRuns.id))
       .where(
         and(
           eq(projectGraphVersions.projectId, projectId),
           or(eq(projectGraphVersions.status, "ready"), eq(projectGraphVersions.status, "limited")),
         ),
       )
-      .orderBy(desc(projectGraphVersions.createdAt), desc(projectGraphVersions.id))
+      .orderBy(
+        sql`case when ${indexRuns.id} is null then 0 else 1 end desc`,
+        sql`coalesce(${indexRuns.finishedAt}, ${indexRuns.startedAt}) desc nulls last`,
+        desc(projectGraphVersions.createdAt),
+        desc(projectGraphVersions.id),
+      )
       .limit(1);
+    const version = row?.version;
 
     if (!version) {
       throw new BadRequestError("Project graph is required before concept consolidation", { projectId });
