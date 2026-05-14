@@ -89,6 +89,44 @@ describe("health queue contracts", () => {
     ).toMatchObject({ kind: "open_analyze_run" });
   });
 
+  it("rejects invalid UUIDs in graph and concept evidence", () => {
+    expect(() =>
+      healthQueueEvidenceSchema.parse({
+        kind: "graph_node",
+        label: "Checkout route",
+        detail: "Route node",
+        graphNodeId: "not-a-uuid"
+      })
+    ).toThrow();
+
+    expect(() =>
+      healthQueueEvidenceSchema.parse({
+        kind: "concept",
+        label: "Checkout flow",
+        detail: "Workflow concept",
+        conceptId: "not-a-uuid"
+      })
+    ).toThrow();
+  });
+
+  it("rejects invalid UUIDs in graph and concept actions", () => {
+    expect(() =>
+      healthQueueActionSchema.parse({
+        kind: "open_graph_node",
+        label: "Open graph node",
+        graphNodeId: "not-a-uuid"
+      })
+    ).toThrow();
+
+    expect(() =>
+      healthQueueActionSchema.parse({
+        kind: "open_concept",
+        label: "Open concept",
+        conceptId: "not-a-uuid"
+      })
+    ).toThrow();
+  });
+
   it("parses a complete health queue response", () => {
     const parsed = healthQueueResponseSchema.parse({
       generatedAt: timestamp,

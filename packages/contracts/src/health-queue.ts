@@ -79,8 +79,8 @@ export const healthQueueEvidenceSchema = z.object({
   detail: z.string().min(1),
   entityId: z.string().min(1).optional(),
   filePath: z.string().min(1).optional(),
-  graphNodeId: z.string().min(1).optional(),
-  conceptId: z.string().min(1).optional(),
+  graphNodeId: z.string().uuid().optional(),
+  conceptId: z.string().uuid().optional(),
   annotationId: z.string().min(1).optional(),
   confidence: z.number().min(0).max(1).optional()
 });
@@ -109,12 +109,12 @@ export const healthQueueActionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("open_graph_node"),
     label: z.string().min(1),
-    graphNodeId: z.string().min(1)
+    graphNodeId: z.string().uuid()
   }),
   z.object({
     kind: z.literal("open_concept"),
     label: z.string().min(1),
-    conceptId: z.string().min(1)
+    conceptId: z.string().uuid()
   }),
   z.object({
     kind: z.literal("open_analyze_run"),
