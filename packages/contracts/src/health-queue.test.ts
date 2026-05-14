@@ -41,6 +41,54 @@ describe("health queue contracts", () => {
     ).toMatchObject({ kind: "open_impact", entityId: "uc.checkout" });
   });
 
+  it("parses source and concept primary targets", () => {
+    expect(
+      healthQueuePrimaryTargetSchema.parse({
+        kind: "source",
+        graphNodeId: "00000000-0000-4000-8000-000000000004",
+        nodeKey: "src/routes/checkout.ts",
+        nodeType: "file",
+        path: "src/routes/checkout.ts",
+        symbolName: null
+      })
+    ).toMatchObject({
+      kind: "source",
+      graphNodeId: "00000000-0000-4000-8000-000000000004",
+      path: "src/routes/checkout.ts"
+    });
+
+    expect(
+      healthQueuePrimaryTargetSchema.parse({
+        kind: "concept",
+        conceptId: "00000000-0000-4000-8000-000000000005",
+        conceptKey: "checkout_flow",
+        conceptType: "workflow",
+        name: "Checkout flow"
+      })
+    ).toMatchObject({
+      kind: "concept",
+      conceptId: "00000000-0000-4000-8000-000000000005",
+      conceptKey: "checkout_flow"
+    });
+  });
+
+  it("parses graph and analyze-run navigation descriptors", () => {
+    expect(
+      healthQueueActionSchema.parse({
+        kind: "open_project_graph",
+        label: "Open graph",
+        q: "checkout"
+      })
+    ).toMatchObject({ kind: "open_project_graph", q: "checkout" });
+
+    expect(
+      healthQueueActionSchema.parse({
+        kind: "open_analyze_run",
+        label: "Open analyze run"
+      })
+    ).toMatchObject({ kind: "open_analyze_run" });
+  });
+
   it("parses a complete health queue response", () => {
     const parsed = healthQueueResponseSchema.parse({
       generatedAt: timestamp,

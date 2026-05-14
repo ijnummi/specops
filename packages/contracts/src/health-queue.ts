@@ -50,16 +50,18 @@ export const healthQueuePrimaryTargetSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("source"),
-    filePath: z.string().min(1),
-    title: z.string().min(1).optional(),
-    entityId: z.string().min(1).optional(),
-    graphNodeId: z.string().min(1).optional()
+    graphNodeId: z.string().uuid().nullable(),
+    nodeKey: z.string().min(1).nullable(),
+    nodeType: z.string().min(1).nullable(),
+    path: z.string().min(1),
+    symbolName: z.string().min(1).nullable()
   }),
   z.object({
     kind: z.literal("concept"),
-    conceptId: z.string().min(1),
-    title: z.string().min(1),
-    confidence: z.number().min(0).max(1).optional()
+    conceptId: z.string().uuid(),
+    conceptKey: z.string().min(1),
+    conceptType: z.string().min(1),
+    name: z.string().min(1)
   })
 ]);
 
@@ -101,7 +103,8 @@ export const healthQueueActionSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("open_project_graph"),
-    label: z.string().min(1)
+    label: z.string().min(1),
+    q: z.string().min(1).optional()
   }),
   z.object({
     kind: z.literal("open_graph_node"),
@@ -115,8 +118,7 @@ export const healthQueueActionSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("open_analyze_run"),
-    label: z.string().min(1),
-    analyzeRunId: z.string().min(1)
+    label: z.string().min(1)
   })
 ]);
 
