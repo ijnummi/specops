@@ -7,6 +7,7 @@ export * from "./change-impact.js";
 export * from "./concepts.js";
 export * from "./diff-reviews.js";
 export * from "./entities.js";
+export * from "./health-queue.js";
 export * from "./impact.js";
 export * from "./indexing.js";
 export * from "./proposals.js";
