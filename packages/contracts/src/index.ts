@@ -9,6 +9,7 @@ export * from "./entities.js";
 export * from "./impact.js";
 export * from "./indexing.js";
 export * from "./proposals.js";
+export * from "./project-graph.js";
 export * from "./projects.js";
 export * from "./readiness.js";
 export * from "./source.js";
