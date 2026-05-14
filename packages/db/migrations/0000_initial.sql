@@ -734,6 +734,204 @@ CREATE INDEX IF NOT EXISTS "project_graph_edges_from_node_idx"
 CREATE INDEX IF NOT EXISTS "project_graph_edges_to_node_idx"
   ON "project_graph_edges" ("to_node_id");
 
+CREATE TABLE IF NOT EXISTS "project_concept_versions" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "project_graph_version_id" uuid NOT NULL REFERENCES "project_graph_versions"("id") ON DELETE cascade,
+  "status" text NOT NULL,
+  "provider" text NOT NULL,
+  "model" text NOT NULL,
+  "prompt_version" text NOT NULL,
+  "summary" text NOT NULL DEFAULT '',
+  "coverage_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "diagnostics_json" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "project_concept_versions_id_project_id_unique" UNIQUE("id","project_id")
+);
+
+CREATE TABLE IF NOT EXISTS "project_concepts" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "concept_version_id" uuid NOT NULL REFERENCES "project_concept_versions"("id") ON DELETE cascade,
+  "concept_key" text NOT NULL,
+  "concept_type" text NOT NULL,
+  "name" text NOT NULL,
+  "summary" text NOT NULL DEFAULT '',
+  "confidence" double precision NOT NULL,
+  "provenance" text NOT NULL,
+  "evidence_summary" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'active',
+  "metadata_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "project_concepts_version_key_unique" UNIQUE("concept_version_id","concept_key"),
+  CONSTRAINT "project_concepts_id_project_id_unique" UNIQUE("id","project_id"),
+  CONSTRAINT "project_concepts_id_project_id_concept_version_id_unique" UNIQUE("id","project_id","concept_version_id")
+);
+
+CREATE TABLE IF NOT EXISTS "project_concept_memberships" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "concept_version_id" uuid NOT NULL REFERENCES "project_concept_versions"("id") ON DELETE cascade,
+  "concept_id" uuid NOT NULL,
+  "graph_node_id" uuid NOT NULL,
+  "role" text NOT NULL,
+  "confidence" double precision NOT NULL,
+  "rationale" text NOT NULL DEFAULT '',
+  "created_at" timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "project_concept_relationships" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+  "concept_version_id" uuid NOT NULL REFERENCES "project_concept_versions"("id") ON DELETE cascade,
+  "from_concept_id" uuid NOT NULL,
+  "to_concept_id" uuid NOT NULL,
+  "relationship_type" text NOT NULL,
+  "confidence" double precision NOT NULL,
+  "rationale" text NOT NULL DEFAULT '',
+  "created_at" timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE "project_concept_versions" DROP CONSTRAINT IF EXISTS "project_concept_versions_graph_version_project_fk";
+ALTER TABLE "project_concepts" DROP CONSTRAINT IF EXISTS "project_concepts_version_project_fk";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_version_project_fk";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_concept_project_fk";
+ALTER TABLE "project_concept_memberships" DROP CONSTRAINT IF EXISTS "project_concept_memberships_graph_node_project_fk";
+ALTER TABLE "project_concept_relationships" DROP CONSTRAINT IF EXISTS "project_concept_relationships_version_project_fk";
+ALTER TABLE "project_concept_relationships" DROP CONSTRAINT IF EXISTS "project_concept_relationships_from_concept_project_fk";
+ALTER TABLE "project_concept_relationships" DROP CONSTRAINT IF EXISTS "project_concept_relationships_to_concept_project_fk";
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_versions_graph_version_project_fk'
+      AND conrelid = 'project_concept_versions'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_versions"
+      ADD CONSTRAINT "project_concept_versions_graph_version_project_fk"
+      FOREIGN KEY ("project_graph_version_id","project_id") REFERENCES "project_graph_versions"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concepts_version_project_fk'
+      AND conrelid = 'project_concepts'::regclass
+  ) THEN
+    ALTER TABLE "project_concepts"
+      ADD CONSTRAINT "project_concepts_version_project_fk"
+      FOREIGN KEY ("concept_version_id","project_id") REFERENCES "project_concept_versions"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_memberships_version_project_fk'
+      AND conrelid = 'project_concept_memberships'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_memberships"
+      ADD CONSTRAINT "project_concept_memberships_version_project_fk"
+      FOREIGN KEY ("concept_version_id","project_id") REFERENCES "project_concept_versions"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_memberships_concept_project_fk'
+      AND conrelid = 'project_concept_memberships'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_memberships"
+      ADD CONSTRAINT "project_concept_memberships_concept_project_fk"
+      FOREIGN KEY ("concept_id","project_id","concept_version_id") REFERENCES "project_concepts"("id","project_id","concept_version_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_memberships_graph_node_project_fk'
+      AND conrelid = 'project_concept_memberships'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_memberships"
+      ADD CONSTRAINT "project_concept_memberships_graph_node_project_fk"
+      FOREIGN KEY ("graph_node_id","project_id") REFERENCES "project_graph_nodes"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_relationships_version_project_fk'
+      AND conrelid = 'project_concept_relationships'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_relationships"
+      ADD CONSTRAINT "project_concept_relationships_version_project_fk"
+      FOREIGN KEY ("concept_version_id","project_id") REFERENCES "project_concept_versions"("id","project_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_relationships_from_concept_project_fk'
+      AND conrelid = 'project_concept_relationships'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_relationships"
+      ADD CONSTRAINT "project_concept_relationships_from_concept_project_fk"
+      FOREIGN KEY ("from_concept_id","project_id","concept_version_id") REFERENCES "project_concepts"("id","project_id","concept_version_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'project_concept_relationships_to_concept_project_fk'
+      AND conrelid = 'project_concept_relationships'::regclass
+  ) THEN
+    ALTER TABLE "project_concept_relationships"
+      ADD CONSTRAINT "project_concept_relationships_to_concept_project_fk"
+      FOREIGN KEY ("to_concept_id","project_id","concept_version_id") REFERENCES "project_concepts"("id","project_id","concept_version_id") ON DELETE cascade;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "project_concept_versions_project_id_idx"
+  ON "project_concept_versions" ("project_id");
+CREATE INDEX IF NOT EXISTS "project_concept_versions_project_status_created_idx"
+  ON "project_concept_versions" ("project_id","status","created_at");
+CREATE INDEX IF NOT EXISTS "project_concept_versions_graph_version_id_idx"
+  ON "project_concept_versions" ("project_graph_version_id");
+CREATE INDEX IF NOT EXISTS "project_concepts_concept_version_id_idx"
+  ON "project_concepts" ("concept_version_id");
+CREATE INDEX IF NOT EXISTS "project_concepts_version_type_idx"
+  ON "project_concepts" ("concept_version_id","concept_type");
+CREATE INDEX IF NOT EXISTS "project_concepts_project_status_idx"
+  ON "project_concepts" ("project_id","status");
+CREATE INDEX IF NOT EXISTS "project_concept_memberships_concept_version_id_idx"
+  ON "project_concept_memberships" ("concept_version_id");
+CREATE INDEX IF NOT EXISTS "project_concept_memberships_concept_id_idx"
+  ON "project_concept_memberships" ("concept_id");
+CREATE INDEX IF NOT EXISTS "project_concept_memberships_graph_node_id_idx"
+  ON "project_concept_memberships" ("graph_node_id");
+CREATE INDEX IF NOT EXISTS "project_concept_relationships_concept_version_id_idx"
+  ON "project_concept_relationships" ("concept_version_id");
+CREATE INDEX IF NOT EXISTS "project_concept_relationships_from_concept_idx"
+  ON "project_concept_relationships" ("from_concept_id");
+CREATE INDEX IF NOT EXISTS "project_concept_relationships_to_concept_idx"
+  ON "project_concept_relationships" ("to_concept_id");
+
 CREATE TABLE IF NOT EXISTS analyze_review_assemblies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
