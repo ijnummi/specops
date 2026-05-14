@@ -148,10 +148,18 @@ describe("initial migration", () => {
     expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_versions"');
     expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_nodes"');
     expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_graph_edges"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_concept_versions"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_concepts"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_concept_memberships"');
+    expect(migration).toContain('CREATE TABLE IF NOT EXISTS "project_concept_relationships"');
     expect(migration).toContain('CONSTRAINT "project_graph_versions_id_project_id_unique" UNIQUE("id","project_id")');
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_id_project_id_unique" UNIQUE("id","project_id")');
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_id_project_id_graph_version_id_unique" UNIQUE("id","project_id","graph_version_id")');
     expect(migration).toContain('CONSTRAINT "project_graph_nodes_version_key_unique" UNIQUE("graph_version_id","node_key")');
+    expect(migration).toContain('CONSTRAINT "project_concept_versions_id_project_id_unique" UNIQUE("id","project_id")');
+    expect(migration).toContain('CONSTRAINT "project_concept_versions_id_project_id_project_graph_version_id_unique" UNIQUE("id","project_id","project_graph_version_id")');
+    expect(migration).toContain('CONSTRAINT "project_concepts_version_key_unique" UNIQUE("concept_version_id","concept_key")');
+    expect(migration).toContain('"project_graph_version_id" uuid NOT NULL');
     expect(migration).toContain("project_graph_versions_project_id_idx");
     expect(migration).toContain("project_graph_versions_project_status_created_idx");
     expect(migration).toContain("project_graph_versions_index_run_id_idx");
@@ -162,12 +170,22 @@ describe("initial migration", () => {
     expect(migration).toContain("project_graph_edges_version_type_idx");
     expect(migration).toContain("project_graph_edges_from_node_idx");
     expect(migration).toContain("project_graph_edges_to_node_idx");
+    expect(migration).toContain("project_concept_versions_project_status_created_idx");
+    expect(migration).toContain("project_concepts_version_type_idx");
+    expect(migration).toContain("project_concept_memberships_graph_version_id_idx");
+    expect(migration).toContain("project_concept_memberships_concept_id_idx");
+    expect(migration).toContain("project_concept_relationships_from_concept_idx");
     for (const constraintName of [
       "project_graph_versions_index_run_project_fk",
       "project_graph_nodes_version_project_fk",
       "project_graph_edges_version_project_fk",
       "project_graph_edges_from_node_project_fk",
-      "project_graph_edges_to_node_project_fk"
+      "project_graph_edges_to_node_project_fk",
+      "project_concept_versions_graph_version_project_fk",
+      "project_concepts_version_project_fk",
+      "project_concept_memberships_version_project_graph_version_fk",
+      "project_concept_memberships_graph_node_project_graph_version_fk",
+      "project_concept_relationships_to_concept_project_fk"
     ]) {
       expect(migration).toContain(`conname = '${constraintName}'`);
     }
@@ -180,6 +198,48 @@ describe("initial migration", () => {
     expect(migration).toContain(
       'FOREIGN KEY ("to_node_id","project_id","graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade',
     );
+    expect(migration).toContain(
+      'FOREIGN KEY ("concept_version_id","project_id","project_graph_version_id") REFERENCES "project_concept_versions"("id","project_id","project_graph_version_id") ON DELETE cascade',
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("graph_node_id","project_id","project_graph_version_id") REFERENCES "project_graph_nodes"("id","project_id","graph_version_id") ON DELETE cascade',
+    );
+  });
+
+  it("cleans invalid concept graph cache rows before enforcing graph-node version consistency", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    const backfillPosition = migration.indexOf(
+      'SET "project_graph_version_id" = version."project_graph_version_id"',
+    );
+    const cleanupPosition = migration.indexOf(
+      'DELETE FROM "project_concept_memberships" AS membership',
+    );
+    const graphNodeFkPosition = migration.indexOf(
+      'ADD CONSTRAINT "project_concept_memberships_graph_node_project_graph_version_fk"',
+    );
+
+    expect(backfillPosition).toBeGreaterThan(-1);
+    expect(cleanupPosition).toBeGreaterThan(-1);
+    expect(graphNodeFkPosition).toBeGreaterThan(-1);
+    expect(cleanupPosition).toBeGreaterThan(backfillPosition);
+    expect(cleanupPosition).toBeLessThan(graphNodeFkPosition);
+    expect(migration).toContain(
+      'DELETE FROM "project_concept_memberships" AS membership\nWHERE NOT EXISTS',
+    );
+    expect(migration).toContain('node."id" = membership."graph_node_id"');
+    expect(migration).toContain('node."project_id" = membership."project_id"');
+    expect(migration).toContain(
+      'node."graph_version_id" = membership."project_graph_version_id"',
+    );
+    expect(migration).toContain(
+      'DELETE FROM "project_concept_relationships" AS relationship',
+    );
+    expect(migration).toContain(
+      'concept."id" IN (relationship."from_concept_id", relationship."to_concept_id")',
+    );
+    expect(migration).toContain('DELETE FROM "project_concepts" AS concept\nWHERE NOT EXISTS');
+    expect(migration).toContain('membership."concept_id" = concept."id"');
   });
 
   it("creates analyze review assembly storage", async () => {

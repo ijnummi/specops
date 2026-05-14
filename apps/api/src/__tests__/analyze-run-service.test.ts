@@ -83,7 +83,8 @@ describeWithDb("createAnalyzeRunService", () => {
         async generateSpecProposals(input) {
           requestedModels.push(input.model);
           return aiPrefillProviderResult(input.model);
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
 
@@ -157,7 +158,8 @@ describeWithDb("createAnalyzeRunService", () => {
       aiPrefillProviderFactory: () => ({
         async generateSpecProposals() {
           throw new Error("AI Prefill should be skipped for an empty selection");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
 
@@ -190,7 +192,8 @@ describeWithDb("createAnalyzeRunService", () => {
       aiPrefillProviderFactory: () => ({
         async generateSpecProposals() {
           throw new Error("AI Prefill should be skipped when there are no source files");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
 
@@ -262,7 +265,8 @@ function successfulProviderFactory(): AiPrefillProviderFactory {
   return () => ({
     async generateSpecProposals(input) {
       return aiPrefillProviderResult(input.model);
-    }
+    },
+    generateConceptGraph: generateConceptGraphShouldNotBeCalled
   });
 }
 
@@ -280,10 +284,15 @@ function deferredSuccessfulProviderFactory(): {
       async generateSpecProposals(input) {
         await ready;
         return aiPrefillProviderResult(input.model);
-      }
+      },
+      generateConceptGraph: generateConceptGraphShouldNotBeCalled
     }),
     resolve
   };
+}
+
+async function generateConceptGraphShouldNotBeCalled(): Promise<never> {
+  throw new Error("Concept graph generation should not be called");
 }
 
 function aiPrefillProviderResult(model: string) {

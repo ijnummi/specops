@@ -175,6 +175,52 @@ describeWithDb("createProjectGraphService", () => {
     }
   });
 
+  it("takes the project advisory lock before persisting graph versions from facts", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const service = createProjectGraphService(db);
+    const facts = await service.loadProjectGraphFacts(project.id);
+    const observed = observeProjectGraphPersistenceOperations(db);
+
+    await createProjectGraphService(observed.db).buildProjectGraphFromFacts({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+      facts,
+    });
+
+    const lockIndex = observed.operations.indexOf("execute:advisory_lock");
+    const updateIndex = observed.operations.indexOf("update:project_graph_versions");
+    const insertIndex = observed.operations.indexOf("insert:project_graph_versions");
+
+    expect(updateIndex).toBeGreaterThanOrEqual(0);
+    expect(insertIndex).toBeGreaterThanOrEqual(0);
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(lockIndex).toBeLessThan(updateIndex);
+    expect(lockIndex).toBeLessThan(insertIndex);
+  });
+
+  it("takes the project advisory lock before loading facts in direct graph builds", async () => {
+    const { project, indexRun } = await createIndexedGraphFixture();
+    const observed = observeProjectGraphPersistenceOperations(db);
+
+    await createProjectGraphService(observed.db).buildProjectGraph({
+      projectId: project.id,
+      indexRunId: indexRun.id,
+    });
+
+    const lockIndex = observed.operations.indexOf("execute:advisory_lock");
+    const factLoadIndex = observed.operations.indexOf("select:source_files");
+    const updateIndex = observed.operations.indexOf("update:project_graph_versions");
+    const insertIndex = observed.operations.indexOf("insert:project_graph_versions");
+
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(factLoadIndex).toBeGreaterThanOrEqual(0);
+    expect(updateIndex).toBeGreaterThanOrEqual(0);
+    expect(insertIndex).toBeGreaterThanOrEqual(0);
+    expect(lockIndex).toBeLessThan(factLoadIndex);
+    expect(lockIndex).toBeLessThan(updateIndex);
+    expect(lockIndex).toBeLessThan(insertIndex);
+  });
+
   it("returns the latest graph by index run recency instead of graph creation time", async () => {
     const { project, indexRun: olderRun } = await createIndexedGraphFixture({
       startedAt: new Date("2026-05-10T10:00:00.000Z"),
@@ -891,6 +937,101 @@ function observeProjectGraphEdgeSelectLimits(db: Db): {
     })) as typeof db.select;
 
   return { db: observedDb, edgeSelectLimits };
+}
+
+function observeProjectGraphPersistenceOperations(db: Db): {
+  db: Db;
+  operations: string[];
+} {
+  const operations: string[] = [];
+  const observedDb = Object.create(db) as Db;
+  observedDb.transaction = ((callback: (tx: unknown) => Promise<unknown>) =>
+    db.transaction((tx) => callback(observeProjectGraphWriteTx(tx, operations)))) as typeof db.transaction;
+
+  return { db: observedDb, operations };
+}
+
+function observeProjectGraphWriteTx<T extends object>(tx: T, operations: string[]): T {
+  const txMethods = tx as Record<"execute" | "select" | "update" | "insert", (...args: unknown[]) => unknown>;
+  const observedTx = Object.create(tx) as Record<
+    "execute" | "select" | "update" | "insert",
+    (...args: unknown[]) => unknown
+  >;
+
+  observedTx.execute = (...args: unknown[]) => {
+    if (isProjectAdvisoryLockQuery(args[0])) {
+      operations.push("execute:advisory_lock");
+    }
+    return txMethods.execute(...args);
+  };
+  observedTx.select = (...args: unknown[]) =>
+    observeProjectGraphFactSelects(txMethods.select(...args), operations);
+  observedTx.update = (...args: unknown[]) => {
+    if (args[0] === projectGraphVersions) {
+      operations.push("update:project_graph_versions");
+    }
+    return txMethods.update(...args);
+  };
+  observedTx.insert = (...args: unknown[]) => {
+    if (args[0] === projectGraphVersions) {
+      operations.push("insert:project_graph_versions");
+    }
+    return txMethods.insert(...args);
+  };
+
+  return observedTx as T;
+}
+
+function observeProjectGraphFactSelects<T>(builder: T, operations: string[]): T {
+  return new Proxy(builder as object, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      return (...args: unknown[]) => {
+        if (property === "from" && args[0] === sourceFiles) {
+          operations.push("select:source_files");
+        }
+        const result = value.apply(target, args);
+
+        if (result && typeof result === "object") {
+          return observeProjectGraphFactSelects(result, operations);
+        }
+
+        return result;
+      };
+    },
+  }) as T;
+}
+
+function isProjectAdvisoryLockQuery(query: unknown): boolean {
+  if (!query || typeof query !== "object" || !("queryChunks" in query)) {
+    return false;
+  }
+
+  const chunks = (query as { queryChunks?: unknown }).queryChunks;
+  if (!Array.isArray(chunks)) {
+    return false;
+  }
+
+  return chunks.some((chunk) => {
+    if (!chunk || typeof chunk !== "object" || !("value" in chunk)) {
+      return false;
+    }
+
+    const value = (chunk as { value?: unknown }).value;
+    return (
+      Array.isArray(value) &&
+      value.some(
+        (part) =>
+          typeof part === "string" &&
+          part.includes("pg_advisory_xact_lock") &&
+          part.includes("hashtextextended"),
+      )
+    );
+  });
 }
 
 function observeSelectBuilder<T>(

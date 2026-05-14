@@ -560,6 +560,194 @@ export const projectGraphEdges = pgTable(
   }),
 );
 
+export const projectConceptVersions = pgTable(
+  "project_concept_versions",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    projectGraphVersionId: uuid("project_graph_version_id")
+      .notNull()
+      .references(() => projectGraphVersions.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    summary: text("summary").notNull().default(""),
+    coverageJson: jsonb("coverage_json").notNull().default(sql`'{}'::jsonb`),
+    diagnosticsJson: jsonb("diagnostics_json").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    projectIdx: index("project_concept_versions_project_id_idx").on(table.projectId),
+    projectStatusCreatedIdx: index("project_concept_versions_project_status_created_idx").on(
+      table.projectId,
+      table.status,
+      table.createdAt,
+    ),
+    graphVersionIdx: index("project_concept_versions_graph_version_id_idx").on(
+      table.projectGraphVersionId,
+    ),
+    idProjectUnique: unique("project_concept_versions_id_project_id_unique").on(
+      table.id,
+      table.projectId,
+    ),
+    idProjectGraphVersionUnique: unique(
+      "project_concept_versions_id_project_id_project_graph_version_id_unique",
+    ).on(table.id, table.projectId, table.projectGraphVersionId),
+    graphVersionProjectFk: foreignKey({
+      name: "project_concept_versions_graph_version_project_fk",
+      columns: [table.projectGraphVersionId, table.projectId],
+      foreignColumns: [projectGraphVersions.id, projectGraphVersions.projectId],
+    }).onDelete("cascade"),
+  }),
+);
+
+export const projectConcepts = pgTable(
+  "project_concepts",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    conceptVersionId: uuid("concept_version_id")
+      .notNull()
+      .references(() => projectConceptVersions.id, { onDelete: "cascade" }),
+    conceptKey: text("concept_key").notNull(),
+    conceptType: text("concept_type").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    confidence: doublePrecision("confidence").notNull(),
+    provenance: text("provenance").notNull(),
+    evidenceSummary: text("evidence_summary").notNull().default(""),
+    status: text("status").notNull().default("active"),
+    metadataJson: jsonb("metadata_json").notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => ({
+    conceptVersionIdx: index("project_concepts_concept_version_id_idx").on(
+      table.conceptVersionId,
+    ),
+    versionTypeIdx: index("project_concepts_version_type_idx").on(
+      table.conceptVersionId,
+      table.conceptType,
+    ),
+    projectStatusIdx: index("project_concepts_project_status_idx").on(table.projectId, table.status),
+    versionKeyUnique: unique("project_concepts_version_key_unique").on(
+      table.conceptVersionId,
+      table.conceptKey,
+    ),
+    idProjectUnique: unique("project_concepts_id_project_id_unique").on(table.id, table.projectId),
+    idProjectVersionUnique: unique("project_concepts_id_project_id_concept_version_id_unique").on(
+      table.id,
+      table.projectId,
+      table.conceptVersionId,
+    ),
+    versionProjectFk: foreignKey({
+      name: "project_concepts_version_project_fk",
+      columns: [table.conceptVersionId, table.projectId],
+      foreignColumns: [projectConceptVersions.id, projectConceptVersions.projectId],
+    }).onDelete("cascade"),
+  }),
+);
+
+export const projectConceptMemberships = pgTable(
+  "project_concept_memberships",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    conceptVersionId: uuid("concept_version_id").notNull(),
+    projectGraphVersionId: uuid("project_graph_version_id").notNull(),
+    conceptId: uuid("concept_id").notNull(),
+    graphNodeId: uuid("graph_node_id").notNull(),
+    role: text("role").notNull(),
+    confidence: doublePrecision("confidence").notNull(),
+    rationale: text("rationale").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    conceptVersionIdx: index("project_concept_memberships_concept_version_id_idx").on(
+      table.conceptVersionId,
+    ),
+    graphVersionIdx: index("project_concept_memberships_graph_version_id_idx").on(
+      table.projectGraphVersionId,
+    ),
+    conceptIdx: index("project_concept_memberships_concept_id_idx").on(table.conceptId),
+    graphNodeIdx: index("project_concept_memberships_graph_node_id_idx").on(table.graphNodeId),
+    versionProjectFk: foreignKey({
+      name: "project_concept_memberships_version_project_graph_version_fk",
+      columns: [table.conceptVersionId, table.projectId, table.projectGraphVersionId],
+      foreignColumns: [
+        projectConceptVersions.id,
+        projectConceptVersions.projectId,
+        projectConceptVersions.projectGraphVersionId,
+      ],
+    }).onDelete("cascade"),
+    conceptProjectFk: foreignKey({
+      name: "project_concept_memberships_concept_project_fk",
+      columns: [table.conceptId, table.projectId, table.conceptVersionId],
+      foreignColumns: [projectConcepts.id, projectConcepts.projectId, projectConcepts.conceptVersionId],
+    }).onDelete("cascade"),
+    graphNodeProjectFk: foreignKey({
+      name: "project_concept_memberships_graph_node_project_graph_version_fk",
+      columns: [table.graphNodeId, table.projectId, table.projectGraphVersionId],
+      foreignColumns: [
+        projectGraphNodes.id,
+        projectGraphNodes.projectId,
+        projectGraphNodes.graphVersionId,
+      ],
+    }).onDelete("cascade"),
+  }),
+);
+
+export const projectConceptRelationships = pgTable(
+  "project_concept_relationships",
+  {
+    id: primaryId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    conceptVersionId: uuid("concept_version_id")
+      .notNull()
+      .references(() => projectConceptVersions.id, { onDelete: "cascade" }),
+    fromConceptId: uuid("from_concept_id").notNull(),
+    toConceptId: uuid("to_concept_id").notNull(),
+    relationshipType: text("relationship_type").notNull(),
+    confidence: doublePrecision("confidence").notNull(),
+    rationale: text("rationale").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (table) => ({
+    conceptVersionIdx: index("project_concept_relationships_concept_version_id_idx").on(
+      table.conceptVersionId,
+    ),
+    fromConceptIdx: index("project_concept_relationships_from_concept_idx").on(
+      table.fromConceptId,
+    ),
+    toConceptIdx: index("project_concept_relationships_to_concept_idx").on(table.toConceptId),
+    versionProjectFk: foreignKey({
+      name: "project_concept_relationships_version_project_fk",
+      columns: [table.conceptVersionId, table.projectId],
+      foreignColumns: [projectConceptVersions.id, projectConceptVersions.projectId],
+    }).onDelete("cascade"),
+    fromConceptProjectFk: foreignKey({
+      name: "project_concept_relationships_from_concept_project_fk",
+      columns: [table.fromConceptId, table.projectId, table.conceptVersionId],
+      foreignColumns: [projectConcepts.id, projectConcepts.projectId, projectConcepts.conceptVersionId],
+    }).onDelete("cascade"),
+    toConceptProjectFk: foreignKey({
+      name: "project_concept_relationships_to_concept_project_fk",
+      columns: [table.toConceptId, table.projectId, table.conceptVersionId],
+      foreignColumns: [projectConcepts.id, projectConcepts.projectId, projectConcepts.conceptVersionId],
+    }).onDelete("cascade"),
+  }),
+);
+
 export const analyzeReviewAssemblies = pgTable(
   "analyze_review_assemblies",
   {

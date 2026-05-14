@@ -48,6 +48,11 @@ export type AiPrefillPromptPacket = {
   }>;
 };
 
+export type ConceptGraphPromptPacket = {
+  promptVersion: "concept-graph-v1";
+  messages: Array<{ role: "system" | "user"; content: string }>;
+};
+
 export type AiPrefillLimits = { maxFiles: number; maxTotalBytes: number };
 
 export type AiPrefillCandidate = {
@@ -73,6 +78,11 @@ export type AiPrefillProviderInput = {
   model: string;
   temperature: number;
 };
+export type ConceptGraphProviderInput = {
+  packet: ConceptGraphPromptPacket;
+  model: string;
+  temperature: number;
+};
 export type AiPrefillProviderResult = {
   provider: AiPrefillProviderName;
   model: string;
@@ -80,6 +90,7 @@ export type AiPrefillProviderResult = {
 };
 export type AiPrefillProvider = {
   generateSpecProposals(input: AiPrefillProviderInput): Promise<AiPrefillProviderResult>;
+  generateConceptGraph(input: ConceptGraphProviderInput): Promise<AiPrefillProviderResult>;
 };
 
 export type BuildAiPrefillPromptPacketInput = {

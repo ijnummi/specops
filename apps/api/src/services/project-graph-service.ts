@@ -42,7 +42,7 @@ type ProjectGraphVersionRow = typeof projectGraphVersions.$inferSelect;
 type ProjectGraphNodeRow = typeof projectGraphNodes.$inferSelect;
 type ProjectGraphEdgeRow = typeof projectGraphEdges.$inferSelect;
 type ProjectGraphReadDb = Pick<Db, "select">;
-type ProjectGraphWriteDb = ProjectGraphReadDb & Pick<Db, "insert" | "update">;
+type ProjectGraphWriteDb = ProjectGraphReadDb & Pick<Db, "execute" | "insert" | "update">;
 
 type BuildProjectGraphInput = {
   projectId: string;
@@ -96,8 +96,7 @@ const nodeDetailEdgeLimit = 100;
 export function createProjectGraphService(db: Db) {
   async function buildProjectGraph(input: BuildProjectGraphInput): Promise<ProjectGraphListResponse> {
     return db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
-
+      await acquireProjectGraphAdvisoryLock(tx, input.projectId);
       const facts = await loadProjectGraphFacts(input.projectId, tx);
       return persistProjectGraphFromFacts(tx, input, facts);
     });
@@ -114,6 +113,8 @@ export function createProjectGraphService(db: Db) {
     input: BuildProjectGraphInput,
     facts: ProjectGraphFacts,
   ): Promise<ProjectGraphListResponse> {
+    await acquireProjectGraphAdvisoryLock(writeDb, input.projectId);
+
     const drafts = buildGraphDrafts(facts);
     const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
     const coverage = buildCoverage(drafts.nodes, drafts.edges, facts);
@@ -545,6 +546,10 @@ export function createProjectGraphService(db: Db) {
     loadProjectGraphFacts,
     recordFailedGraphVersion,
   };
+}
+
+async function acquireProjectGraphAdvisoryLock(writeDb: Pick<Db, "execute">, projectId: string) {
+  await writeDb.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
 }
 
 function buildGraphDrafts(facts: ProjectGraphFacts): {

@@ -2688,7 +2688,8 @@ describeWithDb("database-backed routes", () => {
               ]
             })
           };
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3019,7 +3020,8 @@ describeWithDb("database-backed routes", () => {
               ]
             })
           };
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3066,7 +3068,8 @@ describeWithDb("database-backed routes", () => {
             throw new Error("provider failed");
           }
           throw new Error("unexpected model");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3100,7 +3103,8 @@ describeWithDb("database-backed routes", () => {
             model: input.model,
             text: "not json"
           };
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3237,7 +3241,8 @@ describeWithDb("database-backed routes", () => {
       aiPrefillProviderFactory: () => ({
         async generateSpecProposals() {
           throw new Error("provider should not be called");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3273,7 +3278,8 @@ describeWithDb("database-backed routes", () => {
         async generateSpecProposals() {
           providerCalled = true;
           throw new Error("provider should not be called");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3318,7 +3324,8 @@ describeWithDb("database-backed routes", () => {
         async generateSpecProposals() {
           providerCalled = true;
           throw new Error("provider should not be called");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3353,7 +3360,8 @@ describeWithDb("database-backed routes", () => {
         async generateSpecProposals() {
           providerCalled = true;
           throw new Error("provider should not be called");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3386,7 +3394,8 @@ describeWithDb("database-backed routes", () => {
         async generateSpecProposals() {
           providerCalled = true;
           throw new Error("provider should not be called");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3420,7 +3429,8 @@ describeWithDb("database-backed routes", () => {
           providerCalled = true;
           await writeFile(path.join(project.repoPath, "src", "projects.ts"), "export const changed = true;\n");
           return aiPrefillProviderResult(input.model, "uc.manage-projects", "Manage projects");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3453,7 +3463,8 @@ describeWithDb("database-backed routes", () => {
           providerCalled = true;
           await rm(path.join(project.repoPath, "src", "projects.ts"));
           return aiPrefillProviderResult(input.model, "uc.manage-projects", "Manage projects");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3485,7 +3496,8 @@ describeWithDb("database-backed routes", () => {
         async generateSpecProposals(input) {
           providerCalled = true;
           return aiPrefillProviderResult(input.model, "uc.manage-projects", "Manage projects");
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3563,7 +3575,8 @@ describeWithDb("database-backed routes", () => {
               ]
             })
           };
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -3626,7 +3639,8 @@ describeWithDb("database-backed routes", () => {
               ]
             })
           };
-        }
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
       })
     });
     const project = await createProjectViaApi();
@@ -4861,6 +4875,55 @@ describeWithDb("database-backed routes", () => {
     expect(nodeResponse.statusCode).toBe(400);
   });
 
+  it("rejects concept graph consolidation before a project graph exists", async () => {
+    app = buildServer(testDatabaseUrl!, {
+      aiPrefillProviderFactory: () => ({
+        generateSpecProposals: async () => {
+          throw new Error("Spec proposal generation should not be called");
+        },
+        generateConceptGraph: generateConceptGraphShouldNotBeCalled
+      })
+    });
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/concept-graphs`,
+      payload: {
+        provider: "ollama",
+        model: "llama3.1"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: {
+        code: "bad_request",
+        message: "Project graph is required before concept consolidation",
+        details: { projectId: project.id }
+      }
+    });
+  });
+
+  it("returns not found for latest concept graph before one exists", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/concept-graphs/latest`
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({
+      error: {
+        code: "not_found",
+        message: "Concept graph not found",
+        details: { projectId: project.id }
+      }
+    });
+  });
+
   it("persists source parse warnings as validation messages during project indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
@@ -5929,8 +5992,13 @@ Let customers buy products and receive confirmation while keeping payment and or
             ]
           })
         };
-      }
+      },
+      generateConceptGraph: generateConceptGraphShouldNotBeCalled
     });
+  }
+
+  async function generateConceptGraphShouldNotBeCalled(): Promise<never> {
+    throw new Error("Concept graph generation should not be called");
   }
 
   async function insertActiveAnalyzeRun(projectId: string): Promise<{ id: string }> {

@@ -7,6 +7,10 @@ import type {
   analyzeReviewClaims,
   analyzeRuns,
   indexRuns,
+  projectConceptMemberships,
+  projectConceptRelationships,
+  projectConceptVersions,
+  projectConcepts,
   projectGraphEdges,
   projectGraphNodes,
   projectGraphVersions,
@@ -45,6 +49,14 @@ type ProjectGraphNodeSelect = typeof projectGraphNodes.$inferSelect;
 type ProjectGraphNodeInsert = typeof projectGraphNodes.$inferInsert;
 type ProjectGraphEdgeSelect = typeof projectGraphEdges.$inferSelect;
 type ProjectGraphEdgeInsert = typeof projectGraphEdges.$inferInsert;
+type ProjectConceptVersionSelect = typeof projectConceptVersions.$inferSelect;
+type ProjectConceptVersionInsert = typeof projectConceptVersions.$inferInsert;
+type ProjectConceptSelect = typeof projectConcepts.$inferSelect;
+type ProjectConceptInsert = typeof projectConcepts.$inferInsert;
+type ProjectConceptMembershipSelect = typeof projectConceptMemberships.$inferSelect;
+type ProjectConceptMembershipInsert = typeof projectConceptMemberships.$inferInsert;
+type ProjectConceptRelationshipSelect = typeof projectConceptRelationships.$inferSelect;
+type ProjectConceptRelationshipInsert = typeof projectConceptRelationships.$inferInsert;
 
 type _SpecLinkConfidenceIsNumberOrNull = Expect<Equal<SpecLink["confidence"], number | null>>;
 type _AiProposalConfidenceIsNumberOrNull = Expect<Equal<AiProposal["confidence"], number | null>>;
@@ -77,6 +89,25 @@ type _ProjectGraphNodeConfidenceIsNullable = Expect<
   Equal<ProjectGraphNodeSelect["confidence"], number | null>
 >;
 type _ProjectGraphEdgeProvenanceIsString = Expect<Equal<ProjectGraphEdgeSelect["provenance"], string>>;
+type _ProjectConceptVersionProviderIsString = Expect<
+  Equal<ProjectConceptVersionSelect["provider"], string>
+>;
+type _ProjectConceptConfidenceIsNumber = Expect<Equal<ProjectConceptSelect["confidence"], number>>;
+type _ProjectConceptInsertStatusIsOptional = Expect<
+  Equal<ProjectConceptInsert["status"], string | undefined>
+>;
+type _ProjectConceptMembershipRoleIsString = Expect<
+  Equal<ProjectConceptMembershipSelect["role"], string>
+>;
+type _ProjectConceptMembershipGraphVersionIdIsString = Expect<
+  Equal<ProjectConceptMembershipSelect["projectGraphVersionId"], string>
+>;
+type _ProjectConceptMembershipInsertGraphVersionIdIsRequired = Expect<
+  Equal<ProjectConceptMembershipInsert["projectGraphVersionId"], string>
+>;
+type _ProjectConceptRelationshipTypeIsString = Expect<
+  Equal<ProjectConceptRelationshipSelect["relationshipType"], string>
+>;
 
 const _sourceSpecLink = null as unknown as SourceSpecLink;
 void _sourceSpecLink;
@@ -108,3 +139,20 @@ void projectGraphNodeSelect;
 void projectGraphNodeInsert;
 void projectGraphEdgeSelect;
 void projectGraphEdgeInsert;
+
+const projectConceptVersionSelect = null as unknown as ProjectConceptVersionSelect;
+const projectConceptVersionInsert = null as unknown as ProjectConceptVersionInsert;
+const projectConceptSelect = null as unknown as ProjectConceptSelect;
+const projectConceptInsert = null as unknown as ProjectConceptInsert;
+const projectConceptMembershipSelect = null as unknown as ProjectConceptMembershipSelect;
+const projectConceptMembershipInsert = null as unknown as ProjectConceptMembershipInsert;
+const projectConceptRelationshipSelect = null as unknown as ProjectConceptRelationshipSelect;
+const projectConceptRelationshipInsert = null as unknown as ProjectConceptRelationshipInsert;
+void projectConceptVersionSelect;
+void projectConceptVersionInsert;
+void projectConceptSelect;
+void projectConceptInsert;
+void projectConceptMembershipSelect;
+void projectConceptMembershipInsert;
+void projectConceptRelationshipSelect;
+void projectConceptRelationshipInsert;

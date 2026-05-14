@@ -13,6 +13,9 @@ vi.mock("./client.js", () => ({
 import {
   annotationsQuery,
   analyzeRunQuery,
+  buildConceptGraph,
+  conceptDetailQuery,
+  conceptGraphQuery,
   createAnnotation,
   deleteAnnotation,
   entitySourceLinksQuery,
@@ -195,6 +198,72 @@ describe("api queries", () => {
 
     expect(mocks.apiGet).toHaveBeenCalledWith(
       "/api/projects/project-1/analyze-runs/run-1"
+    );
+  });
+
+  it("builds concept graph query keys and URLs", async () => {
+    mocks.apiGet.mockResolvedValueOnce({ concepts: [] });
+    const query = conceptGraphQuery("project-1");
+
+    expect(query.queryKey).toEqual(["projects", "project-1", "concept-graph"]);
+    expect(queryKeys.conceptGraph("project-1")).toEqual([
+      "projects",
+      "project-1",
+      "concept-graph"
+    ]);
+
+    const runQuery = query.queryFn as () => Promise<unknown>;
+    await runQuery();
+
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      "/api/projects/project-1/concept-graphs/latest"
+    );
+  });
+
+  it("builds concept detail query keys and URLs", async () => {
+    mocks.apiGet.mockResolvedValueOnce({ concept: { id: "concept-1" } });
+    const query = conceptDetailQuery("project-1", "concept-1");
+    const disabledQuery = conceptDetailQuery("project-1", null);
+
+    expect(query.queryKey).toEqual([
+      "projects",
+      "project-1",
+      "concepts",
+      "concept-1"
+    ]);
+    expect(queryKeys.conceptDetail("project-1", "concept-1")).toEqual([
+      "projects",
+      "project-1",
+      "concepts",
+      "concept-1"
+    ]);
+    expect(disabledQuery.enabled).toBe(false);
+
+    const runQuery = query.queryFn as () => Promise<unknown>;
+    await runQuery();
+
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      "/api/projects/project-1/concepts/concept-1"
+    );
+  });
+
+  it("posts concept graph build requests", async () => {
+    const input = {
+      provider: "ollama" as const,
+      model: "gemma4",
+      temperature: 0.1,
+      maxGraphNodes: 150,
+      maxGraphEdges: 300
+    };
+
+    mocks.apiSend.mockResolvedValueOnce({ concepts: [] });
+
+    await buildConceptGraph("project-1", input);
+
+    expect(mocks.apiSend).toHaveBeenCalledWith(
+      "POST",
+      "/api/projects/project-1/concept-graphs",
+      input
     );
   });
 });

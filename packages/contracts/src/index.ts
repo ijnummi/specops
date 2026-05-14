@@ -4,6 +4,7 @@ export * from "./annotations.js";
 export * from "./analyze-review-assemblies.js";
 export * from "./analyze-runs.js";
 export * from "./change-impact.js";
+export * from "./concepts.js";
 export * from "./diff-reviews.js";
 export * from "./entities.js";
 export * from "./impact.js";

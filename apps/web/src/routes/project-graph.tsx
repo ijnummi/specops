@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Lightbulb } from "lucide-react";
 
 import { projectGraphNodeQuery, projectGraphQuery } from "../api/queries.js";
 
@@ -27,15 +27,25 @@ export function ProjectGraphPage({ projectId }: ProjectGraphPageProps) {
             Scanner-derived graph facts for project {projectId}
           </p>
         </div>
-        <Link
-          to="/projects/$projectId"
-          params={{ projectId }}
-          search={{ q: undefined }}
-          className="button-secondary"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back to project
-        </Link>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            to="/projects/$projectId/concepts"
+            params={{ projectId }}
+            className="button-secondary"
+          >
+            <Lightbulb className="h-4 w-4" aria-hidden="true" />
+            Concepts
+          </Link>
+          <Link
+            to="/projects/$projectId"
+            params={{ projectId }}
+            search={{ q: undefined }}
+            className="button-secondary"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Back to project
+          </Link>
+        </div>
       </div>
 
       {graph.error ? (
