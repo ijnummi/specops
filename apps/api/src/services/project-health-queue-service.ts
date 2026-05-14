@@ -61,7 +61,9 @@ export function createProjectHealthQueueService(db: Db) {
       const [
         latestIndexRun,
         latestGraphVersion,
+        newestGraphVersion,
         latestConceptVersion,
+        newestConceptVersion,
         specs,
         links,
         annotations,
@@ -69,7 +71,9 @@ export function createProjectHealthQueueService(db: Db) {
       ] = await Promise.all([
         loadLatestIndexRun(db, projectId),
         loadLatestGraphVersion(db, projectId),
+        loadNewestGraphVersion(db, projectId),
         loadLatestConceptVersion(db, projectId),
+        loadNewestConceptVersion(db, projectId),
         db.select().from(specEntities).where(eq(specEntities.projectId, projectId)).orderBy(asc(specEntities.entityId)),
         db.select().from(specLinks).where(eq(specLinks.projectId, projectId)),
         db
@@ -84,7 +88,13 @@ export function createProjectHealthQueueService(db: Db) {
         createSpecReadinessService(db).getProjectReadiness(projectId),
       ]);
 
-      const diagnostics = buildDiagnostics({ latestIndexRun, latestGraphVersion, latestConceptVersion });
+      const diagnostics = buildDiagnostics({
+        latestIndexRun,
+        latestGraphVersion,
+        latestConceptVersion,
+        newestGraphVersion,
+        newestConceptVersion,
+      });
       const graphNodes = latestGraphVersion
         ? await db
           .select()
@@ -288,6 +298,20 @@ async function loadLatestGraphVersion(
   return row?.version;
 }
 
+async function loadNewestGraphVersion(
+  db: Pick<Db, "select">,
+  projectId: string,
+): Promise<ProjectGraphVersionRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(projectGraphVersions)
+    .where(eq(projectGraphVersions.projectId, projectId))
+    .orderBy(desc(projectGraphVersions.createdAt), desc(projectGraphVersions.id))
+    .limit(1);
+
+  return row;
+}
+
 async function loadLatestConceptVersion(
   db: Pick<Db, "select">,
   projectId: string,
@@ -307,10 +331,26 @@ async function loadLatestConceptVersion(
   return version;
 }
 
+async function loadNewestConceptVersion(
+  db: Pick<Db, "select">,
+  projectId: string,
+): Promise<ProjectConceptVersionRow | undefined> {
+  const [version] = await db
+    .select()
+    .from(projectConceptVersions)
+    .where(eq(projectConceptVersions.projectId, projectId))
+    .orderBy(desc(projectConceptVersions.createdAt), desc(projectConceptVersions.id))
+    .limit(1);
+
+  return version;
+}
+
 function buildDiagnostics(input: {
   latestIndexRun: IndexRunRow | undefined;
   latestGraphVersion: ProjectGraphVersionRow | undefined;
   latestConceptVersion: ProjectConceptVersionRow | undefined;
+  newestGraphVersion: ProjectGraphVersionRow | undefined;
+  newestConceptVersion: ProjectConceptVersionRow | undefined;
 }): HealthQueueDiagnosticDto[] {
   const diagnostics: HealthQueueDiagnosticDto[] = [];
 
@@ -319,6 +359,13 @@ function buildDiagnostics(input: {
       level: "warning",
       code: "no_index_run",
       message: "No source index run is available for this project.",
+    });
+  }
+  if (input.newestGraphVersion?.status === "failed") {
+    diagnostics.push({
+      level: "warning",
+      code: "failed_project_graph",
+      message: "The latest project graph build failed.",
     });
   }
   if (!input.latestGraphVersion) {
@@ -332,6 +379,13 @@ function buildDiagnostics(input: {
       level: "warning",
       code: "limited_project_graph",
       message: "The latest project graph is limited.",
+    });
+  }
+  if (input.newestConceptVersion?.status === "failed") {
+    diagnostics.push({
+      level: "warning",
+      code: "failed_concept_graph",
+      message: "The latest concept graph build failed.",
     });
   }
   if (!input.latestConceptVersion) {
@@ -354,24 +408,30 @@ function buildDiagnostics(input: {
 function buildSpecReadinessItems(
   queue: Awaited<ReturnType<ReturnType<typeof createSpecReadinessService>["getProjectReadiness"]>>["queue"],
 ): HealthQueueItemDto[] {
-  return queue.map((item) => ({
-    id: healthQueueItemId("spec_readiness_failed", item.entityId),
-    family: "spec",
-    kind: "spec_readiness_failed",
-    severity: item.highestSeverity ?? "review",
-    title: `Spec readiness failed: ${item.title}`,
-    detail: `${item.failedCheckCount} readiness check${item.failedCheckCount === 1 ? "" : "s"} failed.`,
-    primaryTarget: specTarget(item),
-    evidence: item.topChecks.map((check) => ({
-      kind: "readiness_check",
-      label: check.label,
-      detail: check.detail,
-      entityId: item.entityId,
-      filePath: check.filePath ?? item.filePath,
-    })),
-    actions: specActions(item.entityId, true),
-    diagnostics: [],
-  }));
+  return queue.map((item) => {
+    const isStale = item.topChecks.some((check) => check.id === "agent_task_stale");
+    const kind = isStale ? "spec_stale" : "spec_readiness_failed";
+    return {
+      id: healthQueueItemId(kind, item.entityId),
+      family: "spec",
+      kind,
+      severity: item.highestSeverity ?? "review",
+      title: isStale ? `Stale spec task: ${item.title}` : `Spec readiness failed: ${item.title}`,
+      detail: isStale
+        ? "This spec task may be stale relative to its linked source or context specs."
+        : `${item.failedCheckCount} readiness check${item.failedCheckCount === 1 ? "" : "s"} failed.`,
+      primaryTarget: specTarget(item),
+      evidence: item.topChecks.map((check) => ({
+        kind: "readiness_check",
+        label: check.label,
+        detail: check.detail,
+        entityId: item.entityId,
+        filePath: check.filePath ?? item.filePath,
+      })),
+      actions: specActions(item.entityId, true),
+      diagnostics: [],
+    } satisfies HealthQueueItemDto;
+  });
 }
 
 function buildMissingSourceSpecItems(

@@ -41,6 +41,7 @@ vi.mock("@tanstack/react-router", () => ({
       .replace("$entityId", params?.entityId ?? "");
     const searchText = search
       ? Object.entries(search)
+          .filter((entry): entry is [string, boolean | number | string] => entry[1] !== undefined)
           .map(([key, value]) => `${key}=${String(value)}`)
           .join("&")
       : "";
@@ -135,13 +136,18 @@ describe("ProjectHealthQueuePage", () => {
     expect(html).toContain("Readiness warning");
     expect(html).toContain("source-links-missing");
     expect(html).toContain("Open spec");
-    expect(html).toContain("/projects/project-1/entities/use.payment?q=undefined");
+    expect(html).toContain("/projects/project-1/entities/use.payment");
     expect(html).toContain("/projects/project-1/readiness");
     expect(html).toContain(
       "/projects/project-1/impact/use.payment?depth=1&amp;direction=both&amp;includeSource=true"
     );
-    expect(html).toContain("/projects/project-1/concepts");
-    expect(html).toContain("/projects/project-1/graph");
+    expect(html).toContain(
+      "/projects/project-1/concepts?conceptId=00000000-0000-4000-8000-000000000010"
+    );
+    expect(html).toContain("/projects/project-1/graph?q=apps/api/src/payments.ts");
+    expect(html).toContain(
+      "/projects/project-1/graph?nodeId=00000000-0000-4000-8000-000000000011"
+    );
     expect(html).toContain("/projects/project-1");
   });
 
@@ -287,7 +293,7 @@ function specItem(): ProjectHealthQueueResponseDto["items"][number] {
         label: "Open concept",
         conceptId: "00000000-0000-4000-8000-000000000010"
       },
-      { kind: "open_project_graph", label: "Open graph" },
+      { kind: "open_project_graph", label: "Open graph", q: "apps/api/src/payments.ts" },
       {
         kind: "open_graph_node",
         label: "Open graph node",

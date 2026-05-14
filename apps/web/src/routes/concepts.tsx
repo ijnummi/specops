@@ -20,6 +20,7 @@ import {
 
 type ConceptsPageProps = {
   projectId: string;
+  conceptId?: string;
 };
 
 const INITIAL_BUILD_REQUEST: BuildConceptGraphRequest = {
@@ -30,13 +31,13 @@ const INITIAL_BUILD_REQUEST: BuildConceptGraphRequest = {
   maxGraphEdges: 300
 };
 
-export function ConceptsPage({ projectId }: ConceptsPageProps) {
+export function ConceptsPage({ conceptId, projectId }: ConceptsPageProps) {
   const queryClient = useQueryClient();
   const graph = useQuery(conceptGraphQuery(projectId));
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null);
   const selectedVisibleConcept =
     graph.data?.concepts.find((concept) => concept.id === selectedConceptId) ?? null;
-  const effectiveConceptId = selectedVisibleConcept?.id ?? graph.data?.concepts[0]?.id ?? null;
+  const effectiveConceptId = selectedVisibleConcept?.id ?? conceptId ?? graph.data?.concepts[0]?.id ?? null;
   const detail = useQuery(conceptDetailQuery(projectId, effectiveConceptId));
   const conceptCounts = useMemo(() => countEntries(graph.data?.conceptCounts ?? {}), [graph.data]);
   const showHeaderBuild = graph.data ? graph.data.concepts.length > 0 : false;

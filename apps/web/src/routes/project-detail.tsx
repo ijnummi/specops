@@ -274,6 +274,7 @@ export function ProjectDetailPage({ projectId, entityId, query }: ProjectDetailP
               <Link
                 to="/projects/$projectId/graph"
                 params={{ projectId }}
+                search={{ nodeId: undefined, q: undefined }}
                 className="button-secondary mt-3 w-full justify-center"
               >
                 Open project graph

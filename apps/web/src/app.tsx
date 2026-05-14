@@ -91,18 +91,27 @@ const projectRoute = createRoute({
 const projectGraphRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/graph",
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+    nodeId: typeof search.nodeId === "string" ? search.nodeId : undefined
+  }),
   component: () => {
     const { projectId } = projectGraphRoute.useParams();
-    return <ProjectGraphPage projectId={projectId} />;
+    const { nodeId, q } = projectGraphRoute.useSearch();
+    return <ProjectGraphPage projectId={projectId} nodeId={nodeId} query={q} />;
   }
 });
 
 const conceptsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/concepts",
+  validateSearch: (search: Record<string, unknown>) => ({
+    conceptId: typeof search.conceptId === "string" ? search.conceptId : undefined
+  }),
   component: () => {
     const { projectId } = conceptsRoute.useParams();
-    return <ConceptsPage projectId={projectId} />;
+    const { conceptId } = conceptsRoute.useSearch();
+    return <ConceptsPage projectId={projectId} conceptId={conceptId} />;
   }
 });
 

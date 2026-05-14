@@ -358,14 +358,34 @@ function HealthQueueActionLink({
       );
     case "open_concept":
       return (
-        <Link className="button-secondary" to="/projects/$projectId/concepts" params={{ projectId }}>
+        <Link
+          className="button-secondary"
+          to="/projects/$projectId/concepts"
+          params={{ projectId }}
+          search={{ conceptId: action.conceptId }}
+        >
           {action.label}
         </Link>
       );
     case "open_project_graph":
+      return (
+        <Link
+          className="button-secondary"
+          to="/projects/$projectId/graph"
+          params={{ projectId }}
+          search={{ nodeId: undefined, q: action.q }}
+        >
+          {action.label}
+        </Link>
+      );
     case "open_graph_node":
       return (
-        <Link className="button-secondary" to="/projects/$projectId/graph" params={{ projectId }}>
+        <Link
+          className="button-secondary"
+          to="/projects/$projectId/graph"
+          params={{ projectId }}
+          search={{ nodeId: action.graphNodeId, q: undefined }}
+        >
           {action.label}
         </Link>
       );

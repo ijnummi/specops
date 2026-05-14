@@ -504,6 +504,50 @@ describeWithDb("createProjectHealthQueueService", () => {
     );
   });
 
+  it("reports stale agent tasks as stale spec queue items", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    await createSpecFixture(db, project.id, {
+      entityId: "domain.policy",
+      type: "domain_entity",
+      title: "Policy domain",
+      status: "draft",
+      filePath: "spec/domain/policy.md",
+      contentHash: "new-policy-hash",
+    });
+    await createSpecFixture(db, project.id, {
+      entityId: "task.hash",
+      type: "agent_task",
+      title: "Refresh policy task",
+      status: "draft",
+      filePath: "spec/tasks/refresh-policy.md",
+      frontmatterJson: {
+        source_entity: "domain.policy",
+        tracked_spec_hashes: { "domain.policy": "old-policy-hash" },
+      },
+      bodyMarkdown: "Run `pnpm test` after refreshing policy coverage.",
+      bodyText: "Run pnpm test after refreshing policy coverage.",
+      contentHash: "task-hash",
+    });
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        id: "spec_stale:task.hash",
+        family: "spec",
+        kind: "spec_stale",
+        title: "Stale spec task: Refresh policy task",
+        primaryTarget: expect.objectContaining({ kind: "spec", entityId: "task.hash" }),
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ kind: "readiness_check", label: "Agent task may be stale" }),
+        ]),
+      }),
+    );
+    expect(response.items).not.toContainEqual(
+      expect.objectContaining({ id: "spec_readiness_failed:task.hash" }),
+    );
+  });
+
   it("evaluates concept coverage against the graph version used by the concept graph", async () => {
     const project = await createProjectFixture(db, projectIds);
     const { graphVersion: olderGraph } = await createGraphFixture(db, project.id, "ready", {
@@ -609,6 +653,31 @@ describeWithDb("createProjectHealthQueueService", () => {
       expect.arrayContaining([
         expect.objectContaining({ level: "warning", code: "limited_project_graph" }),
         expect.objectContaining({ level: "warning", code: "limited_concept_graph" }),
+      ]),
+    );
+  });
+
+  it("reports failed graph and concept diagnostics separately from missing usable graph data", async () => {
+    const project = await createProjectFixture(db, projectIds);
+    const { graphVersion } = await createGraphFixture(db, project.id, "failed");
+    await createConceptGraphFixture(db, project.id, graphVersion.id, "failed");
+
+    const response = await createProjectHealthQueueService(db).getProjectHealthQueue(project.id);
+
+    expect(response.sourceState).toMatchObject({
+      latestProjectGraphVersionId: null,
+      latestProjectGraphStatus: null,
+      latestConceptGraphVersionId: null,
+      latestConceptGraphStatus: null,
+      hasProjectGraph: false,
+      hasConceptGraph: false,
+    });
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "warning", code: "failed_project_graph" }),
+        expect.objectContaining({ level: "warning", code: "no_project_graph" }),
+        expect.objectContaining({ level: "warning", code: "failed_concept_graph" }),
+        expect.objectContaining({ level: "warning", code: "no_concept_graph" }),
       ]),
     );
   });
@@ -729,7 +798,7 @@ async function createSpecFixture(
 async function createGraphFixture(
   db: Db,
   projectId: string,
-  status: "ready" | "limited",
+  status: "ready" | "limited" | "failed",
   options: { startedAt?: Date; finishedAt?: Date } = {},
 ) {
   const [indexRun] = await db
@@ -760,7 +829,7 @@ async function createConceptGraphFixture(
   db: Db,
   projectId: string,
   projectGraphVersionId: string,
-  status: "ready" | "limited",
+  status: "ready" | "limited" | "failed",
 ) {
   const [conceptVersion] = await db
     .insert(projectConceptVersions)

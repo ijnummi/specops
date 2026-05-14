@@ -117,6 +117,36 @@ describe("ProjectGraphPage", () => {
     expect(html).toContain("Outgoing");
   });
 
+  it("uses routed graph search and node selection when provided", () => {
+    mocks.graphState = {
+      data: graphFixture(),
+      error: null,
+      isLoading: false
+    };
+    mocks.nodeState = {
+      data: nodeDetailFixture(graphFixture().nodes[1]!),
+      error: null,
+      isLoading: false
+    };
+
+    renderToStaticMarkup(
+      <ProjectGraphPage
+        projectId="project-1"
+        nodeId="00000000-0000-4000-8000-000000000011"
+        query="apps/api/src/routes"
+      />
+    );
+
+    expect(mocks.projectGraphQuery).toHaveBeenCalledWith("project-1", {
+      limit: 50,
+      q: "apps/api/src/routes"
+    });
+    expect(mocks.projectGraphNodeQuery).toHaveBeenCalledWith(
+      "project-1",
+      "00000000-0000-4000-8000-000000000011"
+    );
+  });
+
   it("falls back to a visible node when the selected node is absent after graph refresh", () => {
     mocks.graphState = {
       data: graphFixture(),

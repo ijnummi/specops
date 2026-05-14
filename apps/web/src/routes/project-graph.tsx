@@ -7,13 +7,15 @@ import { projectGraphNodeQuery, projectGraphQuery } from "../api/queries.js";
 
 type ProjectGraphPageProps = {
   projectId: string;
+  nodeId?: string;
+  query?: string;
 };
 
-export function ProjectGraphPage({ projectId }: ProjectGraphPageProps) {
-  const graph = useQuery(projectGraphQuery(projectId, { limit: 50 }));
+export function ProjectGraphPage({ nodeId, projectId, query }: ProjectGraphPageProps) {
+  const graph = useQuery(projectGraphQuery(projectId, query ? { limit: 50, q: query } : { limit: 50 }));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedVisibleNode = graph.data?.nodes.find((node) => node.id === selectedNodeId) ?? null;
-  const effectiveNodeId = selectedVisibleNode?.id ?? graph.data?.nodes[0]?.id ?? null;
+  const effectiveNodeId = selectedVisibleNode?.id ?? nodeId ?? graph.data?.nodes[0]?.id ?? null;
   const nodeDetail = useQuery(projectGraphNodeQuery(projectId, effectiveNodeId));
   const nodeCounts = useMemo(() => countEntries(graph.data?.nodeCounts ?? {}), [graph.data]);
   const edgeCounts = useMemo(() => countEntries(graph.data?.edgeCounts ?? {}), [graph.data]);
@@ -31,6 +33,7 @@ export function ProjectGraphPage({ projectId }: ProjectGraphPageProps) {
           <Link
             to="/projects/$projectId/concepts"
             params={{ projectId }}
+            search={{ conceptId: undefined }}
             className="button-secondary"
           >
             <Lightbulb className="h-4 w-4" aria-hidden="true" />

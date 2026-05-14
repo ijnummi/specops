@@ -161,6 +161,28 @@ describe("ConceptsPage", () => {
     expect(html).toContain("Payment interface");
   });
 
+  it("uses routed concept selection when provided", () => {
+    mocks.graphState = {
+      data: graphFixture(),
+      error: null,
+      isLoading: false
+    };
+    mocks.detailState = {
+      data: conceptDetailFixture(),
+      error: null,
+      isLoading: false
+    };
+
+    renderToStaticMarkup(
+      <ConceptsPage projectId="project-1" conceptId="00000000-0000-4000-8000-000000000102" />
+    );
+
+    expect(mocks.conceptDetailQuery).toHaveBeenCalledWith(
+      "project-1",
+      "00000000-0000-4000-8000-000000000102"
+    );
+  });
+
   it("renders a build action when no concept graph exists", async () => {
     mocks.graphState = {
       data: null,
