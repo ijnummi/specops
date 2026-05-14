@@ -13,6 +13,7 @@ import { registerAnnotationRoutes } from "./routes/annotations.js";
 import { registerDiffReviewRoutes } from "./routes/diff-reviews.js";
 import { registerEntityRoutes } from "./routes/entities.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
+import { registerProjectGraphRoutes } from "./routes/project-graph.js";
 import { registerProjectHealthRoutes } from "./routes/project-health.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerProposalRoutes } from "./routes/proposals.js";
@@ -111,6 +112,7 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
   app.register(registerSourceRoutes, { prefix: "/api", db });
   app.register(registerValidationRoutes, { prefix: "/api", db });
   app.register(registerIndexRunRoutes, { prefix: "/api", db });
+  app.register(registerProjectGraphRoutes, { prefix: "/api", db });
 
   return app;
 }

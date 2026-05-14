@@ -5,7 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { analyzeRunDetailSchema } from "@specops/contracts";
+import {
+  analyzeRunDetailSchema,
+  projectGraphListResponseSchema,
+  projectGraphNodeDetailSchema
+} from "@specops/contracts";
 import { aiProposals, analyzeRuns, createDb, diffReviews } from "@specops/db";
 import { and, eq } from "drizzle-orm";
 import pg from "pg";
@@ -4756,6 +4760,88 @@ describeWithDb("database-backed routes", () => {
       sourceExportCount: 1,
       sourceSymbolCount: 1
     });
+  });
+
+  it("returns current project graph and graph node detail through the API", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+    await mkdir(project.specopsPath, { recursive: true });
+    await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+    await writeSpecFile(
+      project.specopsPath,
+      "domain/domain.decision.md",
+      specEntityMarkdown({
+        id: "domain.decision",
+        type: "domain_entity",
+        title: "Decision",
+        status: "draft",
+        body: "# Decision\n"
+      })
+    );
+    await writeFile(
+      path.join(project.repoPath, "src", "decision.ts"),
+      "export interface Decision { id: string; }\n"
+    );
+
+    const indexResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/index`
+    });
+    expect(indexResponse.statusCode).toBe(200);
+
+    const graphResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/graph`
+    });
+    const graph = projectGraphListResponseSchema.parse(graphResponse.json());
+    const fileNode = graph.nodes.find((node) => node.nodeType === "file");
+
+    expect(graphResponse.statusCode).toBe(200);
+    expect(graph.nodeCounts.file).toBeGreaterThanOrEqual(1);
+    expect(fileNode).toBeDefined();
+
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/graph/nodes/${fileNode!.id}`
+    });
+    const detail = projectGraphNodeDetailSchema.parse(detailResponse.json());
+
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detail.node.id).toBe(fileNode!.id);
+  });
+
+  it("scopes project graph node detail by project", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const db = createTestDb();
+    const firstProject = await createProjectViaApi();
+    const secondProject = await createProjectViaApi();
+
+    for (const project of [firstProject, secondProject]) {
+      await mkdir(project.specopsPath, { recursive: true });
+      await mkdir(path.join(project.repoPath, "src"), { recursive: true });
+      await writeFile(
+        path.join(project.repoPath, "src", "decision.ts"),
+        "export interface Decision { id: string; }\n"
+      );
+      await createIndexerService(db).indexProject(project.id);
+    }
+
+    const secondGraphResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${secondProject.id}/graph`
+    });
+    const secondGraph = projectGraphListResponseSchema.parse(secondGraphResponse.json());
+    const secondFileNode = secondGraph.nodes.find((node) => node.nodeType === "file");
+
+    expect(secondGraphResponse.statusCode).toBe(200);
+    expect(secondFileNode).toBeDefined();
+
+    const scopedResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${firstProject.id}/graph/nodes/${secondFileNode!.id}`
+    });
+
+    expect(scopedResponse.statusCode).toBe(404);
   });
 
   it("persists source parse warnings as validation messages during project indexing", async () => {
