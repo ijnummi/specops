@@ -170,14 +170,56 @@ describeWithDb("indexProject", () => {
     });
   });
 
+  it("builds the graph from facts captured during the index transaction", async () => {
+    const actualGraphModule = await vi.importActual<typeof import("../services/project-graph-service.js")>(
+      "../services/project-graph-service.js"
+    );
+    const buildProjectGraphFromFacts = vi.fn().mockResolvedValue({});
+    const buildProjectGraph = vi.fn().mockResolvedValue({});
+    vi.mocked(createProjectGraphService).mockImplementationOnce((serviceDb) => ({
+      ...actualGraphModule.createProjectGraphService(serviceDb),
+      buildProjectGraph,
+      buildProjectGraphFromFacts
+    }));
+    const { projectId, repoPath, specopsPath } = await createProjectFixture();
+    await writeSpecFile(
+      specopsPath,
+      "requirements/REQ-1.md",
+      specMarkdown({
+        id: "REQ-1",
+        type: "requirement",
+        title: "Track project specs",
+        status: "draft",
+        body: "Workbench users can browse indexed project specs."
+      })
+    );
+    await writeSourceFile(
+      repoPath,
+      "src/project-service.ts",
+      "export function listProjects() { return [] as string[]; }\n"
+    );
+
+    const result = await createIndexerService(db).indexProject(projectId);
+
+    expect(buildProjectGraph).not.toHaveBeenCalled();
+    expect(buildProjectGraphFromFacts).toHaveBeenCalledWith({
+      projectId,
+      indexRunId: result.id,
+      facts: expect.objectContaining({
+        files: [expect.objectContaining({ path: "src/project-service.ts" })],
+        specs: [expect.objectContaining({ entityId: "REQ-1" })]
+      })
+    });
+  });
+
   it("records a failed graph version without failing a successful index run", async () => {
     const actualGraphModule = await vi.importActual<typeof import("../services/project-graph-service.js")>(
       "../services/project-graph-service.js"
     );
-    const buildProjectGraph = vi.fn().mockRejectedValue(new Error("forced graph failure"));
+    const buildProjectGraphFromFacts = vi.fn().mockRejectedValue(new Error("forced graph failure"));
     vi.mocked(createProjectGraphService).mockImplementationOnce((serviceDb) => ({
       ...actualGraphModule.createProjectGraphService(serviceDb),
-      buildProjectGraph
+      buildProjectGraphFromFacts
     }));
     const { projectId, repoPath, specopsPath } = await createProjectFixture();
     await writeSpecFile(
@@ -209,7 +251,11 @@ describeWithDb("indexProject", () => {
           eq(projectGraphVersions.indexRunId, result.id)
         )
       );
-    expect(buildProjectGraph).toHaveBeenCalledWith({ projectId, indexRunId: result.id });
+    expect(buildProjectGraphFromFacts).toHaveBeenCalledWith({
+      projectId,
+      indexRunId: result.id,
+      facts: expect.any(Object)
+    });
     expect(result.status).toBe("succeeded");
     expect(storedRun?.status).toBe("succeeded");
     expect(version).toMatchObject({
@@ -231,11 +277,11 @@ describeWithDb("indexProject", () => {
     const actualGraphModule = await vi.importActual<typeof import("../services/project-graph-service.js")>(
       "../services/project-graph-service.js"
     );
-    const buildProjectGraph = vi.fn().mockRejectedValue(new Error("forced graph failure"));
+    const buildProjectGraphFromFacts = vi.fn().mockRejectedValue(new Error("forced graph failure"));
     const recordFailedGraphVersion = vi.fn().mockRejectedValue(new Error("forced record failure"));
     vi.mocked(createProjectGraphService).mockImplementationOnce((serviceDb) => ({
       ...actualGraphModule.createProjectGraphService(serviceDb),
-      buildProjectGraph,
+      buildProjectGraphFromFacts,
       recordFailedGraphVersion
     }));
     const { projectId, repoPath, specopsPath } = await createProjectFixture();
@@ -268,7 +314,11 @@ describeWithDb("indexProject", () => {
           eq(projectGraphVersions.indexRunId, result.id)
         )
       );
-    expect(buildProjectGraph).toHaveBeenCalledWith({ projectId, indexRunId: result.id });
+    expect(buildProjectGraphFromFacts).toHaveBeenCalledWith({
+      projectId,
+      indexRunId: result.id,
+      facts: expect.any(Object)
+    });
     expect(recordFailedGraphVersion).toHaveBeenCalledWith({
       projectId,
       indexRunId: result.id,

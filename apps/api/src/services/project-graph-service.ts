@@ -41,10 +41,15 @@ type ProjectGraphVersionRow = typeof projectGraphVersions.$inferSelect;
 type ProjectGraphNodeRow = typeof projectGraphNodes.$inferSelect;
 type ProjectGraphEdgeRow = typeof projectGraphEdges.$inferSelect;
 type ProjectGraphReadDb = Pick<Db, "select">;
+type ProjectGraphWriteDb = ProjectGraphReadDb & Pick<Db, "insert" | "update">;
 
 type BuildProjectGraphInput = {
   projectId: string;
   indexRunId: string | null;
+};
+
+type BuildProjectGraphFromFactsInput = BuildProjectGraphInput & {
+  facts: ProjectGraphFacts;
 };
 
 type RecordFailedGraphVersionInput = {
@@ -75,7 +80,7 @@ type EdgeDraft = {
   confidence: number | null;
 };
 
-type IndexedFacts = {
+export type ProjectGraphFacts = {
   files: SourceFileRow[];
   imports: SourceImportRow[];
   exports: SourceExportRow[];
@@ -92,51 +97,66 @@ export function createProjectGraphService(db: Db) {
     return db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
 
-      const facts = await loadIndexedFacts(tx, input.projectId);
-      const drafts = buildGraphDrafts(facts);
-      const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
-      const coverage = buildCoverage(drafts.nodes, drafts.edges, facts);
-      const status = facts.files.length === 0 ? "limited" : "ready";
-      const summary =
-        status === "limited"
-          ? "Limited project graph: no indexed source files were available."
-          : `Project graph with ${facts.files.length} source files and ${facts.specs.length} spec entities.`;
-      const indexRunFilter =
-        input.indexRunId === null
-          ? isNull(projectGraphVersions.indexRunId)
-          : eq(projectGraphVersions.indexRunId, input.indexRunId);
+      const facts = await loadProjectGraphFacts(input.projectId, tx);
+      return persistProjectGraphFromFacts(tx, input, facts);
+    });
+  }
 
-      await tx
-        .update(projectGraphVersions)
-        .set({ status: "superseded", updatedAt: new Date() })
-        .where(and(eq(projectGraphVersions.projectId, input.projectId), indexRunFilter));
+  async function buildProjectGraphFromFacts(
+    input: BuildProjectGraphFromFactsInput,
+  ): Promise<ProjectGraphListResponse> {
+    return db.transaction(async (tx) => persistProjectGraphFromFacts(tx, input, input.facts));
+  }
 
-      const [version] = await tx
-        .insert(projectGraphVersions)
-        .values({
-          projectId: input.projectId,
-          indexRunId: input.indexRunId,
-          status,
-          summary,
-          coverageJson: coverage,
-          diagnosticsJson: diagnostics,
-        })
-        .returning({ id: projectGraphVersions.id });
+  async function persistProjectGraphFromFacts(
+    writeDb: ProjectGraphWriteDb,
+    input: BuildProjectGraphInput,
+    facts: ProjectGraphFacts,
+  ): Promise<ProjectGraphListResponse> {
+    const drafts = buildGraphDrafts(facts);
+    const diagnostics = [...buildDiagnostics(facts), ...drafts.diagnostics];
+    const coverage = buildCoverage(drafts.nodes, drafts.edges, facts);
+    const status = facts.files.length === 0 ? "limited" : "ready";
+    const summary =
+      status === "limited"
+        ? "Limited project graph: no indexed source files were available."
+        : `Project graph with ${facts.files.length} source files and ${facts.specs.length} spec entities.`;
+    const indexRunFilter =
+      input.indexRunId === null
+        ? isNull(projectGraphVersions.indexRunId)
+        : eq(projectGraphVersions.indexRunId, input.indexRunId);
 
-      if (!version) {
-        throw new Error("Failed to create project graph version");
-      }
+    await writeDb
+      .update(projectGraphVersions)
+      .set({ status: "superseded", updatedAt: new Date() })
+      .where(and(eq(projectGraphVersions.projectId, input.projectId), indexRunFilter));
 
-      if (drafts.nodes.length === 0) {
-        return getProjectGraphFromDb(tx, input.projectId, undefined, version.id);
-      }
+    const [version] = await writeDb
+      .insert(projectGraphVersions)
+      .values({
+        projectId: input.projectId,
+        indexRunId: input.indexRunId,
+        status,
+        summary,
+        coverageJson: coverage,
+        diagnosticsJson: diagnostics,
+      })
+      .returning({ id: projectGraphVersions.id });
 
-      const insertedNodes: Array<{ id: string; nodeKey: string }> = [];
-      for (const nodeChunk of chunk(drafts.nodes, insertChunkSize)) {
-        const insertedChunk = await tx
-          .insert(projectGraphNodes)
-          .values(
-            nodeChunk.map((node) => ({
+    if (!version) {
+      throw new Error("Failed to create project graph version");
+    }
+
+    if (drafts.nodes.length === 0) {
+      return getProjectGraphFromDb(writeDb, input.projectId, undefined, version.id);
+    }
+
+    const insertedNodes: Array<{ id: string; nodeKey: string }> = [];
+    for (const nodeChunk of chunk(drafts.nodes, insertChunkSize)) {
+      const insertedChunk = await writeDb
+        .insert(projectGraphNodes)
+        .values(
+          nodeChunk.map((node) => ({
             projectId: input.projectId,
             graphVersionId: version.id,
             nodeKey: node.nodeKey,
@@ -148,42 +168,41 @@ export function createProjectGraphService(db: Db) {
             sourceRefJson: node.sourceRef,
             metadataJson: node.metadata,
             confidence: node.confidence,
-            })),
-          )
-          .returning({ id: projectGraphNodes.id, nodeKey: projectGraphNodes.nodeKey });
-        insertedNodes.push(...insertedChunk);
-      }
-      const nodeIdsByKey = new Map(insertedNodes.map((node) => [node.nodeKey, node.id]));
-      const edgeRows = drafts.edges
-        .map((edge) => {
-          const fromNodeId = nodeIdsByKey.get(edge.fromNodeKey);
-          const toNodeId = nodeIdsByKey.get(edge.toNodeKey);
-          if (!fromNodeId || !toNodeId) {
-            return null;
-          }
-
-          return {
-            projectId: input.projectId,
-            graphVersionId: version.id,
-            fromNodeId,
-            toNodeId,
-            edgeType: edge.edgeType,
-            provenance: edge.provenance,
-            sourceRefJson: edge.sourceRef,
-            metadataJson: edge.metadata,
-            confidence: edge.confidence,
-          };
-        })
-        .filter((edge): edge is NonNullable<typeof edge> => edge !== null);
-
-      if (edgeRows.length > 0) {
-        for (const edgeChunk of chunk(edgeRows, insertChunkSize)) {
-          await tx.insert(projectGraphEdges).values(edgeChunk);
+          })),
+        )
+        .returning({ id: projectGraphNodes.id, nodeKey: projectGraphNodes.nodeKey });
+      insertedNodes.push(...insertedChunk);
+    }
+    const nodeIdsByKey = new Map(insertedNodes.map((node) => [node.nodeKey, node.id]));
+    const edgeRows = drafts.edges
+      .map((edge) => {
+        const fromNodeId = nodeIdsByKey.get(edge.fromNodeKey);
+        const toNodeId = nodeIdsByKey.get(edge.toNodeKey);
+        if (!fromNodeId || !toNodeId) {
+          return null;
         }
-      }
 
-      return getProjectGraphFromDb(tx, input.projectId, undefined, version.id);
-    });
+        return {
+          projectId: input.projectId,
+          graphVersionId: version.id,
+          fromNodeId,
+          toNodeId,
+          edgeType: edge.edgeType,
+          provenance: edge.provenance,
+          sourceRefJson: edge.sourceRef,
+          metadataJson: edge.metadata,
+          confidence: edge.confidence,
+        };
+      })
+      .filter((edge): edge is NonNullable<typeof edge> => edge !== null);
+
+    if (edgeRows.length > 0) {
+      for (const edgeChunk of chunk(edgeRows, insertChunkSize)) {
+        await writeDb.insert(projectGraphEdges).values(edgeChunk);
+      }
+    }
+
+    return getProjectGraphFromDb(writeDb, input.projectId, undefined, version.id);
   }
 
   async function recordFailedGraphVersion(
@@ -426,7 +445,10 @@ export function createProjectGraphService(db: Db) {
     return version;
   }
 
-  async function loadIndexedFacts(readDb: ProjectGraphReadDb, projectId: string): Promise<IndexedFacts> {
+  async function loadProjectGraphFacts(
+    projectId: string,
+    readDb: ProjectGraphReadDb = db,
+  ): Promise<ProjectGraphFacts> {
     const files = await readDb
       .select()
       .from(sourceFiles)
@@ -463,13 +485,15 @@ export function createProjectGraphService(db: Db) {
 
   return {
     buildProjectGraph,
+    buildProjectGraphFromFacts,
     getProjectGraph,
     getGraphNode,
+    loadProjectGraphFacts,
     recordFailedGraphVersion,
   };
 }
 
-function buildGraphDrafts(facts: IndexedFacts): {
+function buildGraphDrafts(facts: ProjectGraphFacts): {
   nodes: NodeDraft[];
   edges: EdgeDraft[];
   diagnostics: ProjectGraphDiagnostic[];
@@ -792,7 +816,7 @@ function buildTestEdges(files: SourceFileRow[]): EdgeDraft[] {
   return edges;
 }
 
-function buildDiagnostics(facts: IndexedFacts): ProjectGraphDiagnostic[] {
+function buildDiagnostics(facts: ProjectGraphFacts): ProjectGraphDiagnostic[] {
   if (facts.files.length === 0) {
     return [
       {
@@ -809,7 +833,7 @@ function buildDiagnostics(facts: IndexedFacts): ProjectGraphDiagnostic[] {
 function buildCoverage(
   nodes: NodeDraft[],
   edges: EdgeDraft[],
-  facts: IndexedFacts,
+  facts: ProjectGraphFacts,
 ): ProjectGraphCoverage {
   return {
     nodeCounts: countBy(nodes, (node) => node.nodeType),

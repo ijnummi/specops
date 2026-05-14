@@ -17,6 +17,7 @@ import {
 } from "../lib/path-safety.js";
 import { readGitHeadCommit } from "./git-service.js";
 import { createProjectGraphService } from "./project-graph-service.js";
+import type { ProjectGraphFacts } from "./project-graph-service.js";
 import { createProjectService } from "./project-service.js";
 import { createSourceScanService } from "./source-scan-service.js";
 
@@ -44,6 +45,8 @@ export function createIndexerService(db: Db) {
       }
 
       let finishedRun: typeof indexRuns.$inferSelect;
+      let graphFacts: ProjectGraphFacts | null = null;
+      const graphService = createProjectGraphService(db);
       try {
         const [transactionFinishedRun] = await db.transaction(async (tx) => {
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${projectId}, 0))`);
@@ -208,6 +211,7 @@ export function createIndexerService(db: Db) {
             repoPath,
             indexRunId: startedRun.id
           });
+          graphFacts = await graphService.loadProjectGraphFacts(projectId, tx);
 
           return tx
             .update(indexRuns)
@@ -231,6 +235,9 @@ export function createIndexerService(db: Db) {
         if (!transactionFinishedRun) {
           throw new Error("Failed to finish index run");
         }
+        if (!graphFacts) {
+          throw new Error("Failed to capture project graph facts");
+        }
 
         finishedRun = transactionFinishedRun;
       } catch (error) {
@@ -241,9 +248,12 @@ export function createIndexerService(db: Db) {
         throw error;
       }
 
-      const graphService = createProjectGraphService(db);
       try {
-        await graphService.buildProjectGraph({ projectId, indexRunId: finishedRun.id });
+        await graphService.buildProjectGraphFromFacts({
+          projectId,
+          indexRunId: finishedRun.id,
+          facts: graphFacts
+        });
       } catch (error) {
         await graphService.recordFailedGraphVersion({
           projectId,
