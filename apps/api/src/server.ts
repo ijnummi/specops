@@ -13,6 +13,7 @@ import { registerAnnotationRoutes } from "./routes/annotations.js";
 import { registerConceptGraphRoutes } from "./routes/concept-graphs.js";
 import { registerDiffReviewRoutes } from "./routes/diff-reviews.js";
 import { registerEntityRoutes } from "./routes/entities.js";
+import { registerProjectHealthQueueRoutes } from "./routes/health-queue.js";
 import { registerIndexRunRoutes } from "./routes/index-runs.js";
 import { registerProjectGraphRoutes } from "./routes/project-graph.js";
 import { registerProjectHealthRoutes } from "./routes/project-health.js";
@@ -103,6 +104,7 @@ export function buildServer(databaseUrl: string, options: BuildServerOptions = {
   });
   app.register(registerAnalyzeReviewAssemblyRoutes, { prefix: "/api", db });
   app.register(registerProjectHealthRoutes, { prefix: "/api", db });
+  app.register(registerProjectHealthQueueRoutes, { prefix: "/api", db });
   app.register(registerReadinessRoutes, { prefix: "/api", db });
   app.register(registerEntityRoutes, { prefix: "/api", db });
   app.register(registerAnnotationRoutes, { prefix: "/api", db });

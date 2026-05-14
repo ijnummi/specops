@@ -2025,6 +2025,39 @@ describeWithDb("database-backed routes", () => {
     expect(missingResponse.statusCode).toBe(404);
   });
 
+  it("returns the project health queue through the API", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/health-queue`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      summary: expect.objectContaining({ total: expect.any(Number) }),
+      sourceState: expect.objectContaining({
+        hasProjectGraph: expect.any(Boolean),
+        hasConceptGraph: expect.any(Boolean)
+      }),
+      items: expect.any(Array),
+      diagnostics: expect.any(Array)
+    });
+  });
+
+  it("returns 404 for a health queue on an unknown project", async () => {
+    app = buildServer(testDatabaseUrl!);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/00000000-0000-4000-8000-999999999999/health-queue"
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.message).toBe("Project not found");
+  });
+
   it("returns an empty project overview before indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();

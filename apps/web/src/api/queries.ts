@@ -50,6 +50,7 @@ import type {
   ProjectGraphQuery,
   ProjectDto,
   ProjectHealthDto,
+  ProjectHealthQueueResponseDto,
   ProjectOverviewDto,
   ProjectReadinessDto,
   SaveAgentTaskRequest,
@@ -128,6 +129,7 @@ export const queryKeys = {
   projectGraphNode: (projectId: string, nodeId: string | null) =>
     ["projects", projectId, "graph", "nodes", nodeId] as const,
   projectHealth: (projectId: string) => ["projects", projectId, "health"] as const,
+  projectHealthQueue: (projectId: string) => ["projects", projectId, "health-queue"] as const,
   projectOverview: (projectId: string) => ["projects", projectId, "overview"] as const,
   projectReadiness: (projectId: string) => ["projects", projectId, "readiness"] as const,
   conceptGraph: (projectId: string) => ["projects", projectId, "concept-graph"] as const,
@@ -209,6 +211,16 @@ export function projectHealthQuery(projectId: string) {
   return queryOptions({
     queryKey: queryKeys.projectHealth(projectId),
     queryFn: () => apiGet<ProjectHealthDto>(`/api/projects/${encodeURIComponent(projectId)}/health`)
+  });
+}
+
+export function projectHealthQueueQuery(projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.projectHealthQueue(projectId),
+    queryFn: () =>
+      apiGet<ProjectHealthQueueResponseDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/health-queue`
+      )
   });
 }
 
