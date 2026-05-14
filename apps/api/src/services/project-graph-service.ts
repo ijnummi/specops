@@ -17,6 +17,7 @@ import {
 } from "@specops/contracts";
 import type { Db } from "@specops/db";
 import {
+  indexRuns,
   projectGraphEdges,
   projectGraphNodes,
   projectGraphVersions,
@@ -408,17 +409,24 @@ export function createProjectGraphService(db: Db) {
     readDb: ProjectGraphReadDb,
     projectId: string,
   ): Promise<ProjectGraphVersionRow> {
-    const [version] = await readDb
-      .select()
+    const [row] = await readDb
+      .select({ version: projectGraphVersions })
       .from(projectGraphVersions)
+      .leftJoin(indexRuns, eq(projectGraphVersions.indexRunId, indexRuns.id))
       .where(
         and(
           eq(projectGraphVersions.projectId, projectId),
           or(eq(projectGraphVersions.status, "ready"), eq(projectGraphVersions.status, "limited")),
         ),
       )
-      .orderBy(desc(projectGraphVersions.createdAt), desc(projectGraphVersions.id))
+      .orderBy(
+        sql`case when ${indexRuns.id} is null then 0 else 1 end desc`,
+        sql`coalesce(${indexRuns.finishedAt}, ${indexRuns.startedAt}) desc nulls last`,
+        desc(projectGraphVersions.createdAt),
+        desc(projectGraphVersions.id),
+      )
       .limit(1);
+    const version = row?.version;
 
     if (!version) {
       throw new NotFoundError("Project graph not found", { projectId });

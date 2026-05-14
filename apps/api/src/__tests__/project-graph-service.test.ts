@@ -175,6 +175,32 @@ describeWithDb("createProjectGraphService", () => {
     }
   });
 
+  it("returns the latest graph by index run recency instead of graph creation time", async () => {
+    const { project, indexRun: olderRun } = await createIndexedGraphFixture({
+      startedAt: new Date("2026-05-10T10:00:00.000Z"),
+      finishedAt: new Date("2026-05-10T10:00:01.000Z"),
+    });
+    const newerRun = await createIndexRun(project.id, {
+      startedAt: new Date("2026-05-10T11:00:00.000Z"),
+      finishedAt: new Date("2026-05-10T11:00:01.000Z"),
+    });
+    const service = createProjectGraphService(db);
+    const newerGraph = await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: newerRun.id,
+    });
+    await delay(20);
+    await service.buildProjectGraph({
+      projectId: project.id,
+      indexRunId: olderRun.id,
+    });
+
+    const latest = await service.getProjectGraph(project.id);
+
+    expect(latest.version.id).toBe(newerGraph.version.id);
+    expect(latest.version.indexRunId).toBe(newerRun.id);
+  });
+
   it("includes missing endpoint nodes when graph queries return matching edges", async () => {
     const { project, indexRun } = await createIndexedGraphFixture();
     const service = createProjectGraphService(db);
@@ -426,8 +452,8 @@ describeWithDb("createProjectGraphService", () => {
     expect(built.edges).toEqual([]);
   });
 
-  async function createIndexedGraphFixture() {
-    const { project, indexRun } = await createProjectWithIndexRun();
+  async function createIndexedGraphFixture(input?: { startedAt?: Date; finishedAt?: Date }) {
+    const { project, indexRun } = await createProjectWithIndexRun(input);
     await insertSpecEntity(project.id);
 
     const files = await db
@@ -561,7 +587,7 @@ describeWithDb("createProjectGraphService", () => {
     return { project, indexRun, files };
   }
 
-  async function createProjectWithIndexRun() {
+  async function createProjectWithIndexRun(input?: { startedAt?: Date; finishedAt?: Date }) {
     const [project] = await db
       .insert(projects)
       .values({
@@ -573,11 +599,22 @@ describeWithDb("createProjectGraphService", () => {
       .returning();
     projectIds.push(project!.id);
 
+    const indexRun = await createIndexRun(project!.id, input);
+
+    return { project: project!, indexRun };
+  }
+
+  async function createIndexRun(
+    projectId: string,
+    input?: { startedAt?: Date; finishedAt?: Date },
+  ) {
     const [indexRun] = await db
       .insert(indexRuns)
       .values({
-        projectId: project!.id,
+        projectId,
         status: "completed",
+        startedAt: input?.startedAt,
+        finishedAt: input?.finishedAt,
         entityCount: 1,
         sourceFileCount: 4,
         sourceImportCount: 3,
@@ -586,7 +623,7 @@ describeWithDb("createProjectGraphService", () => {
       })
       .returning();
 
-    return { project: project!, indexRun: indexRun! };
+    return indexRun!;
   }
 
   async function insertSpecEntity(projectId: string) {
