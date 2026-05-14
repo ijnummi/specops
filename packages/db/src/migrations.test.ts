@@ -167,6 +167,9 @@ describe("initial migration", () => {
     ]) {
       expect(migration).toContain(`conname = '${constraintName}'`);
     }
+    expect(migration).toContain(
+      'FOREIGN KEY ("index_run_id","project_id") REFERENCES "index_runs"("id","project_id") ON DELETE SET NULL ("index_run_id")',
+    );
   });
 
   it("creates analyze review assembly storage", async () => {

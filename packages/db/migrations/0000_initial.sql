@@ -641,7 +641,7 @@ BEGIN
   ) THEN
     ALTER TABLE "project_graph_versions"
       ADD CONSTRAINT "project_graph_versions_index_run_project_fk"
-      FOREIGN KEY ("index_run_id","project_id") REFERENCES "index_runs"("id","project_id") ON DELETE set null;
+      FOREIGN KEY ("index_run_id","project_id") REFERENCES "index_runs"("id","project_id") ON DELETE SET NULL ("index_run_id");
   END IF;
 END $$;
 

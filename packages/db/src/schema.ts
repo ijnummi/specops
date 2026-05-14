@@ -451,12 +451,9 @@ export const projectGraphVersions = pgTable(
       table.status,
       table.createdAt,
     ),
+    // Composite index-run project safety is enforced in the hand-maintained migration
+    // with ON DELETE SET NULL ("index_run_id"); Drizzle cannot model that safely.
     indexRunIdx: index("project_graph_versions_index_run_id_idx").on(table.indexRunId),
-    indexRunProjectFk: foreignKey({
-      name: "project_graph_versions_index_run_project_fk",
-      columns: [table.indexRunId, table.projectId],
-      foreignColumns: [indexRuns.id, indexRuns.projectId],
-    }).onDelete("set null"),
     idProjectUnique: unique("project_graph_versions_id_project_id_unique").on(
       table.id,
       table.projectId,
