@@ -78,7 +78,7 @@ function AnalyzeRunDetailContent({
                 params={{ projectId, runId: run.id }}
                 className="button-primary"
               >
-                Review generated drafts
+                Review system map and drafts
               </Link>
             ) : null}
           </div>
@@ -297,7 +297,9 @@ const stepLabels: Record<AnalyzeRunStepName, string> = {
   index: "Index project",
   source_proposals: "Generate source proposals",
   select_ai_sources: "Select AI sources",
-  ai_prefill: "Generate AI drafts"
+  ai_prefill: "Generate AI drafts",
+  build_system_map: "Build system map",
+  link_map_to_drafts: "Link map to drafts"
 };
 
 function stepLabel(name: AnalyzeRunStepName) {

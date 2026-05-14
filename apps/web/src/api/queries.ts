@@ -56,6 +56,7 @@ import type {
   SourceSpecAnnotationUpdateRequest,
   StartAgentRunRequest,
   StartAgentRunResponse,
+  SystemMapResponseDto,
   UpdateDiffReviewStatusRequest,
   UpdateDiffReviewStatusResponse,
   UpdateAgentRunStatusRequest,
@@ -130,6 +131,8 @@ export const queryKeys = {
     ["projects", projectId, "agent-runs", runId] as const,
   analyzeRun: (projectId: string, runId: string) =>
     ["projects", projectId, "analyze-runs", runId] as const,
+  analyzeRunSystemMap: (projectId: string, runId: string) =>
+    ["projects", projectId, "analyze-runs", runId, "system-map"] as const,
   analyzeReviewAssemblies: (projectId: string, runId: string) =>
     ["projects", projectId, "analyze-runs", runId, "review-assemblies"] as const,
   diffReviewsRoot: (projectId: string) => ["projects", projectId, "diff-reviews"] as const,
@@ -261,6 +264,18 @@ export function analyzeRunQuery(projectId: string, runId: string) {
     queryFn: () =>
       apiGet<AnalyzeRunDetailDto>(
         `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(runId)}`
+      )
+  });
+}
+
+export function analyzeRunSystemMapQuery(projectId: string, runId: string) {
+  return queryOptions({
+    queryKey: queryKeys.analyzeRunSystemMap(projectId, runId),
+    queryFn: () =>
+      apiGet<SystemMapResponseDto>(
+        `/api/projects/${encodeURIComponent(projectId)}/analyze-runs/${encodeURIComponent(
+          runId
+        )}/system-map`
       )
   });
 }
