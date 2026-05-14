@@ -81,4 +81,88 @@ describe("concept graph prompt helpers", () => {
     expect(normalized.rejectedConceptCount).toBe(1);
     expect(normalized.rejectedMembershipCount).toBe(1);
   });
+
+  it("rejects duplicate concept keys deterministically", () => {
+    const normalized = normalizeConceptGraphProviderResponse({
+      text: JSON.stringify({
+        concepts: [
+          concept({ key: "workflow:checkout", name: "Checkout" }),
+          concept({ key: "workflow:checkout", name: "Duplicate Checkout" })
+        ],
+        relationships: []
+      }),
+      graphNodeIds: new Set([graphNode.id]),
+      graphNodeKeys: new Map([[graphNode.nodeKey, graphNode.id]])
+    });
+
+    expect(normalized.concepts).toHaveLength(1);
+    expect(normalized.concepts[0]?.name).toBe("Checkout");
+    expect(
+      normalized.diagnostics.some((diagnostic) => diagnostic.code === "duplicate_concept_key")
+    ).toBe(true);
+    expect(normalized.rejectedConceptCount).toBe(1);
+  });
+
+  it("normalizes invalid provider enum values with diagnostics", () => {
+    const normalized = normalizeConceptGraphProviderResponse({
+      text: JSON.stringify({
+        concepts: [
+          {
+            ...concept({ key: "custom:checkout", name: "Checkout" }),
+            type: "custom",
+            memberships: [
+              {
+                graphNodeId: graphNode.id,
+                role: "owner",
+                confidence: 0.9,
+                rationale: "Primary implementation file."
+              }
+            ]
+          },
+          concept({ key: "workflow:payments", name: "Payments" })
+        ],
+        relationships: [
+          {
+            fromConceptKey: "custom:checkout",
+            toConceptKey: "workflow:payments",
+            relationshipType: "blocks",
+            confidence: 0.8,
+            rationale: "Invalid relationship type."
+          }
+        ]
+      }),
+      graphNodeIds: new Set([graphNode.id]),
+      graphNodeKeys: new Map([[graphNode.nodeKey, graphNode.id]])
+    });
+
+    expect(normalized.concepts[0]?.type).toBe("unknown");
+    expect(normalized.concepts[0]?.memberships[0]?.role).toBe("supporting");
+    expect(normalized.relationships[0]?.relationshipType).toBe("relates_to");
+    expect(normalized.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+      expect.arrayContaining([
+        "invalid_concept_type",
+        "invalid_membership_role",
+        "invalid_relationship_type"
+      ])
+    );
+  });
 });
+
+function concept(input: { key: string; name: string }) {
+  return {
+    key: input.key,
+    type: "workflow",
+    name: input.name,
+    summary: `${input.name} summary.`,
+    confidence: 0.9,
+    evidenceSummary: "Supported by checkout service.",
+    memberships: [
+      {
+        graphNodeId: graphNode.id,
+        role: "primary",
+        confidence: 0.9,
+        rationale: "Primary implementation file."
+      }
+    ]
+  };
+}

@@ -73,9 +73,16 @@ const conceptTypes = [
   "test_behavior",
   "cross_cutting",
   "unknown"
-];
+] as const;
 
-const membershipRoles = ["primary", "supporting", "entrypoint", "data", "test", "spec"];
+const membershipRoles = [
+  "primary",
+  "supporting",
+  "entrypoint",
+  "data",
+  "test",
+  "spec"
+] as const;
 
 const relationshipTypes = [
   "depends_on",
@@ -84,7 +91,7 @@ const relationshipTypes = [
   "exposes",
   "tests",
   "relates_to"
-];
+] as const;
 
 export function buildConceptGraphPromptPacket(
   input: BuildConceptGraphPromptPacketInput
@@ -177,6 +184,17 @@ export function normalizeConceptGraphProviderResponse(input: {
   rawConcepts.forEach((rawConcept, index) => {
     const record = isRecord(rawConcept) ? rawConcept : {};
     const key = readString(record.key) || conceptKey(readString(record.type), readString(record.name));
+
+    if (acceptedKeys.has(key)) {
+      rejectedConceptCount += 1;
+      diagnostics.push({
+        level: "warning",
+        code: "duplicate_concept_key",
+        message: `Rejected concept ${index + 1} (${key}) because its concept key was already accepted.`
+      });
+      return;
+    }
+
     const memberships = normalizeMemberships({
       value: record.memberships,
       graphNodeIds: input.graphNodeIds,
@@ -197,7 +215,7 @@ export function normalizeConceptGraphProviderResponse(input: {
 
     concepts.push({
       key,
-      type: readString(record.type) || "unknown",
+      type: normalizeConceptType(readString(record.type), diagnostics),
       name: readString(record.name) || key,
       summary: readString(record.summary),
       confidence: clampConceptConfidence(readNumber(record.confidence), memberships),
@@ -244,7 +262,7 @@ function normalizeMemberships(input: {
     return [
       {
         graphNodeId,
-        role: readString(record.role) || "supporting",
+        role: normalizeMembershipRole(readString(record.role), input.diagnostics),
         confidence: clamp(readNumber(record.confidence), 0, 1, 0.5),
         rationale: readString(record.rationale)
       }
@@ -279,7 +297,10 @@ function normalizeRelationships(
       {
         fromConceptKey,
         toConceptKey,
-        relationshipType: readString(record.relationshipType) || "relates_to",
+        relationshipType: normalizeRelationshipType(
+          readString(record.relationshipType),
+          diagnostics
+        ),
         confidence: clamp(readNumber(record.confidence), 0, 1, 0.5),
         rationale: readString(record.rationale)
       }
@@ -303,6 +324,64 @@ function resolveGraphNodeId(
   }
 
   return null;
+}
+
+function normalizeConceptType(value: string, diagnostics: ConceptGraphDiagnostic[]): string {
+  if (isAllowedValue(value, conceptTypes)) {
+    return value;
+  }
+
+  if (value !== "") {
+    diagnostics.push({
+      level: "warning",
+      code: "invalid_concept_type",
+      message: `Replaced invalid concept type ${value} with unknown.`
+    });
+  }
+
+  return "unknown";
+}
+
+function normalizeMembershipRole(value: string, diagnostics: ConceptGraphDiagnostic[]): string {
+  if (isAllowedValue(value, membershipRoles)) {
+    return value;
+  }
+
+  if (value !== "") {
+    diagnostics.push({
+      level: "warning",
+      code: "invalid_membership_role",
+      message: `Replaced invalid membership role ${value} with supporting.`
+    });
+  }
+
+  return "supporting";
+}
+
+function normalizeRelationshipType(
+  value: string,
+  diagnostics: ConceptGraphDiagnostic[]
+): string {
+  if (isAllowedValue(value, relationshipTypes)) {
+    return value;
+  }
+
+  if (value !== "") {
+    diagnostics.push({
+      level: "warning",
+      code: "invalid_relationship_type",
+      message: `Replaced invalid relationship type ${value} with relates_to.`
+    });
+  }
+
+  return "relates_to";
+}
+
+function isAllowedValue<T extends string>(
+  value: string,
+  allowedValues: readonly T[]
+): value is T {
+  return allowedValues.includes(value as T);
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
