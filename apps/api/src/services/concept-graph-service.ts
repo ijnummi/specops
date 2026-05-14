@@ -436,15 +436,17 @@ async function persistConceptVersion(
       });
     }
 
-    await tx
-      .update(projectConceptVersions)
-      .set({ status: "superseded", updatedAt: new Date() })
-      .where(
-        and(
-          eq(projectConceptVersions.projectId, input.projectId),
-          or(eq(projectConceptVersions.status, "ready"), eq(projectConceptVersions.status, "limited")),
-        ),
-      );
+    if (input.status === "ready" || input.status === "limited") {
+      await tx
+        .update(projectConceptVersions)
+        .set({ status: "superseded", updatedAt: new Date() })
+        .where(
+          and(
+            eq(projectConceptVersions.projectId, input.projectId),
+            or(eq(projectConceptVersions.status, "ready"), eq(projectConceptVersions.status, "limited")),
+          ),
+        );
+    }
 
     const conceptKeys = new Set(input.concepts.map((concept) => concept.key));
     const relationships = input.relationships.filter(
@@ -770,5 +772,6 @@ function uniqueStrings(values: string[]) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return message.trim() || "Unknown error";
 }

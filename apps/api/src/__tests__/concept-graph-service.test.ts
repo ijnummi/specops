@@ -594,6 +594,81 @@ describeWithDb("createConceptGraphService", () => {
     expect(relationshipRows).toEqual([]);
   });
 
+  it("stores failed concept graph diagnostics without superseding the latest ready graph", async () => {
+    const { project, graphNode } = await createProjectGraphFixture();
+    const readyService = createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () =>
+        conceptProvider({
+          concepts: [
+            {
+              key: "workflow:checkout",
+              type: "workflow",
+              name: "Checkout",
+              summary: "Checkout order flow.",
+              confidence: 0.87,
+              evidenceSummary: "Route file drives checkout.",
+              memberships: [
+                {
+                  graphNodeId: graphNode.id,
+                  role: "primary",
+                  confidence: 0.92,
+                  rationale: "Checkout route is the workflow entrypoint.",
+                },
+              ],
+            },
+          ],
+          relationships: [],
+        }),
+    });
+    const ready = await readyService.buildConceptGraph(project.id, buildInput());
+    const checkout = ready.concepts[0]!;
+    const failedService = createConceptGraphService(db, {
+      config: testAiConfig(),
+      providerFactory: () => rejectingConceptProvider(new Error("OpenAI request timed out")),
+    });
+
+    const failed = await failedService.buildConceptGraph(project.id, buildInput());
+    const latest = await failedService.getLatestConceptGraph(project.id);
+    const detail = await failedService.getConceptDetail(project.id, checkout.id);
+
+    expect(failed.version.status).toBe("failed");
+    expect(latest.version.id).toBe(failed.version.id);
+    const [readyVersion] = await db
+      .select()
+      .from(projectConceptVersions)
+      .where(
+        and(
+          eq(projectConceptVersions.projectId, project.id),
+          eq(projectConceptVersions.id, ready.version.id),
+        ),
+      );
+    expect(readyVersion?.status).toBe("ready");
+    expect(detail.concept.id).toBe(checkout.id);
+    expect(detail.concept.conceptVersionId).toBe(ready.version.id);
+  });
+
+  it("persists empty provider failure messages as non-empty diagnostics", async () => {
+    for (const error of [new Error(""), ""]) {
+      const { project } = await createProjectGraphFixture();
+      const provider = rejectingConceptProvider(error);
+
+      const built = await createConceptGraphService(db, {
+        config: testAiConfig(),
+        providerFactory: () => provider,
+      }).buildConceptGraph(project.id, buildInput());
+
+      expect(built.version.status).toBe("failed");
+      expect(built.diagnostics).toEqual([
+        expect.objectContaining({
+          level: "error",
+          code: "provider_request_failed",
+          message: "Unknown error",
+        }),
+      ]);
+    }
+  });
+
   it("returns concept detail with graph node DTOs and grouped relationships", async () => {
     const { project, graphNode, supportGraphNode } = await createProjectGraphFixture();
     const service = createConceptGraphService(db, {
@@ -882,7 +957,7 @@ function invalidConceptProvider(text: string): AiPrefillProvider {
   };
 }
 
-function rejectingConceptProvider(error: Error): AiPrefillProvider {
+function rejectingConceptProvider(error: unknown): AiPrefillProvider {
   return {
     generateSpecProposals: vi.fn(async () => {
       throw new Error("generateSpecProposals should not be called");
