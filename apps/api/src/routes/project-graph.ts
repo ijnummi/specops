@@ -11,11 +11,11 @@ type RouteOptions = {
 };
 
 const projectParamsSchema = z.object({
-  projectId: z.string().min(1)
+  projectId: z.string().uuid()
 });
 
 const nodeParamsSchema = projectParamsSchema.extend({
-  nodeId: z.string().min(1)
+  nodeId: z.string().uuid()
 });
 
 export const registerProjectGraphRoutes: FastifyPluginAsync<RouteOptions> = async (app, { db }) => {

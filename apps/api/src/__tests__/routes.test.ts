@@ -4844,6 +4844,23 @@ describeWithDb("database-backed routes", () => {
     expect(scopedResponse.statusCode).toBe(404);
   });
 
+  it("rejects malformed project graph route parameters", async () => {
+    app = buildServer(testDatabaseUrl!);
+    const project = await createProjectViaApi();
+
+    const graphResponse = await app.inject({
+      method: "GET",
+      url: "/api/projects/not-a-uuid/graph"
+    });
+    const nodeResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/graph/nodes/not-a-uuid`
+    });
+
+    expect(graphResponse.statusCode).toBe(400);
+    expect(nodeResponse.statusCode).toBe(400);
+  });
+
   it("persists source parse warnings as validation messages during project indexing", async () => {
     app = buildServer(testDatabaseUrl!);
     const project = await createProjectViaApi();
